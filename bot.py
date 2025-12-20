@@ -1,13 +1,18 @@
 import os
 import asyncio
+import sys
+import aiogram
 from ftplib import FTP
 from datetime import datetime
+
+# Импорты для веб-сервера и вебхуков
 from aiohttp import web
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+
+# Импорты aiogram
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, ContentType
+from aiogram.types import Message
 from aiogram.filters import Command
-from aiogram.utils.token import TokenValidationError
 
 # --- НАСТРОЙКИ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -15,6 +20,9 @@ FTP_HOST = os.getenv("FTP_HOST")
 FTP_USER = os.getenv("FTP_USER")
 FTP_PASS = os.getenv("FTP_PASS")
 FTP_FOLDER = os.getenv("FTP_FOLDER")
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
+VERSION = "1.4.1" # Фиксируем версию для дебага
+
 # Превращаем строку "ID1,ID2" в список чисел
 ALLOWED_IDS = [int(i.strip()) for i in os.getenv("ALLOWED_IDS", "").split(",") if i.strip()]
 
@@ -28,7 +36,7 @@ def upload_to_ftp(file_path, user_folder, file_name):
         ftp.login(user=FTP_USER, passwd=FTP_PASS)
         ftp.set_pasv(True)
         
-        # 1. Основная папка (если задана)
+        # 1. Основная папка
         if FTP_FOLDER and FTP_FOLDER.strip():
             if FTP_FOLDER not in ftp.nlst():
                 ftp.mkd(FTP_FOLDER)
@@ -43,15 +51,15 @@ def upload_to_ftp(file_path, user_folder, file_name):
         with open(file_path, 'rb') as f:
             ftp.storbinary(f'STOR {file_name}', f)
 
-# --- ВЕБ-СТРАНИЦЫ ДЛЯ БРАУЗЕРА ---
+# --- ВЕБ-СТРАНИЦЫ (БРАУЗЕР) ---
 async def handle_index(request):
-    html = """
+    html = f"""
     <html>
         <head><title>Хранилка by Leshiy</title></head>
         <body style="font-family: sans-serif; text-align: center; padding-top: 50px;">
-            <h1>🚀 Телеграм-бот "Хранилка" by Leshiy активен!</h1>
-            <p>Бот доступен по адресу: <a href="https://t.me/leshiy_storage_bot">@leshiy_storage_bot</a></p>
-            <p>Статус системы: <b>ONLINE ✅</b></p>
+            <h1>🚀 Телеграм-бот "Хранилка" by Leshiy v{VERSION} активен!</h1>
+            <p>Бот: <a href="https://t.me/leshiy_storage_bot">@leshiy_storage_bot</a></p>
+            <p>Статус: <b>ONLINE ✅</b></p>
         </body>
     </html>
     """
@@ -60,37 +68,35 @@ async def handle_index(request):
 async def handle_debug_page(request):
     status_ftp = "Проверка..."
     try:
+        # Проверка без блокировки (быстрая)
         with FTP() as ftp:
             ftp.connect(FTP_HOST, 21, timeout=5)
             ftp.login(user=FTP_USER, passwd=FTP_PASS)
             status_ftp = "✅ Соединение установлено"
-    except Exception as e:
-        status_ftp = "❌ Ошибка (проверьте логи)" # Скрываем детали ошибки для безопасности
+    except Exception:
+        status_ftp = "❌ Ошибка (проверьте логи Render)"
     
     html = f"""
     <html>
         <head><title>System Debug</title></head>
         <body style="font-family: sans-serif; padding: 20px; line-height: 1.6;">
             <h2>🖥 Системная диагностика</h2>
-            <p><b>Статус связи с хранилищем:</b> {status_ftp}</p>
+            <p><b>Статус FTP:</b> {status_ftp}</p>
             <hr>
-            <h3>информация о среде:</h3>
+            <h3>Информация о среде:</h3>
             <ul>
-                <li><b>Бот:</b> @leshiy_storage_bot</li>
-                <li><b>Версия бота:</b> {VERSION}</li>
                 <li><b>Python:</b> {sys.version.split()[0]}</li>
                 <li><b>Aiogram:</b> {aiogram.__version__}</li>
-                <li><b>Платформа:</b> Render Cloud</li>
+                <li><b>Версия бота:</b> {VERSION}</li>
             </ul>
-            <hr>
             <p style="color: gray; font-size: 0.8em;">⚠️ Конфиденциальные данные (IP/Пароли) скрыты.</p>
             <p><a href="/">⬅ На главную</a></p>
         </body>
     </html>
     """
     return web.Response(text=html, content_type='text/html')
-    
-# --- ОБРАБОТЧИКИ КОМАНД ---
+
+# --- ОБРАБОТЧИКИ ТЕЛЕГРАМ ---
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     await message.answer(
@@ -102,108 +108,87 @@ async def cmd_start(message: Message):
 @dp.message(Command("debug"))
 async def cmd_debug(message: Message):
     status_ftp = "Проверка..."
-    icon = "⏳"
     try:
-        with FTP() as ftp:
-            ftp.connect(FTP_HOST, 21, timeout=10)
-            ftp.login(user=FTP_USER, passwd=FTP_PASS)
-            ftp.set_pasv(True)
-            status_ftp = "✅ Соединение установлено"
+        # Запускаем в потоке, чтобы бот не "тупил" при долгой проверке
+        def check():
+            with FTP() as ftp:
+                ftp.connect(FTP_HOST, 21, timeout=10)
+                ftp.login(user=FTP_USER, passwd=FTP_PASS)
+                return "✅ Соединение установлено"
+        status_ftp = await asyncio.to_thread(check)
     except Exception as e:
         status_ftp = f"❌ Ошибка: {e}"
     
-    # Возвращаем тот самый вид из v1.4.0
     await message.answer(
-        f"🤖 Бот онлайн\n"
-        f"📦 Версия: {VERSION}\n"
-        f"🔗 FTP: {status_ftp}\n"
-        f"👤 Твой ID: <code>{message.from_user.id}</code>",
+        f"🤖 <b>Бот онлайн</b>\n"
+        f"📦 <b>Версия:</b> {VERSION}\n"
+        f"🔗 <b>FTP:</b> {status_ftp}\n"
+        f"👤 <b>Твой ID:</b> <code>{message.from_user.id}</code>",
         parse_mode="HTML"
     )
 
-# Универсальный обработчик фото и видео
 @dp.message(F.photo | F.video | F.document)
 async def handle_files(message: Message):
-    user_id = message.from_user.id
-    
-    # 1. Проверка на право сохранения
-    if user_id not in ALLOWED_IDS:
-        await message.answer("🚫 У вас нет прав на сохранение файлов в хранилище.")
+    if message.from_user.id not in ALLOWED_IDS:
+        await message.answer("🚫 У вас нет прав на сохранение.")
         return
 
-    file_id = None
-    file_name = None
-    
-    # 2. Логика имен и типов
+    file_id, file_name = None, None
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
     if message.photo:
-        # Сжатое фото: генерируем имя по дате
         file_id = message.photo[-1].file_id
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_name = f"photo_{timestamp}.jpg"
-    
     elif message.video:
-        # Видео (обычно сжатое): по дате
         file_id = message.video.file_id
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_name = f"video_{timestamp}.mp4"
-        
     elif message.document:
-        # Документ (несжатое): проверяем, фото это или видео
         mime = message.document.mime_type
         if mime and (mime.startswith('image/') or mime.startswith('video/')):
             file_id = message.document.file_id
             file_name = message.document.file_name # ИСХОДНОЕ ИМЯ
         else:
-            await message.answer("⚠️ Файл не принимается. Разрешены только фото и видео.")
+            await message.answer("⚠️ Только фото или видео!")
             return
 
-    if not file_id:
-        return
+    if not file_id: return
 
-    # 3. Процесс загрузки
     msg = await message.answer("⏳ Загружаю на сервер...")
     try:
-        file = await bot.get_file(file_id)
-        file_path = f"temp_{file_name}"
-        await bot.download_file(file.file_path, file_path)
+        file_info = await bot.get_file(file_id)
+        temp_path = f"temp_{file_name}"
+        await bot.download_file(file_info.file_path, temp_path)
         
         user_folder = message.from_user.full_name.replace(" ", "_")
+        await asyncio.to_thread(upload_to_ftp, temp_path, user_folder, file_name)
         
-        await asyncio.to_thread(upload_to_ftp, file_path, user_folder, file_name)
-        
-        os.remove(file_path)
-        await msg.edit_text(f"✅ Файл \"{file_name}\" успешно сохранен в папку {user_folder}!")
+        os.remove(temp_path)
+        await msg.edit_text(f"✅ Файл \"{file_name}\" успешно сохранен!")
     except Exception as e:
-        await msg.edit_text(f"❌ Ошибка загрузки: {e}")
+        await msg.edit_text(f"❌ Ошибка: {e}")
 
-# Запрет всего остального (голосовые, стикеры, локации и т.д.)
 @dp.message()
 async def reject_other(message: Message):
-    if not (message.photo or message.video or message.document):
-        await message.answer("⚠️ Этот тип сообщений не поддерживается. Присылайте только фото или видео.")
+    await message.answer("⚠️ Присылайте только фото или видео.")
 
+# --- ЗАПУСК ---
 async def on_startup(bot: Bot):
-    # Устанавливаем вебхук при запуске
-    webhook_url = os.getenv("RENDER_EXTERNAL_URL") + "/webhook"
+    webhook_url = f"{RENDER_URL}/webhook"
     await bot.set_webhook(webhook_url, drop_pending_updates=True)
 
 def main():
-    # Render сам подставляет PORT, если его нет — берем 10000
-    port = int(os.getenv("RENDER_PORT", 10000))
+    port = int(os.getenv("PORT", 10000))
     app = web.Application()
     
-# Маршруты для браузера
     app.router.add_get("/", handle_index)
     app.router.add_get("/debug", handle_debug_page)
     
-    # Маршрут для Телеграма
     webhook_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     webhook_handler.register(app, path="/webhook")
-    
     setup_application(app, dp, bot=bot)
+    
     dp.startup.register(on_startup)
-    
     web.run_app(app, host="0.0.0.0", port=port)
-    
+
 if __name__ == "__main__":
     main()
