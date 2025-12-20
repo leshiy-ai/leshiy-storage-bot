@@ -129,7 +129,7 @@ async def handle_files(message: Message):
 
 # --- ЗАПУСК ---
 async def main():
-    port = int(os.getenv("PORT", 10000))
+    port = int(os.getenv("RENDER_PORT", 10000))
     webhook_path = "/webhook"
     
     app = web.Application()
