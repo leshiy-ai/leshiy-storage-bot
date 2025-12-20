@@ -7,11 +7,11 @@ import io
 from ftplib import FTP
 from datetime import datetime
 
-# Расширенные протоколы передачи данных
+# Расширенные протоколы для работы с хранилищами
 import paramiko
 from webdav3.client import Client as WebDavClient
 
-# Веб-сервер и работа с вебхуками
+# Библиотеки для реализации веб-интерфейса и вебхуков
 from aiohttp import web
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
@@ -21,53 +21,67 @@ from aiogram.types import Message
 from aiogram.filters import Command
 from aiogram.utils.token import TokenValidationError
 
-# Настройка логирования (важно для отладки на Render)
+# Детальная настройка логирования (важно для мониторинга в Render)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# --- КОНФИГУРАЦИЯ И ПЕРЕМЕННЫЕ ---
+# --- НАСТРОЙКИ И КОНФИГУРАЦИЯ ---
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-# FTP_HOST может быть: 1.2.3.4, ftp://host, sftp://host, davs://host
+# FTP_HOST_RAW принимает: sftp://host, davs://host, ftp://host или просто IP
 FTP_HOST_RAW = os.getenv("FTP_HOST", "") 
 FTP_USER = os.getenv("FTP_USER")
 FTP_PASS = os.getenv("FTP_PASS")
 FTP_FOLDER = os.getenv("FTP_FOLDER", "").strip()
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
-VERSION = "1.4.4"
+VERSION = "1.4.5"
 
-# Список разрешенных пользователей Telegram ID
+# НОВАЯ ПЕРЕМЕННАЯ ДЛЯ АДМИНА
+try:
+    admin_env = os.getenv("ADMIN_ID", "")
+    ADMIN_ID = int(admin_env.strip()) if admin_env else None
+except Exception as e:
+    logger.error(f"Ошибка парсинга ADMIN_ID: {e}")
+    ADMIN_ID = None
+    
+# Список разрешенных пользователей
 try:
     ALLOWED_IDS = [int(i.strip()) for i in os.getenv("ALLOWED_IDS", "").split(",") if i.strip()]
 except Exception as e:
     logger.error(f"Ошибка парсинга ALLOWED_IDS: {e}")
     ALLOWED_IDS = []
 
+# Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# --- Вспомогательная функция очистки хоста ---
+# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
+
 def get_clean_host():
+    """Очищает строку хоста от всех возможных префиксов протоколов"""
     return FTP_HOST_RAW.replace("ftp://", "").replace("sftp://", "").replace("dav://", "").replace("davs://", "")
 
-# --- УНИВЕРСАЛЬНАЯ ЛОГИКА ЗАГРУЗКИ (FTP / SFTP / WebDAV) ---
+# --- УНИВЕРСАЛЬНАЯ ЛОГИКА ЗАГРУЗКИ (SFTP / WebDAV / FTP) ---
 
 def upload_file_universal(local_path, user_folder, file_name):
     """
-    Выбирает нужный протокол на основе префикса в FTP_HOST и выполняет загрузку.
+    Функция-комбайн для работы с разными типами серверов.
+    Тип подключения определяется автоматически.
     """
     host = get_clean_host()
+    logger.info(f"Запуск процесса загрузки файла: {file_name}")
     
-    # 1. Работа через SFTP (SSH File Transfer Protocol)
+    # 1. Сценарий загрузки через SFTP (порт 22)
     if FTP_HOST_RAW.startswith("sftp://"):
-        logger.info(f"Использую SFTP для {file_name}")
+        logger.info(f"Выбран протокол SFTP. Подключение к {host}")
         transport = paramiko.Transport((host, 22))
         transport.connect(username=FTP_USER, password=FTP_PASS)
         sftp = paramiko.SFTPClient.from_transport(transport)
         
-        # Проверка и создание структуры папок
+        # Создание структуры каталогов
         if FTP_FOLDER:
             try:
                 sftp.chdir(FTP_FOLDER)
@@ -85,10 +99,12 @@ def upload_file_universal(local_path, user_folder, file_name):
         sftp.close()
         transport.close()
 
-    # 2. Работа через WebDAV (Облачные хранилища)
+    # 2. Сценарий загрузки через WebDAV (Яндекс, Keenetic и др.)
     elif "dav" in FTP_HOST_RAW:
-        logger.info(f"Использую WebDAV для {file_name}")
+        logger.info(f"Выбран протокол WebDAV. Подключение к {FTP_HOST_RAW}")
+        # Приведение dav:// к http:// для совместимости с библиотекой
         target_url = FTP_HOST_RAW.replace("dav://", "http://").replace("davs://", "https://")
+        
         options = {
             'webdav_hostname': target_url,
             'webdav_login':    FTP_USER,
@@ -96,7 +112,7 @@ def upload_file_universal(local_path, user_folder, file_name):
         }
         client = WebDavClient(options)
         
-        # Построение пути в облаке
+        # Построение и проверка путей в облаке
         base_path = ""
         if FTP_FOLDER:
             base_path = f"{FTP_FOLDER}/"
@@ -109,9 +125,9 @@ def upload_file_universal(local_path, user_folder, file_name):
             
         client.upload_sync(remote_path=f"{full_remote_path}{file_name}", local_path=local_path)
 
-    # 3. Работа через классический FTP
+    # 3. Сценарий загрузки через стандартный FTP (порт 21)
     else:
-        logger.info(f"Использую стандартный FTP для {file_name}")
+        logger.info(f"Выбран протокол FTP. Подключение к {host}")
         with FTP() as ftp:
             ftp.connect(host, 21, timeout=30)
             ftp.login(user=FTP_USER, passwd=FTP_PASS)
@@ -132,6 +148,7 @@ def upload_file_universal(local_path, user_folder, file_name):
 # --- ВЕБ-СТРАНИЦЫ (БРАУЗЕР) ---
 
 async def handle_index(request):
+    """Главная страница бота в браузере"""
     html = f"""
     <html>
         <head><title>Хранилка by Leshiy</title></head>
@@ -146,13 +163,14 @@ async def handle_index(request):
 
 async def handle_debug_page(request):
     """Безопасная страница диагностики для браузера"""
-    status_storage = "Checking..."
+    status_storage = "Проверка..."
     host = get_clean_host()
+    
     try:
         if "dav" in FTP_HOST_RAW:
-            status_storage = "WebDAV Mode Active ✅"
+            status_storage = "WebDAV Mode ✅"
         elif "sftp" in FTP_HOST_RAW:
-            status_storage = "SFTP Mode Active ✅"
+            status_storage = "SFTP Mode ✅"
         else:
             with FTP() as ftp:
                 ftp.connect(host, 21, timeout=5)
@@ -181,8 +199,9 @@ async def handle_debug_page(request):
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
+    """Обработка команды /start"""
     await message.answer(
-        "👋 Привет! Я твоя личная FTP/SFTP/WebDAV хранилка.\n"
+        "👋 Привет! Я твоя личная FTP/SFTP/WebDAV хранилка.\n\n"
         "📁 Просто пришли мне любой файл, фото или видео, и я закину их на сервер.\n"
         "⚙️ Используй /debug чтобы проверить статус подключения."
     )
@@ -191,6 +210,7 @@ async def cmd_start(message: Message):
 async def cmd_debug(message: Message):
     """Команда для проверки связи из чата"""
     host = get_clean_host()
+    
     def check_connection():
         try:
             if "dav" in FTP_HOST_RAW: return "✅ WebDAV Ready"
@@ -215,14 +235,30 @@ async def cmd_debug(message: Message):
 
 @dp.message(F.photo | F.video | F.document)
 async def handle_files(message: Message):
+    """Главный обработчик входящего медиаконтента"""
+    
+    # ПРОВЕРКА ДОСТУПА С УВЕДОМЛЕНИЕМ АДМИНА
     if message.from_user.id not in ALLOWED_IDS:
         await message.answer("🚫 У вас нет прав на сохранение файлов.")
+        
+        # Отправляем отчет тебе, если ADMIN_ID настроен
+        if ADMIN_ID:
+            user_name = message.from_user.full_name
+            user_folder_name = user_name.replace(" ", "_")
+            alert_text = (
+                f"🚨 <b>Попытка несанкционированного доступа!</b>\n\n"
+                f"👤 <b>Пользователь:</b> {user_name}\n"
+                f"🆔 <b>ID:</b> <code>{message.from_user.id}</code>\n"
+                f"🌐 <b>Username:</b> @{message.from_user.username}\n"
+                f"📂 <b>Предполагаемая папка:</b> <code>{user_folder_name}</code>"
+            )
+            await bot.send_message(ADMIN_ID, alert_text, parse_mode="HTML")
         return
 
     file_id, file_name = None, None
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
-    # Определение типа файла
+    # Логика определения типа медиа
     if message.photo:
         file_id = message.photo[-1].file_id
         file_name = f"photo_{timestamp}.jpg"
@@ -242,65 +278,69 @@ async def handle_files(message: Message):
     if not file_id:
         return
 
-    msg = await message.answer("⏳ Загружаю на сервер...")
+    status_msg = await message.answer("⏳ Загружаю на сервер...")
     
     try:
-        # Скачивание файла во временное хранилище Render
+        # Скачивание файла в локальную временную папку Render
         file_info = await bot.get_file(file_id)
         temp_path = f"temp_{file_name}"
         await bot.download_file(file_info.file_path, temp_path)
         
-        # Формирование имени папки пользователя
+        # Формирование имени папки на сервере
         user_folder = message.from_user.full_name.replace(" ", "_")
         
-        # Выполнение загрузки в отдельном потоке, чтобы не блокировать бота
+        # Загрузка на удаленное хранилище
         await asyncio.to_thread(upload_file_universal, temp_path, user_folder, file_name)
         
-        # Удаление временного файла
+        # Очистка временных данных
         if os.path.exists(temp_path):
             os.remove(temp_path)
             
-        await msg.edit_text(f"✅ Файл \"{file_name}\" успешно сохранен в папку {user_folder}!")
+        await status_msg.edit_text(f"✅ Файл \"{file_name}\" успешно сохранен!")
         
     except Exception as e:
-        logger.error(f"Критическая ошибка загрузки: {e}")
-        await msg.edit_text(f"❌ Ошибка при сохранении: {e}")
+        logger.error(f"Ошибка при обработке файла: {e}")
+        await status_msg.edit_text(f"❌ Критическая ошибка: {e}")
 
 @dp.message()
 async def reject_other_content(message: Message):
+    """Отклонение текстовых сообщений и прочего контента"""
     await message.answer("⚠️ Пожалуйста, присылайте только фото или видео.")
 
 # --- СИСТЕМНЫЕ ФУНКЦИИ ЗАПУСКА ---
 
 async def on_startup(bot: Bot):
-    logger.info(f"Установка Webhook на адрес: {RENDER_URL}/webhook")
+    """Действия при запуске: установка вебхука"""
+    logger.info(f"Установка Webhook: {RENDER_URL}/webhook")
     await bot.set_webhook(f"{RENDER_URL}/webhook", drop_pending_updates=True)
 
 def main():
+    """Точка входа в приложение"""
     try:
-        # Твоя переменная порта для Render
-        port = int(os.getenv("RENDER_PORT", 10000))
+        # Получение порта из переменных окружения Render
+        port_env = os.getenv("RENDER_PORT", "10000")
+        port = int(port_env)
         
         app = web.Application()
         
-        # Маршруты для веб-интерфейса
+        # Настройка маршрутов веб-сервера
         app.router.add_get("/", handle_index)
         app.router.add_get("/debug", handle_debug_page)
         
-        # Настройка обработчика входящих вебхуков от Telegram
+        # Регистрация обработчика вебхуков
         webhook_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
         webhook_handler.register(app, path="/webhook")
         
         setup_application(app, dp, bot=bot)
         dp.startup.register(on_startup)
         
-        logger.info(f"Запуск сервера на порту {port}...")
+        logger.info(f"Запуск веб-сервера на порту {port}")
         web.run_app(app, host="0.0.0.0", port=port)
         
     except TokenValidationError:
-        logger.error("Ошибка: Токен BOT_TOKEN указан неверно.")
+        logger.error("Ошибка: Токен бота невалиден. Проверьте BOT_TOKEN.")
     except Exception as e:
-        logger.critical(f"Бот упал при запуске: {e}")
+        logger.critical(f"Непредвиденная ошибка при запуске: {e}")
 
 if __name__ == "__main__":
     main()
