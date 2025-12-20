@@ -5,35 +5,29 @@ from aiogram.types import Message
 from aiogram.filters import Command
 from ftplib import FTP
 from aiohttp import web
+from aiogram.webhook.urls import TokenBasedRequestHandler
 
 # --- НАСТРОЙКИ ---
-VERSION = "1.1.0"
+VERSION = "1.2.0 (Webhook Mode)"
 TOKEN = os.getenv("BOT_TOKEN")
 FTP_HOST = os.getenv("FTP_HOST")
 FTP_USER = os.getenv("FTP_USER")
 FTP_PASS = os.getenv("FTP_PASS")
 ALLOWED_IDS = os.getenv("ALLOWED_IDS", "").split(",")
+# URL твоего сервиса на Render (напр. https://my-bot.onrender.com)
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL") 
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# --- МИНИ ВЕБ-СЕРВЕР (чтобы Render не спал) ---
+# --- МИНИ ВЕБ-СЕРВЕР (Health Check) ---
 async def handle_http(request):
     return web.Response(text=f"Хранилка by Leshiy is running. Version: {VERSION}")
-
-async def start_webserver():
-    app = web.Application()
-    app.router.add_get("/", handle_http)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", 10000)
-    await site.start()
 
 # --- ЛОГИКА FTP ---
 def upload_to_ftp(file_path, folder_name, file_name):
     with FTP(FTP_HOST) as ftp:
         ftp.login(user=FTP_USER, passwd=FTP_PASS)
-        # Проверяем наличие папки
         items = ftp.nlst()
         if folder_name not in items:
             ftp.mkd(folder_name)
@@ -44,7 +38,7 @@ def upload_to_ftp(file_path, folder_name, file_name):
 # --- КОМАНДЫ ---
 @dp.message(Command("debug"))
 async def cmd_debug(message: Message):
-    status_ftp = "Доступен"
+    status_ftp = "Проверка..."
     try:
         with FTP(FTP_HOST) as ftp:
             ftp.login(user=FTP_USER, passwd=FTP_PASS)
@@ -67,7 +61,6 @@ async def handle_files(message: Message):
 
     wait_msg = await message.answer("📥 Загружаю...")
     
-    # Сбор данных файла
     if message.document:
         file_obj = message.document
     elif message.video:
@@ -84,7 +77,7 @@ async def handle_files(message: Message):
     await bot.download_file(file.file_path, local_path)
 
     try:
-        upload_to_ftp(local_path, user_folder, file_name)
+        await asyncio.to_thread(upload_to_ftp, local_path, user_folder, file_name)
         await wait_msg.edit_text(f"✅ Сохранено в папку: {user_folder}")
     except Exception as e:
         await wait_msg.edit_text(f"❌ Ошибка сохранения: {e}")
@@ -92,23 +85,37 @@ async def handle_files(message: Message):
         if os.path.exists(local_path):
             os.remove(local_path)
 
-# --- ЗАПУСК ---
+# --- ЗАПУСК ЧЕРЕЗ WEBHOOK ---
 async def main():
-    # Получаем порт из переменной окружения Render или используем 10000
+    # Настройка порта (Render дает его сам)
     port = int(os.getenv("PORT", 10000))
-    
-    # Запускаем веб-сервер
+    webhook_path = "/webhook"
+    webhook_url = f"{RENDER_URL}{webhook_path}"
+
+    # Установка вебхука в Telegram
+    await bot.set_webhook(webhook_url)
+    print(f"Webhook set to: {webhook_url}")
+
+    # Создание приложения aiohttp
     app = web.Application()
+    
+    # Регистрация обработчика вебхука
+    handler = TokenBasedRequestHandler(dispatcher=dp, bot=bot)
+    handler.register(app, path=webhook_path)
+
+    # Добавляем обычный хендлер для главной страницы (чтобы Render видел порт)
     app.router.add_get("/", handle_http)
+
+    # Запуск сервера
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     
-    print(f"Starting webserver on port {port}...")
+    print(f"Starting server on port {port}...")
     await site.start()
     
-    print("Starting bot polling...")
-    await dp.start_polling(bot)
+    # Бесконечное ожидание
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())
