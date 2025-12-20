@@ -177,7 +177,7 @@ async def on_startup(bot: Bot):
     await bot.set_webhook(webhook_url, drop_pending_updates=True)
 
 def main():
-    port = int(os.getenv("PORT", 10000))
+    port = int(os.getenv("RENDER_PORT", 10000))
     app = web.Application()
     
     app.router.add_get("/", handle_index)
