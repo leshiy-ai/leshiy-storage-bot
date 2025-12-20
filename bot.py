@@ -94,9 +94,20 @@ async def handle_files(message: Message):
 
 # --- ЗАПУСК ---
 async def main():
-    # Запускаем веб-сервер фоном
-    asyncio.create_task(start_webserver())
-    # Запускаем бота
+    # Получаем порт из переменной окружения Render или используем 10000
+    port = int(os.getenv("PORT", 10000))
+    
+    # Запускаем веб-сервер
+    app = web.Application()
+    app.router.add_get("/", handle_http)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    
+    print(f"Starting webserver on port {port}...")
+    await site.start()
+    
+    print("Starting bot polling...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
