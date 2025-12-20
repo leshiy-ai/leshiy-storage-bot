@@ -44,7 +44,6 @@ def upload_to_ftp(file_path, user_folder, file_name):
             ftp.storbinary(f'STOR {file_name}', f)
 
 # --- ВЕБ-СТРАНИЦЫ ДЛЯ БРАУЗЕРА ---
-
 async def handle_index(request):
     html = """
     <html>
@@ -64,19 +63,28 @@ async def handle_debug_page(request):
         with FTP() as ftp:
             ftp.connect(FTP_HOST, 21, timeout=5)
             ftp.login(user=FTP_USER, passwd=FTP_PASS)
-            status_ftp = "✅ FTP Соединение установлено"
+            status_ftp = "✅ Соединение установлено"
     except Exception as e:
-        status_ftp = f"❌ Ошибка FTP: {e}"
+        status_ftp = "❌ Ошибка (проверьте логи)" # Скрываем детали ошибки для безопасности
     
     html = f"""
     <html>
-        <body style="font-family: sans-serif; padding: 20px;">
-            <h2>🖥 Диагностика системы</h2>
-            <p><b>Бот:</b> @leshiy_storage_bot ✅</p>
-            <p><b>FTP Host:</b> {FTP_HOST}</p>
-            <p><b>Статус связи:</b> {status_ftp}</p>
+        <head><title>System Debug</title></head>
+        <body style="font-family: sans-serif; padding: 20px; line-height: 1.6;">
+            <h2>🖥 Системная диагностика</h2>
+            <p><b>Статус связи с хранилищем:</b> {status_ftp}</p>
             <hr>
-            <p><a href="/">На главную</a></p>
+            <h3>информация о среде:</h3>
+            <ul>
+                <li><b>Бот:</b> @leshiy_storage_bot</li>
+                <li><b>Версия бота:</b> {VERSION}</li>
+                <li><b>Python:</b> {sys.version.split()[0]}</li>
+                <li><b>Aiogram:</b> {aiogram.__version__}</li>
+                <li><b>Платформа:</b> Render Cloud</li>
+            </ul>
+            <hr>
+            <p style="color: gray; font-size: 0.8em;">⚠️ Конфиденциальные данные (IP/Пароли) скрыты.</p>
+            <p><a href="/">⬅ На главную</a></p>
         </body>
     </html>
     """
@@ -85,11 +93,16 @@ async def handle_debug_page(request):
 # --- ОБРАБОТЧИКИ КОМАНД ---
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
-    await message.answer("👋 Бот-хранилка готов к работе! Присылай фото или видео.")
+    await message.answer(
+        "👋 Привет! Я твоя личная FTP-хранилка.\n\n"
+        "📁 Просто пришли мне любой файл, фото или видео, и я закину их на сервер.\n"
+        "⚙️ Используй /debug чтобы проверить статус подключения."
+    )
 
 @dp.message(Command("debug"))
 async def cmd_debug(message: Message):
     status_ftp = "Проверка..."
+    icon = "⏳"
     try:
         with FTP() as ftp:
             ftp.connect(FTP_HOST, 21, timeout=10)
@@ -99,7 +112,14 @@ async def cmd_debug(message: Message):
     except Exception as e:
         status_ftp = f"❌ Ошибка: {e}"
     
-    await message.answer(f"🤖 Бот онлайн\n🔗 FTP: {status_ftp}\n👤 Твой ID: {message.from_user.id}")
+    # Возвращаем тот самый вид из v1.4.0
+    await message.answer(
+        f"🤖 Бот онлайн\n"
+        f"📦 Версия: {VERSION}\n"
+        f"🔗 FTP: {status_ftp}\n"
+        f"👤 Твой ID: <code>{message.from_user.id}</code>",
+        parse_mode="HTML"
+    )
 
 # Универсальный обработчик фото и видео
 @dp.message(F.photo | F.video | F.document)
