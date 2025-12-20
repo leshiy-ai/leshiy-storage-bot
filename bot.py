@@ -53,6 +53,14 @@ def upload_to_ftp(file_path, folder_name, file_name):
             ftp.storbinary(f'STOR {file_name}', f)
 
 # --- КОМАНДЫ БОТА (в Телеграм) ---
+@dp.message(Command("start"))
+async def cmd_start(message: Message):
+    await message.answer(
+        "👋 Привет! Я твоя личная FTP-хранилка.\n\n"
+        "📁 Просто пришли мне любой файл, фото или видео, и я закину их на сервер.\n"
+        "⚙️ Используй /debug чтобы проверить статус подключения."
+    )
+    
 @dp.message(Command("debug"))
 async def cmd_debug_bot(message: Message):
     status_ftp = "Проверка..."
