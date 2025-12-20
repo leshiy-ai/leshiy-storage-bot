@@ -105,20 +105,17 @@ async def main():
     port = int(os.getenv("PORT", 10000))
     webhook_path = "/webhook"
     
-    # Мы УБРАЛИ bot.set_webhook. 
-    # Теперь тебе нужно самому запустить ссылку в браузере:
-    # https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://leshiy-storage-bot.onrender.com/webhook
-
     app = web.Application()
     
     # Роуты для браузера
     app.router.add_get("/", handle_root)
     app.router.add_get("/debug", handle_debug_url)
     
-    # Обработчик вебхука от Telegram
+    # Обработчик вебхука (куда Telegram шлет данные)
     handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     handler.register(app, path=webhook_path)
     
+    # КРИТИЧЕСКИ ВАЖНО: Связываем aiogram с aiohttp
     setup_application(app, dp, bot=bot)
 
     runner = web.AppRunner(app)
@@ -128,6 +125,7 @@ async def main():
     print(f"Server started on port {port}")
     await site.start()
     
+    # Просто ждем, ничего НЕ запускаем (никаких start_polling!)
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
