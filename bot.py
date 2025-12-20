@@ -13,6 +13,7 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 # --- НАСТРОЙКИ ---
 VERSION = "1.4.0"
 TOKEN = os.getenv("BOT_TOKEN")
+FTP_FOLDER = os.getenv("FTP_FOLDER")
 FTP_HOST = os.getenv("FTP_HOST")
 FTP_USER = os.getenv("FTP_USER")
 FTP_PASS = os.getenv("FTP_PASS")
@@ -42,19 +43,28 @@ async def handle_debug_url(request):
     return web.Response(text=debug_info, content_type='text/html')
 
 # --- ЛОГИКА FTP ---
-def upload_to_ftp(file_path, folder_name, file_name):
+def upload_to_ftp(file_path, user_folder, file_name):
     with FTP() as ftp:
-        # Увеличим таймаут до 30 секунд
-        ftp.connect(FTP_HOST, 21, timeout=30) 
+        ftp.connect(FTP_HOST, 21, timeout=30)
         ftp.login(user=FTP_USER, passwd=FTP_PASS)
+        ftp.set_pasv(True)
         
-        # ВКЛЮЧАЕМ ПАССИВНЫЙ РЕЖИМ (исправляет 'sendall')
-        ftp.set_pasv(True) 
+        # 1. Проверяем основную папку (FTP_FOLDER)
+        if FTP_FOLDER and FTP_FOLDER.strip():
+            all_items = ftp.nlst()
+            if FTP_FOLDER not in all_items:
+                ftp.mkd(FTP_FOLDER)
+            ftp.cwd(FTP_FOLDER)
         
-        items = ftp.nlst()
-        if folder_name not in items:
-            ftp.mkd(folder_name)
-        ftp.cwd(folder_name)
+        # 2. Проверяем папку пользователя (user_folder)
+        # Если хочешь, чтобы и она была опциональной, можно добавить условие.
+        # Но сейчас она создает структуру: STORAGE/Имя_Юзера/файл.jpg
+        current_items = ftp.nlst()
+        if user_folder not in current_items:
+            ftp.mkd(user_folder)
+        ftp.cwd(user_folder)
+        
+        # 3. Загрузка
         with open(file_path, 'rb') as f:
             ftp.storbinary(f'STOR {file_name}', f)
 
