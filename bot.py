@@ -43,8 +43,46 @@ def upload_to_ftp(file_path, user_folder, file_name):
         with open(file_path, 'rb') as f:
             ftp.storbinary(f'STOR {file_name}', f)
 
-# --- ОБРАБОТЧИКИ ---
+# --- ВЕБ-СТРАНИЦЫ ДЛЯ БРАУЗЕРА ---
 
+async def handle_index(request):
+    html = """
+    <html>
+        <head><title>Хранилка by Leshiy</title></head>
+        <body style="font-family: sans-serif; text-align: center; padding-top: 50px;">
+            <h1>🚀 Телеграм-бот "Хранилка" by Leshiy активен!</h1>
+            <p>Бот доступен по адресу: <a href="https://t.me/leshiy_storage_bot">@leshiy_storage_bot</a></p>
+            <p>Статус системы: <b>ONLINE ✅</b></p>
+        </body>
+    </html>
+    """
+    return web.Response(text=html, content_type='text/html')
+
+async def handle_debug_page(request):
+    status_ftp = "Проверка..."
+    try:
+        with FTP() as ftp:
+            ftp.connect(FTP_HOST, 21, timeout=5)
+            ftp.login(user=FTP_USER, passwd=FTP_PASS)
+            status_ftp = "✅ FTP Соединение установлено"
+    except Exception as e:
+        status_ftp = f"❌ Ошибка FTP: {e}"
+    
+    html = f"""
+    <html>
+        <body style="font-family: sans-serif; padding: 20px;">
+            <h2>🖥 Диагностика системы</h2>
+            <p><b>Бот:</b> @leshiy_storage_bot ✅</p>
+            <p><b>FTP Host:</b> {FTP_HOST}</p>
+            <p><b>Статус связи:</b> {status_ftp}</p>
+            <hr>
+            <p><a href="/">На главную</a></p>
+        </body>
+    </html>
+    """
+    return web.Response(text=html, content_type='text/html')
+    
+# --- ОБРАБОТЧИКИ КОМАНД ---
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     await message.answer("👋 Бот-хранилка готов к работе! Присылай фото или видео.")
@@ -132,25 +170,20 @@ async def on_startup(bot: Bot):
 def main():
     # Render сам подставляет PORT, если его нет — берем 10000
     port = int(os.getenv("RENDER_PORT", 10000))
-    
     app = web.Application()
     
-    # Настраиваем обработчик вебхука
-    webhook_requests_handler = SimpleRequestHandler(
-        dispatcher=dp,
-        bot=bot
-    )
-    # Регистрируем путь /webhook
-    webhook_requests_handler.register(app, path="/webhook")
+# Маршруты для браузера
+    app.router.add_get("/", handle_index)
+    app.router.add_get("/debug", handle_debug_page)
     
-    # Подключаем бота и диспетчер к приложению
+    # Маршрут для Телеграма
+    webhook_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
+    webhook_handler.register(app, path="/webhook")
+    
     setup_application(app, dp, bot=bot)
-    
-    # Регистрируем функцию установки вебхука при старте
     dp.startup.register(on_startup)
     
-    # Запускаем сервер aiohttp
     web.run_app(app, host="0.0.0.0", port=port)
-
+    
 if __name__ == "__main__":
     main()
