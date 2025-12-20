@@ -122,8 +122,33 @@ async def reject_other(message: Message):
     if not (message.photo or message.video or message.document):
         await message.answer("⚠️ Этот тип сообщений не поддерживается. Присылайте только фото или видео.")
 
-async def main():
-    await dp.start_polling(bot)
+async def on_startup(bot: Bot):
+    # Устанавливаем вебхук при запуске
+    webhook_url = os.getenv("RENDER_EXTERNAL_URL") + "/webhook"
+    await bot.set_webhook(webhook_url, drop_pending_updates=True)
+
+def main():
+    # Render сам подставляет PORT, если его нет — берем 10000
+    port = int(os.getenv("RENDER_PORT", 10000))
+    
+    app = web.Application()
+    
+    # Настраиваем обработчик вебхука
+    webhook_requests_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot
+    )
+    # Регистрируем путь /webhook
+    webhook_requests_handler.register(app, path="/webhook")
+    
+    # Подключаем бота и диспетчер к приложению
+    setup_application(app, dp, bot=bot)
+    
+    # Регистрируем функцию установки вебхука при старте
+    dp.startup.register(on_startup)
+    
+    # Запускаем сервер aiohttp
+    web.run_app(app, host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
