@@ -43,8 +43,14 @@ async def handle_debug_url(request):
 
 # --- ЛОГИКА FTP ---
 def upload_to_ftp(file_path, folder_name, file_name):
-    with FTP(FTP_HOST) as ftp:
+    with FTP() as ftp:
+        # Увеличим таймаут до 30 секунд
+        ftp.connect(FTP_HOST, 21, timeout=30) 
         ftp.login(user=FTP_USER, passwd=FTP_PASS)
+        
+        # ВКЛЮЧАЕМ ПАССИВНЫЙ РЕЖИМ (исправляет 'sendall')
+        ftp.set_pasv(True) 
+        
         items = ftp.nlst()
         if folder_name not in items:
             ftp.mkd(folder_name)
@@ -65,8 +71,11 @@ async def cmd_start(message: Message):
 async def cmd_debug_bot(message: Message):
     status_ftp = "Проверка..."
     try:
-        with FTP(FTP_HOST) as ftp:
+        with FTP() as ftp:
+            ftp.connect(FTP_HOST, 21, timeout=10)
             ftp.login(user=FTP_USER, passwd=FTP_PASS)
+            ftp.set_pasv(True) # Важно и тут
+            ftp.quit()
             status_ftp = "✅ Соединение установлено"
     except Exception as e:
         status_ftp = f"❌ Ошибка: {e}"
