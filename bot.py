@@ -271,14 +271,33 @@ async def handle_files(message: Message):
     # Если админ прислал файл allowed_ids.txt
     if message.from_user.id == ADMIN_ID and message.document and message.document.file_name == DB_FILE:
         status_msg = await message.answer("🔄 Обработка нового файла базы ID...")
-        f_info = await bot.get_file(message.document.file_id)
-        # Скачиваем локально
-        await bot.download_file(f_info.file_path, DB_FILE)
-        # Заливаем в корень хранилища
-        await asyncio.to_thread(upload_file_universal, DB_FILE, "", DB_FILE, is_root=True)
-        # Обновляем список в памяти
-        await sync_db_from_storage()
-        await status_msg.edit_text(f"✅ Файл <code>{DB_FILE}</code> успешно обновлен в корне и загружен в память!\nВсего пользователей: {len(ALLOWED_IDS)}", parse_mode="HTML")
+        try:
+            f_info = await bot.get_file(message.document.file_id)
+            
+            # 1. Качаем файл из ТГ во временный локальный файл
+            await bot.download_file(f_info.file_path, DB_FILE)
+            
+            # 2. СРАЗУ читаем его, чтобы обновить память бота (не дожидаясь облака)
+            with open(DB_FILE, "r") as f:
+                content = f.read().replace("\n", "").replace(" ", "")
+                new_ids = [int(i) for i in content.split(",") if i.strip().isdigit()]
+                if new_ids:
+                    global ALLOWED_IDS
+                    ALLOWED_IDS = list(set(new_ids))
+                    # На всякий случай добавляем тебя, если забыл вписать
+                    if ADMIN_ID not in ALLOWED_IDS: ALLOWED_IDS.append(ADMIN_ID)
+            
+            # 3. Отправляем этот проверенный файл в корень облака
+            await asyncio.to_thread(upload_file_universal, DB_FILE, "", DB_FILE, is_root=True)
+            
+            await status_msg.edit_text(
+                f"✅ База обновлена!\n\n"
+                f"👥 Пользователей в памяти: {len(ALLOWED_IDS)}\n"
+                f"📁 Файл синхронизирован с облаком.", 
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            await status_msg.edit_text(f"❌ Ошибка при обновлении: {e}")
         return
 
     # Проверка прав доступа
