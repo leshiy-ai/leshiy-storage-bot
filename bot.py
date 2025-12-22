@@ -253,6 +253,38 @@ async def cmd_admin(message: Message):
         parse_mode="HTML"
     )
 
+@dp.message(Command("add"))
+async def cmd_add_id(message: Message):
+    """Добавляет один или несколько ID вручную: /add 123, 456"""
+    if message.from_user.id != ADMIN_ID: return
+    
+    args = message.text.replace("/add", "").strip()
+    if not args:
+        await message.answer("📝 Введи ID через запятую. Пример: <code>/add 1234567, 9876543</code>", parse_mode="HTML")
+        return
+
+    # Чистим ввод и превращаем в список чисел
+    ids_to_add = [i.strip() for i in args.split(",") if i.strip().isdigit()]
+    
+    if not ids_to_add:
+        await message.answer("❌ Не найдено корректных ID.")
+        return
+
+    added_count = 0
+    global ALLOWED_IDS
+    for uid_str in ids_to_add:
+        uid = int(uid_str)
+        if uid not in ALLOWED_IDS:
+            ALLOWED_IDS.append(uid)
+            added_count += 1
+    
+    if added_count > 0:
+        # Сохраняем обновленный список в облако
+        await save_id_to_storage()
+        await message.answer(f"✅ Добавлено новых ID: {added_count}\nВсего пользователей: {len(ALLOWED_IDS)}")
+    else:
+        await message.answer("ℹ️ Все указанные ID уже есть в списке.")
+        
 @dp.message(Command("debug"))
 async def cmd_debug(message: Message):
     def check():
