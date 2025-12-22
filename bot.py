@@ -103,6 +103,10 @@ async def sync_db_from_storage():
 async def save_id_to_storage(new_id=None):
     """Добавляет ID и обновляет файл в облаке"""
     global ALLOWED_IDS
+    # Если список пустой (а он не должен быть таким, т.к. ты админ), 
+    # лучше сначала попробовать его загрузить из файла
+    if not ALLOWED_IDS:
+        await sync_db_from_storage()
     if new_id and new_id not in ALLOWED_IDS:
         ALLOWED_IDS.append(new_id)
         
@@ -255,35 +259,44 @@ async def cmd_admin(message: Message):
 
 @dp.message(Command("add"))
 async def cmd_add_id(message: Message):
-    """Добавляет один или несколько ID вручную: /add 123, 456"""
+    """Добавляет ID к текущему списку, не удаляя старые"""
     if message.from_user.id != ADMIN_ID: return
     
+    global ALLOWED_IDS
     args = message.text.replace("/add", "").strip()
+    
     if not args:
-        await message.answer("📝 Введи ID через запятую. Пример: <code>/add 1234567, 9876543</code>", parse_mode="HTML")
+        await message.answer("📝 Введи ID через запятую. Пример: <code>/add 123, 456</code>", parse_mode="HTML")
         return
 
-    # Чистим ввод и превращаем в список чисел
-    ids_to_add = [i.strip() for i in args.split(",") if i.strip().isdigit()]
+    # Извлекаем числа
+    import re
+    input_ids = [int(uid) for uid in re.findall(r'\d+', args)]
     
-    if not ids_to_add:
-        await message.answer("❌ Не найдено корректных ID.")
+    if not input_ids:
+        await message.answer("❌ ID не найдены.")
         return
 
     added_count = 0
-    global ALLOWED_IDS
-    for uid_str in ids_to_add:
-        uid = int(uid_str)
+    for uid in input_ids:
         if uid not in ALLOWED_IDS:
             ALLOWED_IDS.append(uid)
             added_count += 1
     
+    # СТРАХОВКА: Убеждаемся, что админ всегда в списке перед сохранением
+    if ADMIN_ID not in ALLOWED_IDS:
+        ALLOWED_IDS.append(ADMIN_ID)
+
     if added_count > 0:
-        # Сохраняем обновленный список в облако
-        await save_id_to_storage()
-        await message.answer(f"✅ Добавлено новых ID: {added_count}\nВсего пользователей: {len(ALLOWED_IDS)}")
+        # Важно: вызываем сохранение БЕЗ аргументов, 
+        # чтобы функция просто взяла текущий ALLOWED_IDS из памяти
+        success = await save_id_to_storage() 
+        if success:
+            await message.answer(f"✅ Добавлено: {added_count}\nВсего в базе: {len(ALLOWED_IDS)}")
+        else:
+            await message.answer("❌ Ошибка при записи в облако, но в памяти ID обновлены.")
     else:
-        await message.answer("ℹ️ Все указанные ID уже есть в списке.")
+        await message.answer(f"ℹ️ Эти ID уже есть. Всего в базе: {len(ALLOWED_IDS)}")
         
 @dp.message(Command("debug"))
 async def cmd_debug(message: Message):
