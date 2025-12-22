@@ -36,7 +36,7 @@ FTP_PASS = os.getenv("FTP_PASS")
 FTP_FOLDER = os.getenv("FTP_FOLDER", "").strip()
 RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
-VERSION = "1.5.1"
+VERSION = "1.5.2"
 
 # Файл базы данных на твоем сервере (WebDAV/FTP)
 DB_FILE = "allowed_ids.txt"
@@ -82,16 +82,30 @@ async def sync_db_from_storage():
             with open(local_path, "r") as f:
                 content = f.read().strip()
                 if content:
-                    ALLOWED_IDS = list(set([int(i) for i in content.split(",") if i.strip()]))
+                    # Улучшенный парсинг: убираем пробелы и переносы, фильтруем пустые элементы
+                    clean_content = content.replace("\n", "").replace(" ", "")
+                    new_ids = []
+                    for i in clean_content.split(","):
+                        if i.strip().isdigit():
+                            new_ids.append(int(i.strip()))
+                    
+                    if new_ids:
+                        ALLOWED_IDS = list(set(new_ids))
             logger.info(f"✅ База ID синхронизирована: {ALLOWED_IDS}")
+        
+        # Всегда гарантируем наличие админа
+        if ADMIN_ID and ADMIN_ID not in ALLOWED_IDS:
+            ALLOWED_IDS.append(ADMIN_ID)
+            
     except Exception as e:
         logger.error(f"❌ Ошибка синхронизации БД: {e}")
 
-async def save_id_to_storage(new_id):
+async def save_id_to_storage(new_id=None):
     """Добавляет ID и обновляет файл в облаке"""
     global ALLOWED_IDS
-    if new_id in ALLOWED_IDS: return False
-    ALLOWED_IDS.append(new_id)
+    if new_id and new_id not in ALLOWED_IDS:
+        ALLOWED_IDS.append(new_id)
+        
     content = ",".join(map(str, ALLOWED_IDS))
     local_path = DB_FILE
     try:
@@ -113,7 +127,8 @@ async def save_id_to_storage(new_id):
 
 # --- ЛОГИКА ЗАГРУЗКИ ФАЙЛОВ ---
 
-def upload_file_universal(local_path, user_folder, file_name):
+def upload_file_universal(local_path, user_folder, file_name, is_root=False):
+    """Загрузка файла. Если is_root=True, сохраняет в корень (для системных файлов)"""
     host = get_clean_host()
     if FTP_HOST_RAW.startswith("sftp://"):
         transport = paramiko.Transport((host, 22))
@@ -122,16 +137,22 @@ def upload_file_universal(local_path, user_folder, file_name):
         if FTP_FOLDER:
             try: sftp.chdir(FTP_FOLDER)
             except IOError: sftp.mkdir(FTP_FOLDER); sftp.chdir(FTP_FOLDER)
-        try: sftp.chdir(user_folder)
-        except IOError: sftp.mkdir(user_folder); sftp.chdir(user_folder)
+        if not is_root:
+            try: sftp.chdir(user_folder)
+            except IOError: sftp.mkdir(user_folder); sftp.chdir(user_folder)
         sftp.put(local_path, file_name)
         sftp.close(); transport.close()
     elif "dav" in FTP_HOST_RAW:
         client = get_webdav_client()
         base = f"{FTP_FOLDER}/" if FTP_FOLDER else ""
         if base and not client.check(base): client.mkdir(base)
-        path = f"{base}{user_folder}/"
-        if not client.check(path): client.mkdir(path)
+        
+        if is_root:
+            path = base
+        else:
+            path = f"{base}{user_folder}/"
+            if not client.check(path): client.mkdir(path)
+            
         client.upload_sync(remote_path=f"{path}{file_name}", local_path=local_path)
     else:
         with FTP() as ftp:
@@ -139,8 +160,9 @@ def upload_file_universal(local_path, user_folder, file_name):
             if FTP_FOLDER:
                 if FTP_FOLDER not in ftp.nlst(): ftp.mkd(FTP_FOLDER)
                 ftp.cwd(FTP_FOLDER)
-            if user_folder not in ftp.nlst(): ftp.mkd(user_folder)
-            ftp.cwd(user_folder)
+            if not is_root:
+                if user_folder not in ftp.nlst(): ftp.mkd(user_folder)
+                ftp.cwd(user_folder)
             with open(local_path, 'rb') as f: ftp.storbinary(f'STOR {file_name}', f)
 
 # --- ВЕБ-СТРАНИЦЫ (БРАУЗЕР) ---
@@ -246,7 +268,22 @@ async def cmd_debug(message: Message):
 
 @dp.message(F.photo | F.video | F.document)
 async def handle_files(message: Message):
-    if ADMIN_ID and ADMIN_ID not in ALLOWED_IDS: await save_id_to_storage(ADMIN_ID)
+    # Если админ прислал файл allowed_ids.txt
+    if message.from_user.id == ADMIN_ID and message.document and message.document.file_name == DB_FILE:
+        status_msg = await message.answer("🔄 Обработка нового файла базы ID...")
+        f_info = await bot.get_file(message.document.file_id)
+        # Скачиваем локально
+        await bot.download_file(f_info.file_path, DB_FILE)
+        # Заливаем в корень хранилища
+        await asyncio.to_thread(upload_file_universal, DB_FILE, "", DB_FILE, is_root=True)
+        # Обновляем список в памяти
+        await sync_db_from_storage()
+        await status_msg.edit_text(f"✅ Файл <code>{DB_FILE}</code> успешно обновлен в корне и загружен в память!\nВсего пользователей: {len(ALLOWED_IDS)}", parse_mode="HTML")
+        return
+
+    # Проверка прав доступа
+    if ADMIN_ID and ADMIN_ID not in ALLOWED_IDS: 
+        ALLOWED_IDS.append(ADMIN_ID)
     
     if message.from_user.id not in ALLOWED_IDS:
         await message.answer("🚫 У вас нет прав на сохранение файлов. Запрос отправлен администратору.")
@@ -262,6 +299,7 @@ async def handle_files(message: Message):
             await bot.send_message(ADMIN_ID, alert, parse_mode="HTML", reply_markup=kb)
         return
 
+    # Логика загрузки контента
     start_t = datetime.now()
     await bot.send_chat_action(message.chat.id, action="upload_document")
     file_id, file_name = None, None
