@@ -235,6 +235,9 @@ async def cmd_debug(message: Message):
 
 @dp.message(F.photo | F.video | F.document)
 async def handle_files(message: Message):
+    # Засекаем время начала обработки для определения "холодного старта"
+    start_time = datetime.now()
+    
     """Главный обработчик входящего медиаконтента"""
     
     # ПРОВЕРКА ДОСТУПА С УВЕДОМЛЕНИЕМ АДМИНА
@@ -254,7 +257,12 @@ async def handle_files(message: Message):
             )
             await bot.send_message(ADMIN_ID, alert_text, parse_mode="HTML")
         return
+        
+    # Отправляем статус "загрузки", чтобы пользователь видел активность в заголовке чата
+    await bot.send_chat_action(message.chat.id, action="upload_document")
 
+    file_id, file_name = None, None
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     file_id, file_name = None, None
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
@@ -279,6 +287,10 @@ async def handle_files(message: Message):
         return
 
     status_msg = await message.answer("⏳ Загружаю на сервер...")
+    # Проверяем, долго ли бот "просыпался"
+    process_delay = (datetime.now() - start_time).total_seconds()
+    wake_up_note = " 💤 (Проснулся после спячки)" if process_delay > 3 else ""
+    msg = await message.answer(f"⏳ Начинаю загрузку...{wake_up_note}")
     
     try:
         # Скачивание файла в локальную временную папку Render
