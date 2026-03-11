@@ -1,5 +1,0 @@
-aiogram
-python-dotenv
-aiohttp
-paramiko
-webdavclient3
