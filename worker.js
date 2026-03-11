@@ -10,7 +10,7 @@ Telegram-бот для автоматической загрузки фото и
 Скрытая функция: Команда /search для поиска и возможность достать файлы с хранилки.
 */
 // Глобальные константы
-const version = "v2.3.2 от 11.01.2026"; // актуальная версия
+const version = "v2.3.3 от 11.01.2026"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -1198,7 +1198,7 @@ async function handleVK(body, env, hostname, ctx) {
           return new Response("OK");
         }
 
-        await sendVKMessage(chatId, `⏳ Вижу вложений: ${message.attachments.length}. Начинаю...`, env);
+        await sendVKMessage(chatId, `⏳ Начинаю загрузку в облако: ${message.attachments.length} (шт.)`, env);
 
         ctx.waitUntil((async () => {
           for (const attach of message.attachments) {
@@ -1243,35 +1243,42 @@ async function handleVK(body, env, hostname, ctx) {
                 const v = attach.video;
                 let vFiles = v.files || {};
                 
-                // 1. Пытаемся взять ссылку из того, что прислал Callback API
+                // 1. Стандартный поиск
                 url = vFiles.mp4_1080 || vFiles.mp4_720 || vFiles.mp4_480 || vFiles.mp4_360 || vFiles.src;
 
-                // 2. Если пусто (пожатое видео), идем в API ВК за ссылками
-                if (!url && v.id) {
+                // 2. Если API молчит, идем ПАРСИТЬ плеер
+                if (!url && v.player) {
                   try {
-                    // Используем твой VK_TOKEN из env
-                    const vkApiUrl = `https://api.vk.com/method/video.get?owner_id=${v.owner_id}&videos=${v.owner_id}_${v.id}&access_token=${env.VK_TOKEN}&v=5.199`;
-                    const vkRes = await fetch(vkApiUrl);
-                    const vkData = await vkRes.json();
+                    const playerRes = await fetch(v.player, {
+                      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                    });
                     
-                    if (vkData.response && vkData.response.items && vkData.response.items[0]) {
-                      const realFiles = vkData.response.items[0].files || {};
-                      url = realFiles.mp4_1080 || realFiles.mp4_720 || realFiles.mp4_480 || realFiles.mp4_360 || realFiles.src;
+                    if (playerRes.ok) {
+                      const html = await playerRes.text();
+                      // Ищем ссылки в объекте видеоконфига внутри HTML
+                      const videoMatch = html.match(/https?:\/\/[^\s"'<>]+?\.mp4[^\s"'<>]*\?[\w=&%-]+/g);
                       
-                      // Если ВК отдал внешнюю ссылку (например, YouTube), её не скачаем просто так
-                      if (!url && realFiles.external) {
-                         await sendVKMessage(chatId, `ℹ️ Видео "${v.title}" — внешняя ссылка (${realFiles.external}). Такие пока не качаю.`, env);
-                         continue;
+                      if (videoMatch) {
+                        // Берем первую попавшуюся ссылку (обычно это среднее качество)
+                        url = videoMatch[0].replace(/\\/g, ''); 
+                        console.log("Found link via Player Parsing:", url);
+                      } else {
+                        // Попытка №2: поиск через JSON-подобную структуру
+                        const flashVarsMatch = html.match(/\"url(\d+)\"\:\"(https?.*?)\"/g);
+                        if (flashVarsMatch) {
+                          // Берем самое высокое качество из найденных
+                          const lastMatch = flashVarsMatch[flashVarsMatch.length - 1];
+                          url = lastMatch.split('":"')[1].replace('"', '').replace(/\\/g, '');
+                        }
                       }
                     }
-                  } catch (e) {
-                    console.error("VK API Video.get Error:", e);
-                  }
+                  } catch (e) { console.error("Player parsing failed", e); }
                 }
 
+                // 3. Если всё еще нет - вот теперь мы реально бессильны (приватное видео)
                 if (!url) {
-                  await sendVKMessage(chatId, `❌ Не удалось извлечь видеопоток для "${v.title}". Попробуй как файл.`, env);
-                  continue;
+                  await sendVKMessage(chatId, `⚠️ ВК запрещает использовать свой плеер. Отправь пожалуйста непожатое видео как документ.`, env);
+                  continue; 
                 }
 
                 name = (v.title || `Video_${dateStr}`).replace(/[\\/:*?"<>|]/g, "") + ".mp4";
@@ -2646,26 +2653,6 @@ async function showFolderSelector(chatId, userData, env) {
   }
 }
 
-async function uploadToYandex(stream, name, token, folder = "") {
-  // Яндекс требует, чтобы путь начинался с /
-  let fullPath = folder ? `/${folder}/${name}` : `/${name}`;
-  // Убираем двойные слэши, если они вдруг возникли
-  fullPath = fullPath.replace(/\/+/g, '/');
-
-  const getUrl = `https://cloud-api.yandex.net/v1/disk/resources/upload?path=${encodeURIComponent(fullPath)}&overwrite=true`;
-  
-  const r = await fetch(getUrl, {
-    headers: { "Authorization": `OAuth ${token}` }
-  });
-  
-  const d = await r.json();
-  if (d.href) { 
-    await fetch(d.href, { method: "PUT", body: stream }); 
-    return true; 
-  }
-  return false;
-}
-
 async function uploadToYandexFromArrayBuffer(arrayBuffer, name, token, folder = "") {
   let fullPath = folder ? `/${folder}/${name}` : `/${name}`;
   fullPath = fullPath.replace(/\/+/g, '/');
@@ -2757,25 +2744,6 @@ async function downloadFromGoogle(folderId, fileName, token, env) {
     const fileRes = await fetch(url, { headers: { "Authorization": `Bearer ${token}` } });
     return fileRes.ok ? await fileRes.arrayBuffer() : null;
   } catch (e) { return null; }
-}
-
-async function uploadToGoogle(stream, name, token, folderId = "root") {
-  const meta = { 
-    name: name, 
-    parents: (folderId && folderId !== "root") ? [folderId] : [] 
-  };
-  
-  const fd = new FormData();
-  fd.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
-  fd.append('file', new Blob([await new Response(stream).arrayBuffer()]));
-  
-  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-    method: 'POST', 
-    headers: { 'Authorization': `Bearer ${token}` }, 
-    body: fd
-  });
-  
-  return res.ok;
 }
 
 async function uploadToGoogleFromArrayBuffer(arrayBuffer, name, token, folderId = "root") {
@@ -2881,60 +2849,6 @@ async function handleMailruCallback(request, env) {
   }
 }
 
-async function uploadToMailru(stream, fileName, accessToken, folderPath, env) {
-  try {
-    // 1. Преобразуем поток в ArrayBuffer
-    const arrayBuffer = await new Response(stream).arrayBuffer();
-    const fileBuffer = new Uint8Array(arrayBuffer);
-
-    // 2. Получаем shard URL
-    const dispRes = await fetch(`https://cloud.mail.ru/api/v2/dispatcher?access_token=${accessToken}`);
-    const dispData = await dispRes.json();
-
-    if (!dispData.body?.upload?.[0]?.url) {
-      await logDebug(`❌ Mail.ru: не удалось получить shard: ${JSON.stringify(dispData)}`, env);
-      return false;
-    }
-    const uploadUrl = dispData.body.upload[0].url;
-
-    // 3. Загружаем файл на shard
-    const uploadRes = await fetch(`${uploadUrl}?cloud_domain=2&login=me`, {
-      method: "POST",
-      body: fileBuffer
-    });
-
-    const fileHash = await uploadRes.text();
-    if (!fileHash.trim()) {
-      await logDebug(`❌ Mail.ru: пустой hash после загрузки на shard`, env);
-      return false;
-    }
-
-    // 4. Регистрируем файл в облаке
-    const fullPath = `/${folderPath}/${fileName}`.replace(/\/+/g, '/');
-    const params = new URLSearchParams({
-      home: fullPath,
-      hash: fileHash.trim(),
-      size: fileBuffer.byteLength.toString(),
-      conflict: "rename",
-      api: "2"
-    });
-
-    const addRes = await fetch(`https://cloud.mail.ru/api/v2/file/add?access_token=${accessToken}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: params
-    });
-
-    const addData = await addRes.json();
-    await logDebug(`📤 Mail.ru upload result: ${JSON.stringify(addData)}`, env);
-
-    return addData.status === 200;
-  } catch (e) {
-    await logDebug(`🔥 Mail.ru upload error: ${e.message}\nStack: ${e.stack}`, env);
-    return false;
-  }
-}
-
 async function createMailruFolder(folderName, accessToken, env) {
   try {
     const params = new URLSearchParams({
@@ -3027,28 +2941,6 @@ async function handleDropboxCallback(request, env) {
     return new Response("OK! Go back to Telegram.");
   }
   return new Response("Error", { status: 400 });
-}
-
-async function uploadToDropbox(stream, fileName, accessToken, folderPath = "") {
-  const path = `/${folderPath}/${fileName}`.replace(/\/+/g, '/');
-  const arg = {
-    path: path,
-    mode: "add",
-    autorename: true,
-    mute: false
-  };
-
-  const res = await fetch("https://content.dropboxapi.com/2/files/upload", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${accessToken}`,
-      "Dropbox-API-Arg": JSON.stringify(arg),
-      "Content-Type": "application/octet-stream"
-    },
-    body: stream // Dropbox отлично принимает поток напрямую!
-  });
-
-  return res.ok;
 }
 
 async function uploadToDropboxFromArrayBuffer(arrayBuffer, fileName, accessToken, folderPath = "") {
