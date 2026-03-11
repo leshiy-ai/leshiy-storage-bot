@@ -1,3 +1,16 @@
+/* 🤖 Telegram Storage Bot "Хранилка" by Leshiy
+Личный Telegram-бот для автоматической загрузки фото и видео на домашний FTP/SFTP/WEBDAV-сервер. 
+Бот поддерживает сохранение исходных имен файлов и автоматическую сортировку по папкам пользователей.
+
+✨ Основные функции
+Универсальность: Поддержка классического FTP, защищенного SFTP и облачного WebDAV (Google, Яндекс.Диск, Облако Mail.Ru и др.).
+Умное именование: Сохраняет исходные имена для файлов без сжатия и генерирует имена по дате/времени для сжатых фото/видео.
+Поддержка WEBM: Возможность сохранять видеофайлы в современных форматах без потери качества.
+Диагностика: Команда /debug для проверки статуса подключения к хранилищу в реальном времени.
+*/
+// Глобальные константы
+const version = "v2.1.3"; // актуальная версия
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -23,6 +36,26 @@ export default {
     // 2. ОБРАБОТКА CALLBACKS (Auth)
     if (url.pathname === "/auth/yandex/callback") return await handleYandexCallback(request, env);
     if (url.pathname === "/auth/google/callback") return await handleGoogleCallback(request, env);
+    if (url.pathname === "/auth/mailru/callback") return await handleMailruCallback(request, env);
+    if (url.pathname === "/auth/dropbox/callback") return await handleDropboxCallback(request, env);
+  
+  // Ответ для Mail.ru, чтобы он нашел файл receiver.html
+  if (url.pathname.endsWith("receiver.html")) {
+    const receiverHtml = `<html>
+  <body>
+  <script src="//connect.mail.ru/js/loader.js"></script>
+  <script>
+  mailru.loader.require('receiver', function(){
+    mailru.receiver.init();
+  })
+  </script>
+  </body>
+  </html>`;
+    
+    return new Response(receiverHtml, {
+      headers: { "Content-Type": "text/html; charset=utf-8" }
+    });
+  }
 
     // 3. ОБРАБОТКА ВЕБХУКОВ ТЕЛЕГРАМА (POST запросы)
     if (request.method === "POST") {
@@ -52,7 +85,6 @@ export default {
 async function handleTelegramUpdate(update, env, hostname) {
   // --- ОБРАБОТКА НАЖАТИЙ (CALLBACK) ---
   if (update.callback_query) {
-    // Если пришел колбэк, отдаем его специальной функции
     return await handleCallbackQuery(update.callback_query, env);
   }
 
@@ -62,50 +94,174 @@ async function handleTelegramUpdate(update, env, hostname) {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
   const text = msg.text || "";
+  const userKey = `user:${userId}`;
 
-  // Данные админа и юзера
+  // Данные админа и базовая загрузка данных пользователя
   const adminCfg = await env.USER_DB.get("admin:config", { type: "json" });
   const isAdmin = adminCfg && Number(adminCfg.id) === Number(userId);
-  const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
+  let userData = await env.USER_DB.get(userKey, { type: "json" });
 
-  // --- КОМАНДА /START ---
-  if (text === "/start") {
-    // Формируем статус с учетом выбранной папки
-    let statusText = "❌ Диск не подключен";
-    if (userData) {
-      const folderInfo = userData.folderId ? ` (папка: <b>${userData.folderId}</b>)` : " (корень)";
-      statusText = `✅ <b>${userData.provider}</b> подключен${folderInfo}`;
+  // --- 1. МОСТ ДЛЯ РЕФЕРАЛА (Приоритет) ---
+  // Если у пользователя в базе есть пометка shared_from, подтягиваем данные владельца
+  if (userData && userData.shared_from) {
+    const ownerId = String(userData.shared_from);
+    const ownerData = await env.USER_DB.get(`user:${ownerId}`, { type: "json" });
+
+    if (ownerData) {
+      // Сохраняем ID рефа, но для сессии используем токены владельца
+      const originalRefId = userId;
+      userData = { 
+        ...ownerData, 
+        is_ref: true, 
+        real_user_id: originalRefId, 
+        shared_from: ownerId 
+      };
+    }
+  }
+
+  // --- 2. КОМАНДА /START (Доступна ВСЕМ, не блокируется проверками) ---
+  if (text.startsWith("/start")) {
+    const args = text.split(" ")[1];
+    let inviteData = null;
+
+    // Проверка инвайта по ссылке ?start=ref_XXX
+    if (args && args.startsWith("ref_")) {
+      const token = args.split("_")[1];
+      inviteData = await env.USER_DB.get(`invite:${token}`, { type: "json" });
+
+      if (inviteData) {
+        const ownerData = await env.USER_DB.get(`user:${inviteData.inviterId}`, { type: "json" });
+        if (ownerData) {
+          // Создаем связь в базе
+          userData = { 
+            provider: ownerData.provider, 
+            shared_from: String(inviteData.inviterId), 
+            connected_at: Date.now() 
+          };
+          await env.USER_DB.put(userKey, JSON.stringify(userData));
+          
+          await sendMessage(chatId, `🤝 <b>Готово!</b>\nТы подключился к хранилке пользователя <code>${inviteData.inviterId}</code> (${ownerData.provider}).`, null, env);
+          await sendMessage(inviteData.inviterId, `🔔 Твоей хранилкой начал пользоваться ID <code>${userId}</code>`, null, env);
+        }
+      } else {
+        await sendMessage(chatId, "❌ Ссылка недействительна или устарела.", null, env);
+      }
     }
 
-    const welcome = `👋 <b>Привет! Я твоя личная хранилка.</b>\n\n` +
-                    `📁 Просто пришли мне фото или видео, и я закину их на сервер.\n\n` +
-                    `⚙️ Статус: ${statusText}\n\n` +
-                    `📖 <b>Команды:</b>\n` +
-                    `/folder — Выбрать папку для загрузки\n` +
-                    `/debug — Техническая информация`;
+    // Уведомление админу о новом юзере (только если это первый заход)
+    if (!userData && !isAdmin) {
+      const report = `👤 Новый пользователь: ${msg.from.first_name || "ᅠ"}\n` +
+                     `🆔 ID: <code>${userId}</code>\n` +
+                     `📂 Статус: Ожидает подключения`;
+      await logToAdmin(report, env);
+    }
+
+    // Формирование текста приветствия
+    let statusText = "❌ Диск не подключен";
+    if (userData && userData.provider) {
+      const folderInfo = userData.folderId ? ` (папка: <b>${userData.folderId}</b>)` : " (корень)";
+      const sharedInfo = userData.shared_from ? ` [Общий диск]` : "";
+      statusText = `✅ <b>${userData.provider}</b> подключен${folderInfo}${sharedInfo}`;
+    }
+
+    let welcome = `👋 <b>Привет! Я твоя личная хранилка.</b>\n\n` +
+                  `📁 Просто пришли мне фото или видео, и я закину их на сервер.\n\n` +
+                  `⚙️ Статус: ${statusText}\n\n` +
+                  `📖 <b>Команды:</b>\n` +
+                  `/folder — Выбрать папку для загрузки\n` +
+                  `/share — Создать ссылку для друга\n` +
+                  `/disconnect — Отключить диск друга\n` +
+                  `/debug — Техническая информация`;
     
-    const yAuth = `https://oauth.yandex.ru/authorize?response_type=code&client_id=${env.YANDEX_CLIENT_ID}&state=${userId}`;
-    const gAuth = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${env.GOOGLE_CLIENT_ID}&redirect_uri=https://${hostname}/auth/google/callback&response_type=code&scope=${encodeURIComponent("https://www.googleapis.com/auth/drive.file")}&state=${userId}&access_type=offline&prompt=consent`;
-    
-    const kb = {
-      inline_keyboard: [
-        [{ text: "🔗 Подключить Яндекс.Диск", url: yAuth }],
-        [{ text: "🔗 Подключить Google Drive", url: gAuth }]
-      ]
-    };
+    if (inviteData && !userData?.shared_from) {
+      welcome += `\n\n🎁 <b>Найдено приглашение!</b>\nОт владельца облака <b>${inviteData.provider}</b>.\nНажми кнопку подтверждения в меню ниже.`;
+    }
+  
+    const kb = getStartKeyboard(userId, hostname, env, inviteData);
     return await sendMessage(chatId, welcome, kb, env);
+  }
+
+  // --- 3. ОБЩАЯ ПРОВЕРКА ДОСТУПА (Для всех команд ниже и файлов) ---
+  const hasAccess = isAdmin || (userData && (userData.access_token || userData.provider === 'mailru-webdav' || userData.shared_from));
+  
+  if (!hasAccess) {
+    const restrictedMsg = `🚫 <b>Доступ ограничен.</b>\nУ тебя не подключено облако и нет активной ссылки от друга.`;
+    return await sendMessage(chatId, restrictedMsg, null, env);
+  }
+
+  // --- КОМАНДА /SHARE ---
+  if (text === "/share") {
+    if (userData.is_ref) {
+      return await sendMessage(chatId, "⚠️ Ты используешь чужой диск и не можешь создавать свои реф-ссылки.", null, env);
+    }
+    
+    const inviteToken = Math.random().toString(36).substring(2, 12);
+    const inviteData = {
+      inviterId: userId,
+      provider: userData.provider,
+      token: inviteToken,
+      timestamp: Date.now()
+    };
+    
+    await env.USER_DB.put(`invite:${inviteToken}`, JSON.stringify(inviteData));
+    const botName = env.BOT_USERNAME || "leshiy_storage_bot"; 
+    const inviteLink = `https://t.me/${botName}?start=ref_${inviteToken}`;
+    return await sendMessage(chatId, `🚀 <b>Твоя ссылка для друга:</b>\n<code>${inviteLink}</code>\n\nДруг подключится к твоему облаку <b>${userData.provider}</b>.`, null, env);
   }
 
   // --- КОМАНДА /DEBUG ---
   if (text === "/debug") {
     const currentFolder = userData?.folderId || "Не установлена (Root)";
     const debugMsg = `🤖 <b>Бот онлайн</b>\n` +
-                     `📦 Версия: 2.1.0 (Stable)\n` +
-                     `🔗 Статус: ${userData ? "✅ Соединение активно" : "❌ Ошибка"}\n` +
-                     `📁 Текущая папка: <code>${currentFolder}</code>\n` +
+                     `📦 Версия: ${version}\n` +
+                     `🔗 Статус: ✅ Соединение активно\n` +
+                     `📁 Папка: <code>${currentFolder}</code>\n` +
                      `👤 Твой ID: <code>${userId}</code>\n` +
-                     `👑 Админ: ${isAdmin ? "Да" : "Нет"}`;
+                     `${isAdmin ? "👑 Админ: Да" : "👑 Админ: Нет"}`;
     return await sendMessage(chatId, debugMsg, null, env);
+  }
+
+  // --- КОМАНДА /DISCONNECT ---
+  if (text === "/disconnect") {
+    const isShared = !!userData.shared_from;
+    const provider = userData.provider;
+
+    await env.USER_DB.delete(userKey);
+    
+    let dMsg = `🔌 <b>Диск отключен.</b>\nТы больше не подключен к ${provider}.`;
+    if (isShared) {
+      dMsg = `🔌 <b>Ты отключился от хранилки друга.</b>\nТеперь ты можешь подключить своё собственное облако.`;
+    }
+    return await sendMessage(chatId, dMsg, null, env);
+  }
+
+  // --- КОМАНДА /FOLDER ---
+  if (text === "/folder") {
+    let folders = [];
+    try {
+      if (userData.provider === "google") {
+        folders = await listGoogleFolders(userData.access_token);
+      } else if (userData.provider === "dropbox") {
+        folders = await listDropboxFolders(userData.access_token);
+      } else if (userData.provider === "yandex") {
+        folders = await listYandexFolders(userData.access_token);
+      }
+    } catch (e) {
+      return await sendMessage(chatId, `❌ Ошибка списка папок: ${e.message}`, null, env);
+    }
+
+    const buttons = folders.map(f => [
+      { text: `📁 ${f.name}`, callback_data: `set_folder:${userId}:${userData.provider === 'google' ? f.id : f.name}` }
+    ]);
+    
+    if (userData.provider === "mailru-webdav") {
+      buttons.push([{ text: "✏️ Указать папку вручную", callback_data: `manual_folder:${userId}` }]);
+    }
+    
+    buttons.unshift([{ text: "➕ Создать 'Storage'", callback_data: `create_folder:${userId}:Storage` }]);
+
+    const msgText = `📂 <b>${userData.provider} Drive</b>\nВыбери папку:`;
+    return await sendMessage(chatId, msgText, { inline_keyboard: buttons }, env);
   }
 
   // --- КОМАНДА /ADMIN ---
@@ -169,96 +325,123 @@ async function handleTelegramUpdate(update, env, hostname) {
 
     return await sendMessage(chatId, msgText, { inline_keyboard: buttons }, env);
   }
-
-  // --- КОМАНДА /FOLDER ---
-  if (text === "/folder") {
-    if (!userData) return await sendMessage(chatId, "❌ Сначала подключи диск", null, env);
   
-    let folders = [];
-    try {
-      if (userData.provider === "google") {
-        // Используем listGoogleFolders (которую мы обсуждали выше)
-        folders = await listGoogleFolders(userData.access_token);
-      } else {
-        folders = await listYandexFolders(userData.access_token);
-      }
-    } catch (e) {
-      return await sendMessage(chatId, `❌ Ошибка списка папок: ${e.message}`, null, env);
-    }
-  
-    // Собираем кнопки: для Google кладем в callback_data ID папки, для Яндекса - имя
-    const buttons = folders.map(f => [
-      { 
-        text: `📁 ${f.name}`, 
-        callback_data: `set_folder:${userId}:${userData.provider === 'google' ? f.id : f.name}` 
-      }
-    ]);
-  
-    // Добавляем кнопку создания папки "Storage" (или с другим именем)
-    buttons.unshift([{ 
-      text: "➕ Создать 'Storage'", 
-      callback_data: `create_folder:${userId}:Storage` 
-    }]);
-  
-    const msgText = `📂 <b>${userData.provider} Drive</b>\nВыбери папку для сохранения файлов:`;
-    return await sendMessage(chatId, msgText, { inline_keyboard: buttons }, env);
-  }
-
-  // --- ОБРАБОТКА ФАЙЛОВ ---
+  // --- ОБРАБОТКА ФАЙЛОВ (Документы, Видео, Фото, Аудио, Голосовые) ---
   const isDoc = !!msg.document;
   const isVideo = !!msg.video;
   const isPhoto = !!msg.photo;
+  const isAudio = !!msg.audio;
+  const isVoice = !!msg.voice;
 
-  if (isDoc || isVideo || isPhoto) {
-    // 1. ПРОВЕРКА ДОСТУПА (Берем из GitHub логику)
-    let allowed = await env.USER_DB.get("admin:allowed_ids", { type: "json" }) || [];
-    const isAllowed = isAdmin || allowed.includes(String(userId));
-
-    if (!isAllowed) {
-      return await sendMessage(chatId, "🚫 <b>Доступ ограничен.</b>\nОбратитесь к администратору для получения разрешения.", null, env);
-    }
-
-    // 2. ПРОВЕРКА ПОДКЛЮЧЕНИЯ ДИСКА
-    if (!userData) {
-      return await sendMessage(chatId, "❌ <b>Диск не подключен.</b>\nИспользуйте /start для авторизации.", null, env);
-    }
-    
+  if (isDoc || isVideo || isPhoto || isAudio || isVoice) {
     await sendMessage(chatId, "⏳ <b>Начинаю загрузку в облако...</b>", null, env);
     
     try {
-      const fileObj = msg.document || msg.video || (msg.photo ? msg.photo[msg.photo.length - 1] : null);
+      // Собираем объект файла в зависимости от его типа
+      const fileObj = msg.document || 
+                      msg.video || 
+                      msg.audio || 
+                      msg.voice || 
+                      (msg.photo ? msg.photo[msg.photo.length - 1] : null);
       
-      // Логика формирования имени (как в 1.5.2)
+      if (!fileObj) throw new Error("Файл не найден");
+
       let fileName = "";
-      if (isDoc || isVideo) {
+      
+      // Логика формирования имени
+      if (isDoc || isVideo || isAudio) {
+        // Берем оригинальное имя файла
         fileName = fileObj.file_name || `file_${Date.now()}`;
+      } else if (isVoice) {
+        // Для голосовых создаем имя с датой
+        const dateStr = new Date().toISOString().replace(/T/, '_').replace(/\..+/, '').replace(/:/g, '-');
+        fileName = `Voice_${dateStr}.ogg`;
       } else {
-        const now = new Date();
-        const dateStr = now.toISOString().replace(/T/, '_').replace(/\..+/, '').replace(/:/g, '-');
+        // Для фото создаем имя с датой
+        const dateStr = new Date().toISOString().replace(/T/, '_').replace(/\..+/, '').replace(/:/g, '-');
         fileName = `Photo_${dateStr}.jpg`;
       }
 
       const { stream } = await getFileStream(fileObj.file_id, env);
-      
       let success = false;
+
       if (userData.provider === "yandex") {
-        // Добавляем userData.folderId в аргументы!
         success = await uploadToYandex(stream, fileName, userData.access_token, userData.folderId || "");
       } else if (userData.provider === "google") {
         success = await uploadToGoogle(stream, fileName, userData.access_token, userData.folderId);
+      } else if (userData.provider === "dropbox") {
+        success = await uploadToDropbox(stream, fileName, userData.access_token, userData.folderId || "Storage");
+      } else if (userData.provider === "mailru-webdav") {
+        const fullPath = `${userData.host}/${userData.folderId ? userData.folderId + '/' : ''}${encodeURIComponent(fileName)}`;
+        const arrayBuffer = await new Response(stream).arrayBuffer();
+        const res = await fetch(fullPath, {
+          method: "PUT",
+          headers: {
+            "Authorization": `Basic ${btoa(userData.user + ":" + userData.pass)}`,
+            "Content-Type": "application/octet-stream"
+          },
+          body: arrayBuffer
+        });
+        success = res.status === 201 || res.status === 204;
       }
 
       if (success) {
-        return await sendMessage(chatId, `✅ Файл <b>${fileName}</b> успешно сохранен в ${userData.provider}!`, null, env);
+        return await sendMessage(chatId, `✅ Файл <b>${fileName}</b> сохранен в ${userData.provider}!`, null, env);
       } else {
-        return await sendMessage(chatId, "❌ Ошибка при загрузке. Проверьте место на диске или токены.", null, env);
+        return await sendMessage(chatId, "❌ Ошибка при загрузке. Проверьте токены или место на диске.", null, env);
       }
     } catch (e) {
-      return await sendMessage(chatId, `❌ Критическая ошибка: ${e.message}`, null, env);
+      return await sendMessage(chatId, `❌ Ошибка: ${e.message}`, null, env);
     }
   }
 
   return new Response("OK");
+}
+
+/**
+ * Генерирует клавиатуру для команды /start
+ */
+function getStartKeyboard(userId, hostname, env, inviteData = null) {
+  let keyboard = [];
+
+  // 1-я строка: Яндекс
+  const yAuth = `https://oauth.yandex.ru/authorize?response_type=code&client_id=${env.YANDEX_CLIENT_ID}&state=${userId}`;
+  keyboard.push([{ text: "🔗 Подключить Яндекс.Диск", url: yAuth }]);
+
+  // 2-я строка: Google
+  const gAuth = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${env.GOOGLE_CLIENT_ID}&redirect_uri=https://${hostname}/auth/google/callback&response_type=code&scope=${encodeURIComponent("https://www.googleapis.com/auth/drive.file")}&state=${userId}&access_type=offline&prompt=consent`;
+  keyboard.push([{ text: "🔗 Подключить Google Drive", url: gAuth }]);
+
+  // 3-я строка: DropBox
+  const dbxAuth = `https://www.dropbox.com/oauth2/authorize?client_id=${env.DROPBOX_CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(`https://${hostname}/auth/dropbox/callback`)}&token_access_type=offline&state=${userId}`;
+  keyboard.push([{ text: "🔗 Подключить Dropbox", url: dbxAuth }]);
+
+  // 4-я строка: Mail.Ru
+  const mailruClientId = env.MAILRU_CLIENT_ID;
+  const mailruRedirectUri = `https://${hostname}/auth/mailru/callback`;
+  //const mAuth = `https://connect.mail.ru/oauth/authorize?client_id=${mailruClientId}&response_type=code&scope=cloud.write.all&redirect_uri=${encodeURIComponent(mailruRedirectUri)}&state=${userId}`;
+  // В параметре scope добавляем cloud.write.all (или просто cloud)
+  // Старый вариант: scope=cloud.write.all
+  const scope = "cloud";
+  const mAuth = `https://connect.mail.ru/oauth/authorize?client_id=${mailruClientId}&response_type=code&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(mailruRedirectUri)}&state=${userId}`;
+
+  keyboard.push([{ 
+    text: "🔗 Подключить Облако Mail.ru (WebDAV)", callback_data: "ask_mailru_webdav" }]);
+  
+  // 4-я строка: Условие по рефу
+  if (inviteData) {
+      keyboard.push([{ 
+          text: "🤝 Подтвердить подключение к другу", 
+          callback_data: `confirm_ref:${inviteData.token}` 
+      }]);
+  } else {
+      keyboard.push([{ 
+          text: "🤝 Подключить Хранилку друга", 
+          callback_data: "ask_ref_url" 
+      }]);
+  }
+
+  return { inline_keyboard: keyboard };
 }
 
 async function handleCallbackQuery(query, env) {
@@ -282,25 +465,87 @@ async function handleCallbackQuery(query, env) {
     const userData = await env.USER_DB.get(`user:${targetUserId}`, { type: "json" });
     if (!userData) return new Response("OK");
 
+    if (action === "manual_folder") {
+      await env.USER_DB.put(`state:${userId}`, "wait_manual_folder");
+      await sendMessage(chatId, "🔤 Напиши название папки (например: <code>Storage</code>):", null, env);
+      return new Response("OK");
+    }
     if (action === "create_folder") {
       let finalId;
+      let success = false;
       if (userData.provider === "google") {
         finalId = await createGoogleFolder(folderIdOrName, userData.access_token);
-      } else {
-        await createYandexFolder(folderIdOrName, userData.access_token);
-        finalId = folderIdOrName;
+      } else if (userData.provider === "yandex") {
+        success = await createYandexFolder(folderIdOrName, userData.access_token);
+      } else if (userData.provider === "mailru") {
+        // Вызываем создание папки для Mail.ru
+        success = await createMailruFolder(folderIdOrName, userData.access_token, env);
+      } else if (userData.provider === "dropbox") {
+        success = await createDropboxFolder(folderIdOrName, userData.access_token);
+      } else if (userData.provider === "webdav" || userData.provider === "mailru-webdav") {
+        success = await createWebDAVFolder(folderIdOrName, userData);
       }
-      userData.folderId = finalId;
-      await env.USER_DB.put(`user:${targetUserId}`, JSON.stringify(userData));
-      await sendMessage(chatId, `✅ Папка <b>${folderIdOrName}</b> создана и выбрана!`, null, env);
-      
+      if (success) {
+        userData.folderId = folderIdOrName;
+        await env.USER_DB.put(`user:${targetUserId}`, JSON.stringify(userData));
+        await sendMessage(chatId, `✅ Папка <b>${folderIdOrName}</b> создана и выбрана!`, null, env);
+      } else {
+        await sendMessage(chatId, "❌ Не удалось создать папку. Попробуйте позже.", null, env);
+      }
+
     } else if (action === "set_folder") {
-      // ВОТ ЭТОГО У ТЕБЯ НЕ ХВАТАЛО: Сохранение существующей папки
       userData.folderId = folderIdOrName;
       await env.USER_DB.put(`user:${targetUserId}`, JSON.stringify(userData));
       await sendMessage(chatId, `📂 Папка выбрана: <b>${folderIdOrName}</b>`, null, env);
     }
-
+    if (action === "ask_ref_url") {
+      // Если рефа нет, просто шлем инструкцию и просим прислать ссылку текстом
+      const instruction = `📥 <b>Как подключить хранилку друга:</b>\n\n` +
+                          `1. Попроси друга прислать тебе реф-ссылку (он может создать её командой /share).\n` +
+                          `2. Либо просто скопируй и <b>пришли мне токен</b> (например: <code>${Math.random().toString(36).substring(2, 10)}</code>) прямо в этот чат.`;
+      return await sendMessage(chatId, instruction, null, env);
+    }
+    if (action === "ask_mailru_webdav") {
+      await env.USER_DB.put(`state:${userId}`, "wait_mailru_webdav");
+      return await sendMessage(chatId, 
+        "📧 <b>Облако Mail.ru через WebDAV</b>\n\n" +
+        "1. Перейди в Настройки Облака Mail.ru → «Пароли для внешних приложений»\n" +
+        "2. Создай пароль для WebDAV\n" +
+        "3. Пришли мне ссылку в формате:\n<code>https://ваша-почта@mail.ru:пароль_для_внешнего_приложения@webdav.cloud.mail.ru</code>\n\n" +
+        "<i>Я сразу удалю это сообщение из чата!</i>", 
+        null, env
+      );
+    }
+    if (action === "ask_custom_server") {
+      await env.USER_DB.put(`state:${userId}`, "wait_webdav_url");
+      return await sendMessage(chatId, "🌐 <b>Подключение своего сервера</b>\n\nПришли ссылку в формате:\n<code>https://user:pass@webdav.yandex.ru</code>\n\n<i>После получения я удалю твое сообщение из чата в целях безопасности.</i>", null, env);
+    }
+    
+    if (action === "confirm_ref") {
+      // parts[1] будет содержать токен инвайта: "confirm_ref:TOKEN"
+      const token = parts[1];
+      const invite = await env.USER_DB.get(`invite:${token}`, { type: "json" });
+    
+      if (invite) {
+        const ownerData = await env.USER_DB.get(`user:${invite.inviterId}`, { type: "json" });
+        if (ownerData) {
+          const newUserContext = {
+            ...ownerData,
+            shared_from: invite.inviterId,
+            connected_at: Date.now()
+          };
+          await env.USER_DB.put(`user:${userId}`, JSON.stringify(newUserContext));
+          
+          await sendMessage(chatId, `🤝 <b>Связь установлена!</b>\nТеперь ты используешь облако друга (${invite.provider}).`, null, env);
+          await logToAdmin(`✅ Юзер <code>${userId}</code> подтвердил подключение к <code>${invite.inviterId}</code>`, env);
+          
+          // Обновляем меню /start
+          return await handleTelegramUpdate({ message: { chat: { id: chatId }, from: { id: userId }, text: "/start" } }, env, "hostname_placeholder");
+        }
+      } else {
+        return await sendMessage(chatId, "❌ Ссылка просрочена или неверна.", null, env);
+      }
+    }
   } catch (e) {
     await sendMessage(chatId, `❌ Ошибка: ${e.message}`, null, env);
   }
@@ -335,6 +580,19 @@ async function getFileStream(fileId, env) {
   
   const res = await fetch(`https://api.telegram.org/file/bot${env.TELEGRAM_TOKEN}/${fData.result.file_path}`);
   return { stream: res.body };
+}
+
+// ✅ logToAdmin - Сообщения только АДМИНУ в общем чате
+async function logToAdmin(text, env) {
+  try {
+    const adminCfg = await env.USER_DB.get("admin:config", { type: "json" });
+    if (adminCfg && adminCfg.id) {
+      // Используем parse_mode HTML для красоты (ID в code)
+      await sendMessage(adminCfg.id, `🔔 <b>ADMIN LOG:</b>\n${text}`, null, env);
+    }
+  } catch (e) {
+    console.error("Ошибка логирования админу:", e.message);
+  }
 }
 
 // --- CALLBACKS ---
@@ -535,4 +793,260 @@ async function createGoogleFolder(folderName, token, parentId = "root") {
   });
   const data = await res.json();
   return data.id; // Возвращает ID созданной папки
+}
+
+// Работа с Облаком Mail.Ru
+async function handleMailruCallback(request, env) {
+  const url = new URL(request.url);
+  const code = url.searchParams.get("code");
+  const userId = url.searchParams.get("state");
+
+  if (!code) return new Response("❌ Ошибка: code не получен");
+  const clientId = env.MAILRU_CLIENT_ID.trim();
+  const clientSecret = env.MAILRU_CLIENT_SECRET.trim();
+  const redirectUri = `https://${url.hostname}/auth/mailru/callback`;
+
+  // Формируем параметры строго по спецификации для Внешних приложений
+  const bodyParams = new URLSearchParams();
+  bodyParams.append('grant_type', 'authorization_code');
+  bodyParams.append('code', code);
+  bodyParams.append('redirect_uri', redirectUri);
+  bodyParams.append('client_id', clientId);
+  bodyParams.append('client_secret', clientSecret);
+
+  try {
+    // Пробуем connect.mail.ru, так как статус теперь "Внешнее"
+    const res = await fetch("https://connect.mail.ru/oauth/token", {
+      method: "POST",
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json'
+      },
+      body: bodyParams.toString()
+    });
+
+    const data = await res.json();
+
+    if (data.access_token) {
+      await env.USER_DB.put(`user:${userId}`, JSON.stringify({
+        provider: "mailru",
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+        expires_at: Date.now() + (data.expires_in * 1000)
+      }));
+
+      await sendMessage(userId, "✅ <b>Облако Mail.ru (Внешнее) подключено!</b>", null, env);
+      return new Response("✅ Успешно! Можете вернуться в Telegram.");
+    }
+
+    // Если всё еще CLIENT_SECRET_FAIL, выводим детали для отладки
+    return new Response(`❌ Ошибка обмена: ${JSON.stringify(data)}`);
+  } catch (e) {
+    return new Response(`❌ Ошибка сети: ${e.message}`);
+  }
+}
+
+async function uploadToMailru(stream, fileName, accessToken, folderPath, env) {
+  try {
+    // 1. Преобразуем поток в ArrayBuffer
+    const arrayBuffer = await new Response(stream).arrayBuffer();
+    const fileBuffer = new Uint8Array(arrayBuffer);
+
+    // 2. Получаем shard URL
+    const dispRes = await fetch(`https://cloud.mail.ru/api/v2/dispatcher?access_token=${accessToken}`);
+    const dispData = await dispRes.json();
+
+    if (!dispData.body?.upload?.[0]?.url) {
+      await logToAdmin(`❌ Mail.ru: не удалось получить shard: ${JSON.stringify(dispData)}`, env);
+      return false;
+    }
+    const uploadUrl = dispData.body.upload[0].url;
+
+    // 3. Загружаем файл на shard
+    const uploadRes = await fetch(`${uploadUrl}?cloud_domain=2&login=me`, {
+      method: "POST",
+      body: fileBuffer
+    });
+
+    const fileHash = await uploadRes.text();
+    if (!fileHash.trim()) {
+      await logToAdmin(`❌ Mail.ru: пустой hash после загрузки на shard`, env);
+      return false;
+    }
+
+    // 4. Регистрируем файл в облаке
+    const fullPath = `/${folderPath}/${fileName}`.replace(/\/+/g, '/');
+    const params = new URLSearchParams({
+      home: fullPath,
+      hash: fileHash.trim(),
+      size: fileBuffer.byteLength.toString(),
+      conflict: "rename",
+      api: "2"
+    });
+
+    const addRes = await fetch(`https://cloud.mail.ru/api/v2/file/add?access_token=${accessToken}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params
+    });
+
+    const addData = await addRes.json();
+    await logToAdmin(`📤 Mail.ru upload result: ${JSON.stringify(addData)}`, env);
+
+    return addData.status === 200;
+  } catch (e) {
+    await logToAdmin(`🔥 Mail.ru upload error: ${e.message}\nStack: ${e.stack}`, env);
+    return false;
+  }
+}
+
+async function createMailruFolder(folderName, accessToken, env) {
+  try {
+    const params = new URLSearchParams({
+      home: `/${folderName}`,
+      api: "2"
+    });
+
+    const res = await fetch(`https://cloud.mail.ru/api/v2/folder/add?access_token=${accessToken}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString()
+    });
+
+    const data = await res.json();
+    // Логируем результат, чтобы понять, пробита ли 403-я
+    await logToAdmin(`📁 Mailru Folder Create (${folderName}): ${JSON.stringify(data)}`, env);
+    
+    return data.status === 200 || data.status === 409; // 409 значит папка уже есть
+  } catch (e) {
+    await logToAdmin(`❌ Folder Create Error: ${e.message}`, env);
+    return false;
+  }
+}
+
+// Работа с WebDAV - создание папки
+async function createWebDAVFolder(folderName, userData) {
+  const url = `${userData.host}/${encodeURIComponent(folderName)}/`; // ← Обязательно с /
+  const auth = btoa(`${userData.user}:${userData.pass}`);
+
+  const res = await fetch(url, {
+    method: "MKCOL", // ← Ключевое изменение!
+    headers: {
+      "Authorization": `Basic ${auth}`
+    }
+  });
+
+  // 201 — создано, 405 — уже существует (иногда Mail.ru возвращает 405)
+  return res.status === 201 || res.status === 405;
+}
+
+// Работа с DropBox
+async function handleDropboxCallback(request, env) {
+  const url = new URL(request.url);
+  const code = url.searchParams.get("code");
+  const userId = url.searchParams.get("state"); // Не забудь прокинуть state в ссылку выше
+
+  const res = await fetch("https://api.dropboxapi.com/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code,
+      grant_type: "authorization_code",
+      client_id: env.DROPBOX_CLIENT_ID,
+      client_secret: env.DROPBOX_CLIENT_SECRET,
+      redirect_uri: `https://${url.hostname}/auth/dropbox/callback`
+    })
+  });
+
+  const data = await res.json();
+  if (data.access_token) {
+    await env.USER_DB.put(`user:${userId}`, JSON.stringify({
+      provider: "dropbox",
+      access_token: data.access_token,
+      refresh_token: data.account_id // У Dropbox свои нюансы с рефрешем, для начала хватит этого
+    }));
+    await sendMessage(userId, "🎉 <b>Dropbox успешно подключен!</b>", null, env);
+    return new Response("OK! Go back to Telegram.");
+  }
+  return new Response("Error", { status: 400 });
+}
+
+async function uploadToDropbox(stream, fileName, accessToken, folderPath = "") {
+  const path = `/${folderPath}/${fileName}`.replace(/\/+/g, '/');
+  const arg = {
+    path: path,
+    mode: "add",
+    autorename: true,
+    mute: false
+  };
+
+  const res = await fetch("https://content.dropboxapi.com/2/files/upload", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${accessToken}`,
+      "Dropbox-API-Arg": JSON.stringify(arg),
+      "Content-Type": "application/octet-stream"
+    },
+    body: stream // Dropbox отлично принимает поток напрямую!
+  });
+
+  return res.ok;
+}
+
+async function listDropboxFolders(token) {
+  try {
+    const res = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        path: "", // Пустое значение для корня Full Dropbox
+        recursive: false,
+        include_media_info: false,
+        include_deleted: false
+      })
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json();
+      console.error("Dropbox list error:", errorData);
+      return [];
+    }
+
+    const data = await res.json();
+    // Фильтруем только записи с тегом "folder"
+    return (data.entries || [])
+      .filter(item => item[".tag"] === "folder")
+      .map(item => ({ 
+        id: item.name, // Для Dropbox используем имя как ID
+        name: item.name 
+      }));
+  } catch (e) {
+    console.error("Dropbox fetch error:", e);
+    return [];
+  }
+}
+
+async function createDropboxFolder(folderName, token) {
+  try {
+    const res = await fetch("https://api.dropboxapi.com/2/files/create_folder_v2", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        path: `/${folderName}`,
+        autorename: false
+      })
+    });
+    
+    const data = await res.json();
+    // Если папка уже есть, Dropbox вернет ошибку, проверим это
+    return res.status === 200 || data?.error_summary?.includes("path_already_exists");
+  } catch (e) {
+    return false;
+  }
 }
