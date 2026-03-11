@@ -1,18 +1,21 @@
 /* 🗄 Telegram Storage Bot "Хранилка" by Leshiy
-Личный Telegram-бот для автоматической загрузки фото и видео на домашний FTP/SFTP/WEBDAV-сервер. 
-Бот поддерживает сохранение исходных имен файлов и автоматическую сортировку по папкам пользователей.
+Telegram-бот для автоматической загрузки фото и видео в облачное хранилище с реферальной системой доступа. 
 
-✨ Основные функции
-Универсальность: Поддержка классического FTP, защищенного SFTP и облачного WebDAV (Google, Яндекс.Диск, Облако Mail.Ru и др.).
+✨ Основные функции: Автоматическая загрузка фото и видео на облачные платформы (Google, Яндекс.Диск, Облако Mail.Ru WebDAV и др.) 
+прямо через телеграмм. Возможность предоставления доступа к Вашему хранилищу друзьям и близким просто отправив им реферальную ссылку.
+Универсальность: Поддержка облачного WebDAV (Google, Яндекс.Диск, Облако Mail.Ru и др.).
 Умное именование: Сохраняет исходные имена для файлов без сжатия и генерирует имена по дате/времени для сжатых фото/видео.
 Поддержка WEBM: Возможность сохранять видеофайлы в современных форматах без потери качества.
 Диагностика: Команда /debug для проверки статуса подключения к хранилищу в реальном времени.
 */
 // Глобальные константы
-const version = "v2.1.4"; // актуальная версия
+const version = "v2.1.5"; // актуальная версия
 
+// ----------------------------------------------------
+// ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
+// ----------------------------------------------------
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const hostname = url.hostname;
 
@@ -64,12 +67,13 @@ export default {
     
         // Сначала проверяем кнопки (Callback)
         if (update.callback_query) {
-          return await handleCallbackQuery(update.callback_query, env);
+          await handleCallbackQuery(update.callback_query, env, ctx);
+          return new Response("OK"); // ← один раз, в fetch
         }
     
         // Потом проверяем сообщения и файлы
         if (update.message || update.edited_message) {
-          return await handleTelegramUpdate(update, env, hostname);
+          return await handleTelegramUpdate(update, env, hostname, ctx);
         }
       } catch (e) {
         console.error("Критическая ошибка:", e);
@@ -82,12 +86,7 @@ export default {
   }
 };
 
-async function handleTelegramUpdate(update, env, hostname) {
-  // --- ОБРАБОТКА НАЖАТИЙ (CALLBACK) ---
-  if (update.callback_query) {
-    return await handleCallbackQuery(update.callback_query, env);
-  }
-
+async function handleTelegramUpdate(update, env, hostname, ctx) {
   const msg = update.message || update.edited_message;
   if (!msg) return new Response("OK");
 
@@ -153,7 +152,7 @@ async function handleTelegramUpdate(update, env, hostname) {
       const report = `👤 Новый пользователь: ${msg.from.first_name || "ᅠ"}\n` +
                      `🆔 ID: <code>${userId}</code>\n` +
                      `📂 Статус: Ожидает подключения`;
-      await logToAdmin(report, env);
+      await logDebug(report, env);
     }
 
     // Формирование текста приветствия
@@ -264,6 +263,48 @@ async function handleTelegramUpdate(update, env, hostname) {
     return await sendMessage(chatId, msgText, { inline_keyboard: buttons }, env);
   }
 
+  // - КОМАНДА /SEARCH - 
+  if (text.startsWith("/search")) {
+    const query = text.replace(/^\/search\s*/i, '').trim();
+    if (!query) {
+      return await sendMessage(chatId, "🔎 Напиши, что искать: /search вечеринка 15 декабря", null, env);
+    }
+
+    const searchResult = await searchFilesByQuery(userId, query, env);
+
+    if (!searchResult.success) {
+      return await sendMessage(chatId, `❌ Ошибка поиска: ${searchResult.message}`, null, env);
+    }
+
+    if (searchResult.fileIds.length === 0) {
+      return await sendMessage(chatId, "❌ Ничего не найдено.", null, env);
+    }
+
+    // Сохраняем результат поиска в KV (для пагинации)
+    const searchKey = `search:${userId}:${Date.now()}`;
+    await env.USER_DB.put(searchKey, JSON.stringify({
+      query,
+      fileIds: searchResult.fileIds,
+      timestamp: Date.now()
+    }), { expirationTtl: 60 * 10 }); // 10 минут
+
+    // Отправляем первые 5 файлов
+    const firstFive = searchResult.fileIds.slice(0, 5);
+    let fileList = "";
+    for (const fileId of firstFive) {
+      const fileRow = await env.FILES_DB.prepare("SELECT fileName FROM files WHERE id = ?").bind(fileId).first();
+      if (fileRow) {
+        fileList += `📄 ${fileRow.fileName}\n`;
+      }
+    }
+
+    return await sendMessage(chatId, 
+      `🔍 Найдено ${searchResult.fileIds.length} файлов:\n\n${fileList}\n\n👉 Для просмотра всех результатов — нажми «Показать ещё»`,
+      { inline_keyboard: [[{ text: "➡️ Показать ещё", callback_data: `show_more_search:${searchKey}` }]] },
+      env
+    );
+  }
+
   // --- КОМАНДА /ADMIN ---
   if (text === "/admin" && isAdmin) {
     // 1. Получаем тех, кто уже авторизован (есть запись user:ID)
@@ -277,13 +318,32 @@ async function handleTelegramUpdate(update, env, hostname) {
     const allUniqueIds = [...new Set([...authIds, ...allowedIds])];
 
     const adminMsg = `⚙️ <b>Панель администратора</b>\n\n` +
-                     `✅ <b>Авторизованы (диск подключен):</b>\n` +
-                     (authIds.length > 0 ? authIds.map(id => `• <code>${id}</code>`).join("\n") : "—") +
-                     `\n\n🔑 <b>Разрешенные ID (ждут входа):</b>\n` +
-                     (allowedIds.length > 0 ? allowedIds.map(id => `• <code>${id}</code>`).join("\n") : "—") +
-                     `\n\n👤 <b>Всего охвачено:</b> ${allUniqueIds.length}`;
+                    `✅ <b>Авторизованы (диск подключен):</b>\n` +
+                    (authIds.length > 0 ? authIds.map(id => `• <code>${id}</code>`).join("\n") : "—") +
+                    `\n\n🔑 <b>Разрешенные ID (ждут входа):</b>\n` +
+                    (allowedIds.length > 0 ? allowedIds.map(id => `• <code>${id}</code>`).join("\n") : "—") +
+                    `\n\n👤 <b>Всего охвачено:</b> ${allUniqueIds.length}`;
 
-    return await sendMessage(chatId, adminMsg, null, env);
+    const adminKeyboard = {
+      inline_keyboard: [
+        [{ text: "🧠 Настройки ИИ", callback_data: "open_ai_settings" }]
+  ]
+};
+
+return await sendMessage(chatId, adminMsg, adminKeyboard, env);
+  }
+
+  if (text === "/ai_settings" && isAdmin) {
+    const serviceType = "TEXT_TO_TEXT";
+    const service = AI_MODEL_MENU_CONFIG[serviceType];
+    if (!service) return await sendMessage(chatId, "❌ Настройки ИИ недоступны.", null, env);
+  
+    const currentModelKey = await env.USER_DB.get(service.kvKey) || Object.keys(service.models)[0];
+    const buttons = Object.entries(service.models).map(([key, name]) => [
+      { text: (key === currentModelKey ? "✅ " : "") + name, callback_data: `set_ai_model:${serviceType}:${key}` }
+    ]);
+  
+    return await sendMessage(chatId, `🧠 Выберите модель для семантического поиска:`, { inline_keyboard: buttons }, env);
   }
 
   if (text.startsWith("/add") && isAdmin) {
@@ -363,6 +423,8 @@ async function handleTelegramUpdate(update, env, hostname) {
       }
 
       const { stream } = await getFileStream(fileObj.file_id, env);
+      const fileResponse = await getFileStream(fileObj.file_id, env);
+      const arrayBuffer = await new Response(fileResponse.stream).arrayBuffer();
       let success = false;
 
       if (userData.provider === "yandex") {
@@ -386,13 +448,96 @@ async function handleTelegramUpdate(update, env, hostname) {
       }
 
       if (success) {
-        return await sendMessage(chatId, `✅ Файл <b>${fileName}</b> сохранен в ${userData.provider}!`, null, env);
+        // Сразу отвечаем
+        const response = await sendMessage(chatId, `✅ Файл <b>${fileName}</b> сохранен!`, null, env);
+        // Определяем тип для базы
+        const fType = isPhoto ? "photo" : isVideo ? "video" : isAudio ? "audio" : isVoice ? "voice" : "document";
+        // А запись — в фоне
+        ctx.waitUntil(
+          (async () => {
+            try {
+              await env.FILES_DB.prepare(
+                "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
+              ).bind(
+                String(userId), 
+                fileName, 
+                fileObj.file_id, 
+                fType, 
+                userData.provider, 
+                userData.folderId || "Root", 
+                Date.now()
+              ).run();
+            } catch (e) {
+              await logDebug(`⚠️ D1 write error: ${e.message}`, env);
+            }
+          })()
+          );
+        // Фоновая генерация описания через Gemini Vision
+        ctx.waitUntil(
+          (async () => {
+            try {
+              // Только для фото/видео, где можно применить Vision
+              // Фоновая генерация описания (если файл — фото или видео)
+              if (fType === "photo" || fType === "video") {
+                ctx.waitUntil(
+                  (async () => {
+                    try {
+                      // Читаем поток в ArrayBuffer
+                      const arrayBuffer = await new Response(stream).arrayBuffer();
+
+                      // Генерируем описание
+                      const description = await callGeminiVision(
+                        AI_MODELS.IMAGE_TO_TEXT_GEMINI,
+                        arrayBuffer,
+                        env
+                      );
+
+                      // Обновляем запись в D1
+                      const updateSql = `
+                        UPDATE files SET ai_description = ? WHERE userId = ? AND fileName = ?
+                      `;
+                      await env.FILES_DB.prepare(updateSql)
+                        .bind(description, String(userId), fileName)
+                        .run();
+
+                      console.log(`✅ Description generated for ${fileName}`);
+
+                    } catch (e) {
+                      console.error("AI description error:", e);
+                      await logDebug(`⚠️ Ошибка генерации описания: ${e.message}`, env);
+                    }
+                  })()
+                );
+              }
+            } catch (e) {
+              console.error("AI description error:", e);
+              await logDebug(`⚠️ Ошибка генерации описания: ${e.message}`, env);
+            }
+          })()
+        );
+        return response;
       } else {
         return await sendMessage(chatId, "❌ Ошибка при загрузке. Проверьте токены или место на диске.", null, env);
       }
     } catch (e) {
       return await sendMessage(chatId, `❌ Ошибка: ${e.message}`, null, env);
     }
+  }
+
+  if (text.trim() && !text.startsWith("/") && userData) {
+    // Пользователь подключён → отвечаем через ИИ
+    try {
+      const modelConfig = await loadActiveConfig('TEXT_TO_TEXT', env);
+      await logDebug(`💬 Запрос к ИИ: "${text.substring(0, 50)}..." через <code>${modelConfig.MODEL}</code>`, env);
+  
+      const responseText = await modelConfig.FUNCTION(text, modelConfig, env);
+      const safeText = responseText.substring(0, 4000);
+      await sendMessage(chatId, safeText, null, env);
+    } catch (e) {
+      await logDebug(`❌ Ошибка ИИ: ${e.message}`, env);
+      await sendMessage(chatId, `❌ ИИ не отвечает. Подробности в /debug.`, null, env);
+    }
+    return new Response("OK");
   }
 
   return new Response("OK");
@@ -445,7 +590,7 @@ function getStartKeyboard(userId, hostname, env, inviteData = null) {
   return { inline_keyboard: keyboard };
 }
 
-async function handleCallbackQuery(query, env) {
+async function handleCallbackQuery(query, env, ctx) {
   // 1. Сразу гасим часики на кнопке
   await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/answerCallbackQuery`, {
     method: "POST",
@@ -466,11 +611,34 @@ async function handleCallbackQuery(query, env) {
     const userData = await env.USER_DB.get(`user:${targetUserId}`, { type: "json" });
     if (!userData) return new Response("OK");
 
+    if (action === "show_more_search") {
+      const searchKey = parts[1];
+      const searchState = await env.USER_DB.get(searchKey, { type: "json" });
+      if (!searchState) {
+        return await sendMessage(chatId, "❌ Результат поиска устарел или не найден.", null, env);
+      }
+    
+      const remainingIds = searchState.fileIds.slice(5); // Пропускаем первые 5
+      if (remainingIds.length === 0) {
+        return await sendMessage(chatId, "✅ Все файлы уже показаны.", null, env);
+      }
+    
+      let fileList = "";
+      for (const fileId of remainingIds) {
+        const fileRow = await env.FILES_DB.prepare("SELECT fileName FROM files WHERE id = ?").bind(fileId).first();
+        if (fileRow) {
+          fileList += `📄 ${fileRow.fileName}\n`;
+        }
+      }
+      return await sendMessage(chatId, `✅ Остальные файлы:\n\n${fileList}`, null, env);
+    }
+
     if (action === "manual_folder") {
       await env.USER_DB.put(`state:${userId}`, "wait_manual_folder");
       await sendMessage(chatId, "🔤 Напиши название папки (например: <code>Storage</code>):", null, env);
       return new Response("OK");
     }
+
     if (action === "create_folder") {
       let finalId;
       let success = false;
@@ -499,6 +667,53 @@ async function handleCallbackQuery(query, env) {
       await env.USER_DB.put(`user:${targetUserId}`, JSON.stringify(userData));
       await sendMessage(chatId, `📂 Папка выбрана: <b>${folderIdOrName}</b>`, null, env);
     }
+
+    if (action === "set_ai_model") {
+      const serviceType = parts[1];
+      const modelKey = parts[2];
+    
+      // Проверяем, что тип сервиса и модель существуют
+      if (!SERVICE_TYPE_MAP[serviceType] || !AI_MODELS[modelKey]) {
+        await sendMessage(chatId, "❌ Неверный тип или модель.", null, env);
+        return new Response("OK");
+      }
+    
+      // Сохраняем выбранную модель в KV
+      const kvKey = SERVICE_TYPE_MAP[serviceType].kvKey;
+      await env.USER_DB.put(kvKey, modelKey);
+      await logDebug(`⚙️ Установлена модель: <code>${kvKey}</code> = <code>${modelKey}</code>`, env);
+    
+      // Подтверждаем пользователю
+      await sendMessage(chatId, `✅ Модель для ${serviceType} успешно изменена на: ${modelKey}`, null, env);
+    
+      // Обновляем меню
+      const updatedService = AI_MODEL_MENU_CONFIG[serviceType];
+      const currentModelKey = modelKey;
+      const buttons = Object.entries(updatedService.models).map(([key, name]) => [
+        {
+          text: (key === currentModelKey ? "✅ " : "") + name,
+          callback_data: `set_ai_model:${serviceType}:${key}`
+        }
+      ]);
+    
+      // Отправляем обновлённое меню
+      await sendMessage(chatId, `🧠 Выберите модель для ${serviceType}:`, { inline_keyboard: buttons }, env);
+    }
+
+    if (action === "open_ai_settings") {
+      // Повтори логику из /ai_settings
+      const serviceType = "TEXT_TO_TEXT";
+      const service = AI_MODEL_MENU_CONFIG[serviceType];
+      if (!service) return await sendMessage(chatId, "❌ Настройки ИИ недоступны.", null, env);
+    
+      const currentModelKey = await env.USER_DB.get(service.kvKey) || Object.keys(service.models)[0];
+      const buttons = Object.entries(service.models).map(([key, name]) => [
+        { text: (key === currentModelKey ? "✅ " : "") + name, callback_data: `set_ai_model:${serviceType}:${key}` }
+      ]);
+    
+      return await sendMessage(chatId, `🧠 Выберите модель для семантического поиска:`, { inline_keyboard: buttons }, env);
+    }
+
     if (action === "ask_ref_url") {
       // Если рефа нет, просто шлем инструкцию и просим прислать ссылку текстом
       const instruction = `📥 <b>Как подключить хранилку друга:</b>\n\n` +
@@ -517,6 +732,7 @@ async function handleCallbackQuery(query, env) {
         null, env
       );
     }
+
     if (action === "ask_custom_server_info") {
       const customServerGuide = 
         `📁 <b>Подключение своего сервера</b>\n\n` +
@@ -534,11 +750,12 @@ async function handleCallbackQuery(query, env) {
         ]] 
       }, env);
     }
+
     if (action === "ask_custom_server") {
       await env.USER_DB.put(`state:${userId}`, "wait_webdav_url");
       return await sendMessage(chatId, "🌐 <b>Подключение своего сервера</b>\n\nПришли ссылку в формате:\n<code>https://user:pass@webdav.yandex.ru</code>\n\n<i>После получения я удалю твое сообщение из чата в целях безопасности.</i>", null, env);
     }
-    
+
     if (action === "confirm_ref") {
       // parts[1] будет содержать токен инвайта: "confirm_ref:TOKEN"
       const token = parts[1];
@@ -555,10 +772,10 @@ async function handleCallbackQuery(query, env) {
           await env.USER_DB.put(`user:${userId}`, JSON.stringify(newUserContext));
           
           await sendMessage(chatId, `🤝 <b>Связь установлена!</b>\nТеперь ты используешь облако друга (${invite.provider}).`, null, env);
-          await logToAdmin(`✅ Юзер <code>${userId}</code> подтвердил подключение к <code>${invite.inviterId}</code>`, env);
+          await logDebug(`✅ Юзер <code>${userId}</code> подтвердил подключение к <code>${invite.inviterId}</code>`, env);
           
           // Обновляем меню /start
-          return await handleTelegramUpdate({ message: { chat: { id: chatId }, from: { id: userId }, text: "/start" } }, env, "hostname_placeholder");
+          return await handleTelegramUpdate({ message: { chat: { id: chatId }, from: { id: userId }, text: "/start" } }, env, "hostname_placeholder", ctx);
         }
       } else {
         return await sendMessage(chatId, "❌ Ссылка просрочена или неверна.", null, env);
@@ -567,7 +784,7 @@ async function handleCallbackQuery(query, env) {
   } catch (e) {
     await sendMessage(chatId, `❌ Ошибка: ${e.message}`, null, env);
   }
-  return new Response("OK");
+  return;
 }
 
 // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
@@ -600,8 +817,8 @@ async function getFileStream(fileId, env) {
   return { stream: res.body };
 }
 
-// ✅ logToAdmin - Сообщения только АДМИНУ в общем чате
-async function logToAdmin(text, env) {
+// ✅ logDebug - Сообщения только АДМИНУ в общем чате
+async function logDebug(text, env) {
   try {
     const adminCfg = await env.USER_DB.get("admin:config", { type: "json" });
     if (adminCfg && adminCfg.id) {
@@ -875,7 +1092,7 @@ async function uploadToMailru(stream, fileName, accessToken, folderPath, env) {
     const dispData = await dispRes.json();
 
     if (!dispData.body?.upload?.[0]?.url) {
-      await logToAdmin(`❌ Mail.ru: не удалось получить shard: ${JSON.stringify(dispData)}`, env);
+      await logDebug(`❌ Mail.ru: не удалось получить shard: ${JSON.stringify(dispData)}`, env);
       return false;
     }
     const uploadUrl = dispData.body.upload[0].url;
@@ -888,7 +1105,7 @@ async function uploadToMailru(stream, fileName, accessToken, folderPath, env) {
 
     const fileHash = await uploadRes.text();
     if (!fileHash.trim()) {
-      await logToAdmin(`❌ Mail.ru: пустой hash после загрузки на shard`, env);
+      await logDebug(`❌ Mail.ru: пустой hash после загрузки на shard`, env);
       return false;
     }
 
@@ -909,11 +1126,11 @@ async function uploadToMailru(stream, fileName, accessToken, folderPath, env) {
     });
 
     const addData = await addRes.json();
-    await logToAdmin(`📤 Mail.ru upload result: ${JSON.stringify(addData)}`, env);
+    await logDebug(`📤 Mail.ru upload result: ${JSON.stringify(addData)}`, env);
 
     return addData.status === 200;
   } catch (e) {
-    await logToAdmin(`🔥 Mail.ru upload error: ${e.message}\nStack: ${e.stack}`, env);
+    await logDebug(`🔥 Mail.ru upload error: ${e.message}\nStack: ${e.stack}`, env);
     return false;
   }
 }
@@ -933,11 +1150,11 @@ async function createMailruFolder(folderName, accessToken, env) {
 
     const data = await res.json();
     // Логируем результат, чтобы понять, пробита ли 403-я
-    await logToAdmin(`📁 Mailru Folder Create (${folderName}): ${JSON.stringify(data)}`, env);
+    await logDebug(`📁 Mailru Folder Create (${folderName}): ${JSON.stringify(data)}`, env);
     
     return data.status === 200 || data.status === 409; // 409 значит папка уже есть
   } catch (e) {
-    await logToAdmin(`❌ Folder Create Error: ${e.message}`, env);
+    await logDebug(`❌ Folder Create Error: ${e.message}`, env);
     return false;
   }
 }
@@ -1067,4 +1284,629 @@ async function createDropboxFolder(folderName, token) {
   } catch (e) {
     return false;
   }
+}
+
+async function searchFilesByQuery(userId, query, env) {
+  try {
+    // Получаем файлы
+    const filesResult = await env.FILES_DB.prepare(
+      "SELECT id, fileName, ai_description FROM files WHERE userId = ? ORDER BY timestamp DESC LIMIT 100"
+    ).bind(String(userId)).all();
+
+    if (!filesResult.success || filesResult.results.length === 0) {
+      return { success: false, message: "Нет файлов для поиска." };
+    }
+
+    const filesList = filesResult.results.map(f => 
+      `${f.id}. ${f.fileName} — ${f.ai_description || 'Без описания'}`
+    ).join("\n");
+
+    // Выбираем модель через KV
+    const modelConfig = await loadActiveConfig('TEXT_TO_TEXT', env);
+    
+    // Формируем промт
+    const prompt = `
+Ты — умный ассистант по поиску файлов. Пользователь ищет: "${query}"
+Вот список его файлов (ID. Имя — Описание):
+${filesList}
+
+Верни ТОЛЬКО номера подходящих файлов через запятую, например: 1,3,7
+Не пиши ничего кроме чисел и запятых.
+`;
+
+    // Вызываем ИИ
+    const responseText = await modelConfig.FUNCTION(prompt, modelConfig, env);
+    console.log("Gemini response:", responseText);
+
+    // Парсим
+    const relevantIds = responseText
+      .split(/[,，\s]+/)
+      .map(id => parseInt(id.trim()))
+      .filter(id => !isNaN(id) && id > 0);
+
+    return relevantIds.length > 0
+      ? { success: true, fileIds: relevantIds }
+      : { success: true, fileIds: [], message: "Ничего не найдено." };
+
+  } catch (e) {
+    console.error("Search error:", e);
+    return { success: false, message: "Ошибка ИИ: " + (e.message || "неизвестно") };
+  }
+}
+
+/**
+ * Преобразует ArrayBuffer в Base64 строку.
+ * @param {ArrayBuffer} buffer - Бинарные данные.
+ * @returns {string} Base64 строка.
+ */
+function arrayBufferToBase64(buffer) {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+// ✅ *** Gemini Chat API (для текстового общения) ***
+/**
+ * Вызывает модель Gemini через Google Generative Language API, используя унифицированную конфигурацию.
+ * @param {string} prompt - Текстовый промт.
+ * @param {Object} config - Объект активной конфигурации (AI_MODELS.TEXT_TO_TEXT_GEMINI).
+ * @param {Object} env - Объект окружения Cloudflare Worker, содержащий ключ.
+ * @param {string} userMessageText - Текущее сообщение пользователя. 
+ * @returns {Promise<string>} Сгенерированный текстовый ответ.
+ */
+async function callGeminiChat(prompt, config, env, userMessageText) {
+    
+  // --- ДИНАМИЧЕСКИЕ ПАРАМЕТРЫ ИЗ КОНФИГУРАЦИИ ---
+  const API_KEY_ENV_NAME = config.API_KEY; 
+  const API_KEY = env[API_KEY_ENV_NAME]; 
+  const BASE_URL = config.BASE_URL; 
+  const MODEL = config.MODEL; 
+  
+  // --- УНИФИЦИРОВАННАЯ СБОРКА URL ---
+  // Формат: BASE_URL/models/МОДЕЛЬ:generateContent?key=КЛЮЧ
+  const url = `${BASE_URL}/models/${MODEL}:generateContent?key=${API_KEY}`;
+  // ------------------------------------
+
+  if (!API_KEY) {
+      throw new Error(`GemINI API key is missing. Expected env var: ${API_KEY_ENV_NAME}`);
+  }
+
+  // 2. СИСТЕМНАЯ ИНСТРУКЦИЯ 
+  const systemInstructionText = `
+  🤖 ТЫ — многофункциональный AI-ассистент "Gemini AI" от Leshiy, отвечающий на русском языке.
+  Твоя задача — вести диалог, отвечать на вопросы, соблюдая контекст и используя информацию о твоих функциях.
+  
+  Твои ключевые функции:
+  ✨ Основные функции: Автоматическая загрузка фото и видео на облачные платформы (Google, Яндекс.Диск, Облако Mail.Ru WebDAV и др.) прямо через телеграмм. 
+  Возможность предоставления доступа к Вашему хранилищу друзьям и близким просто отправив им реферальную ссылку (команда /share) формирует ссылку с токеном.
+  Универсальность: Поддержка облачного хранилища с авторизацией OAuth (Google, Яндекс.Диск, DropBox) и WebDAV (Облако Mail.Ru и др.)
+  Умное именование: Сохраняет исходные имена для файлов без сжатия и генерирует имена по дате/времени для сжатых фото/видео/аудио/документов.
+  💬 Чат: Ты ведешь диалог, отвечаешь на вопросы, ❔ помогаешь по менюшкам и окнам и сохраняешь контекст беседы.
+  
+  Когда пользователь спрашивает, что ты умеешь, обязательно упомяни о своих навыках.
+  Ответы должны быть информативными и доброжелательными и по возможности компактными, старайся построить диалог понятно и не сильно рассуждая.
+`;
+  // 3. ТЕЛО ЗАПРОСА (ВОССТАНОВЛЕННАЯ РАБОЧАЯ ЛОГИКА)
+  const body = {
+      systemInstruction: {
+          parts: [{ text: systemInstructionText }]
+      },
+      contents: [{ role: "user", parts: [{ text: prompt }] }]
+  };
+
+  const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Gemini Chat API Error: ${response.status} - ${errorText.substring(0, 150)}...`);
+  }
+
+  const data = await response.json();
+  const textResult = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+  if (!textResult) { throw new Error(`Gemini Chat не вернул ответ. Причина: ${JSON.stringify(data.promptFeedback)}`); }
+
+  return textResult.trim();
+}
+
+// ✅ *** Gemini Vision (компьютерное зрение) - ИСПРАВЛЕНО ***
+/**
+ * Генерирует описание файла через Gemini Vision.
+ * @param {Object} config - Конфигурация модели (из AI_MODELS).
+ * @param {ArrayBuffer} imageBuffer - Буфер изображения.
+ * @param {Object} env - Окружение (с API ключом).
+ * @returns {Promise<string>} Описание файла.
+ */
+async function callGeminiVision(config, imageBuffer, env) {
+  const API_KEY_ENV_NAME = config.API_KEY;
+  const API_KEY = env[API_KEY_ENV_NAME];
+  const BASE_URL = config.BASE_URL;
+  const MODEL = config.MODEL;
+
+  if (!API_KEY) {
+    throw new Error(`Gemini API key is missing. Expected env var: ${API_KEY_ENV_NAME}`);
+  }
+
+  const imageBase64 = arrayBufferToBase64(imageBuffer);
+
+  const systemInstructionText = "РОЛЬ И ЯЗЫК: Действуй как 'Фотореставратор'. Общение СТРОГО на РУССКОМ языке. ЦЕЛЬ: Создать максимально детализированный, буквальный промпт для Image-to-Image генерации. Твой ответ должен быть только промптом, без приветствий и объяснений.";
+
+  const body = {
+    systemInstruction: { parts: [{ text: systemInstructionText }] },
+    contents: [{
+      parts: [
+        { text: "На основе присланного изображения, сгенерируй ОЧЕНЬ ПОДРОБНЫЙ, но не более 750 символов, точный и буквальный промпт на РУССКОМ языке для нейросети для генерации изображения. ТОЧНО ВОСПРОИЗВЕДИ сцену, но в высоком разрешении и цвете. Используй слово 'ребенок' вместо 'малыш' или 'младенец'. НЕ УПОМИНАЙ 'пустышка', если это возможно, или замени на нейтральный термин вроде 'аксессуар для рта'. Сохрани СТРОГО ту же КОМПОЗИЦИЮ и ракурс. Используй художественный стиль 'фотореалистичная иллюстрация' или 'картина' вместо 'фотография'. Добавь в конец промпта суффиксы для качества: 'высокая детализация, шедевр, студийное освещение'." },
+        { inlineData: { mimeType: 'image/jpeg', data: imageBase64 } }
+      ]
+    }],
+  };
+
+  const url = `${BASE_URL}/models/${MODEL}:generateContent?key=${API_KEY}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  const data = await response.json();
+  if (data.error) {
+    throw new Error(`Gemini API Error: ${data.error.message}`);
+  }
+
+  const textResult = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!textResult) {
+    throw new Error("Gemini не вернул промпт.");
+  }
+
+  return textResult.trim();
+}
+
+// ✅ *** Gemini Video Vision (видео аналитика) - ИСПРАВЛЕНО ***
+/**
+* Выполняет анализ видеоконтента (Video Captioning) с помощью Gemini 2.5 Flash.
+* @param {Object} config - Объект активной конфигурации (AI_MODELS.VIDEO_TO_ANALYSIS_GEMINI).
+* @param {ArrayBuffer} videoBuffer - Буфер видеофайла.
+* @param {string} mimeType - MIME-тип видео (напр., 'video/mp4').
+* @param {Object} env - Объект окружения, содержащий ключ.
+* @returns {Promise<string>} Сгенерированный текстовый анализ.
+*/
+async function callGeminiVideoVision(config, videoBuffer, mimeType, env) { 
+  
+  // --- ДИНАМИЧЕСКИЕ ПАРАМЕТРЫ ИЗ КОНФИГУРАЦИИ ---
+  const API_KEY_ENV_NAME = config.API_KEY; 
+  const API_KEY = env[API_KEY_ENV_NAME]; 
+  const BASE_URL = config.BASE_URL; 
+  const MODEL = config.MODEL; 
+  
+  const url = `${BASE_URL}/models/${MODEL}:generateContent`; 
+  // ------------------------------------
+
+  if (!API_KEY) {
+      throw new Error(`Gemini API key is missing. Expected env var: ${API_KEY_ENV_NAME}`);
+  }
+  
+  // ТРЕБУЕТСЯ КОНВЕРТАЦИЯ: Base64 для Gemini.
+  // P.S. Убедитесь, что arrayBufferToBase64 доступна
+  const videoBase64 = arrayBufferToBase64(videoBuffer); 
+
+  const systemInstructionText = "РОЛЬ: Действуй как 'Видеоаналитик'. Общение СТРОГО на РУССКОМ языке. ЦЕЛЬ: Предоставить подробный и точный анализ видеоконтента, включая ключевые действия, объекты и события. Твой ответ должен быть только анализом, без приветствий и объяснений.";
+  
+  const promptText = "Проанализируй видеоролик покадрово и аудиодорожку. Предоставь полное описание происходящего, включая распознавание действий, ключевых объектов и хронометраж. Отдельно опиши содержание аудиодорожки, включая точную транскрипцию и возможный контекст (цитаты, источники). Ответь только текстом анализа, используя четкую структуру";
+
+  const body = {
+      systemInstruction: { parts: [{ text: systemInstructionText }] }, 
+      contents: [{
+          parts: [
+              { text: promptText },
+              { inlineData: { mimeType: mimeType, data: videoBase64 } } // <-- Используем mimeType видео
+          ]
+      }],
+  };
+  
+  const response = await fetch(`${url}?key=${API_KEY}`, { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+  });
+  
+  const data = await response.json();
+  if (data.error) { throw new Error(`Gemini API Error: ${data.error.message}`); }
+  const textResult = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!textResult) { throw new Error("Gemini не вернул результат анализа видео."); }
+  return textResult.trim();
+}
+
+// ✅ *** Workers AI Chat API (для текстового общения с историей) ***
+async function callWorkersAIChat(prompt, config, env, userMessageText) {
+    const { AI } = env;
+    if (!AI) {
+        throw new Error("Workers AI binding 'AI' не настроен. Проверьте Cloudflare Dashboard.");
+    }
+
+    const MODEL_NAME = config.MODEL;
+    // --- УДАЛЯЕМ ЛИШНИЕ ПЕРЕМЕННЫЕ ИЗ-ЗА НОВОЙ ЛОГИКИ ПЕРЕХВАТА ---
+
+    // 1. ОПРЕДЕЛЕНИЕ СИСТЕМНОГО КОНТЕКСТА
+    // УДАЛЯЕМ ЛОГИКУ, КОТОРАЯ СТИМУЛИРУЕТ ТЕГИ <think>
+    const systemPromptText = `🤖 ТЫ — многофункциональный AI-ассистент "Gemini AI" от Leshiy, отвечающий на русском языке.
+Твоя задача — вести диалог, отвечать на вопросы, соблюдая контекст и используя информацию о твоих функциях.
+
+СТРОГОЕ ПРАВИЛО: НИКОГДА НЕ УПОМИНАЙ LLaMA, Meta AI или Austin.
+
+Твои ключевые функции:
+✨ Основные функции: Автоматическая загрузка фото и видео на облачные платформы (Google, Яндекс.Диск, Облако Mail.Ru WebDAV и др.) прямо через телеграмм. 
+Возможность предоставления доступа к Вашему хранилищу друзьям и близким просто отправив им реферальную ссылку (команда /share) формирует ссылку с токеном.
+Универсальность: Поддержка облачного хранилища с авторизацией OAuth (Google, Яндекс.Диск, DropBox) и WebDAV (Облако Mail.Ru и др.)
+Умное именование: Сохраняет исходные имена для файлов без сжатия и генерирует имена по дате/времени для сжатых фото/видео/аудио/документов.
+💬 Чат: Ты ведешь диалог, отвечаешь на вопросы, ❔ помогаешь по менюшкам и окнам и сохраняешь контекст беседы.
+
+Когда пользователь спрашивает, что ты умеешь, обязательно упомяни о своих навыках.
+Ответы должны быть информативными и доброжелательными и по возможности компактными, старайся построить диалог понятно и не сильно рассуждая.
+`.trim();
+
+    // 2. ФОРМИРОВАНИЕ ИСТОРИИ (messages) (Оставляем как есть, но используем 'system' для основного промпта)
+
+    // Инициализация массива с СИСТЕМНЫМ КОНТЕКСТОМ.
+    // Используем роль 'system' если модель её поддерживает (Qwen должна),  иначе оставим 'user'.
+    const messages = [
+        { role: 'system', content: systemPromptText },
+    ];
+
+    try {
+        // *** ДОБАВЛЯЕМ ЛИМИТ ТОКЕНОВ И ТЕМПЕРАТУРУ ***
+        const response = await AI.run(MODEL_NAME, { 
+            messages: messages,
+            stream: false, // Отключаем стриминг, чтобы избежать обрезки
+            max_tokens: 1024, // Увеличиваем лимит токенов для безопасности
+            temperature: 0.7 // Умеренная температура
+        });
+
+        if (!response || !response.response) {
+            throw new Error(`Workers AI не вернул ожидаемый ответ. Response: ${JSON.stringify(response)}`);
+        }
+
+        return response.response.trim(); // Возвращаем сырой, но полный ответ
+    } catch (e) {
+        console.error("Workers AI call failed:", e);
+        throw new Error(`Ошибка Workers AI: ${e.message}`);
+    }
+}
+
+// ✅ *** Workers AI Vision (Uform-Gen2 для генерации промпта из фото) - УНИФИЦИРОВАНО ***
+/**
+ * Генерирует детальный промпт для Stable Diffusion, используя изображение и текстовую инструкцию, через Workers AI (Uform).
+ * @param {Object} config - Объект активной конфигурации (AI_MODELS.IMAGE_TO_TEXT_WORKERS_AI).
+ * @param {ArrayBuffer} imageBuffer - Буфер изображения.
+ * @param {Object} env - Объект окружения, содержащий привязку AI.
+ * @returns {Promise<string>} Сгенерированный текстовый промпт.
+ */
+async function callWorkersAIVision(config, imageBuffer, env) { // <-- ИЗМЕНЕНА ПОДПИСЬ
+  const { AI } = env;
+  // --- УНИФИКАЦИЯ: Используем модель из конфигурации ---
+  const VISION_MODEL = config.MODEL; 
+  // ---------------------------------------------------
+
+  if (!AI) {
+      throw new Error("Workers AI binding 'AI' не настроен.");
+  }
+
+  // Здесь audioBuffer стал вторым аргументом, а promptText - третьим.
+  const imageBytes = [...new Uint8Array(imageBuffer)];
+
+  // Uform-Gen2 требует простого промпта. Мы используем эффективную инструкцию на английском.
+  const simplifiedPrompt = `Describe the attached image in full detail as a high-quality, atmospheric, long prompt (max 750 characters) for an image generation AI like Stable Diffusion or Midjourney. Focus on subject, style, lighting, and composition. The response must be ONLY in RUSSIAN, without any added commentary.`;
+
+  try {
+      const aiResponse = await AI.run(
+          VISION_MODEL,
+          {
+              prompt: simplifiedPrompt,
+              image: imageBytes
+          }
+      );
+
+      if (!aiResponse || !aiResponse.description) { // <-- Uform возвращает 'description'
+          throw new Error(`Vision API не вернул ожидаемый ответ. Response: ${JSON.stringify(aiResponse)}`);
+      }
+
+      return aiResponse.description.trim();
+  } catch (e) {
+      console.error("Workers AI Vision call failed:", e);
+      throw new Error(`VISION_FAIL: Ошибка Workers AI Vision: ${e.message}`);
+  }
+}
+
+// ✅ *** callBotHubTextChat - Обработчик для текстовых чат-запросов BotHub
+/**
+ * @description Отправляет запрос на генерацию текста через BotHub API.
+ * @param {string} prompt - Текстовый промт.
+ * @param {Object} config - Объект конфигурации модели (TEXT_TO_TEXT_BOTHUB).
+ * @param {string} messageText - Новое сообщение от пользователя.
+ * @param {Object} env - Объект окружения (включает DEBUG_ENABLED и ctx).
+ * @returns {Promise<string>} Сгенерированный текстовый ответ.
+ */
+async function callBotHubTextChat(prompt, config, env, messageText) {
+  // 1. ОПРЕДЕЛЕНИЕ СИСТЕМНОГО КОНТЕКСТА (ГЛОБАЛЬНАЯ КОНСТАНТА)
+  const SYSTEM_PROMPT = `
+🤖 ТЫ — многофункциональный AI-ассистент "Gemini AI" от Leshiy, отвечающий на русском языке.
+Твоя задача — вести диалог, отвечать на вопросы, соблюдая контекст и используя информацию о твоих функциях.
+
+Твои ключевые функции:
+✨ Основные функции: Автоматическая загрузка фото и видео на облачные платформы (Google, Яндекс.Диск, Облако Mail.Ru WebDAV и др.) прямо через телеграмм. 
+Возможность предоставления доступа к Вашему хранилищу друзьям и близким просто отправив им реферальную ссылку (команда /share) формирует ссылку с токеном.
+Универсальность: Поддержка облачного хранилища с авторизацией OAuth (Google, Яндекс.Диск, DropBox) и WebDAV (Облако Mail.Ru и др.)
+Умное именование: Сохраняет исходные имена для файлов без сжатия и генерирует имена по дате/времени для сжатых фото/видео/аудио/документов.
+💬 Чат: Ты ведешь диалог, отвечаешь на вопросы, ❔ помогаешь по менюшкам и окнам и сохраняешь контекст беседы.
+  
+Когда пользователь спрашивает, что ты умеешь, обязательно упомяни о своих навыках.
+Ответы должны быть информативными и доброжелательными и по возможности компактными, старайся построить диалог понятно и не сильно рассуждая.
+`.trim();
+  
+  const apiKey = env[config.API_KEY];
+  const baseUrl = config.BASE_URL;
+  const model = config.MODEL;
+  
+  // ПРОВЕРКА КЛЮЧА
+  if (!apiKey) {
+      throw new Error(`API Key для ${config.SERVICE} не настроен.`);
+  }
+
+  // 1. Формирование истории и промпта
+  const apiMessages = [];
+  
+  // Используем ГЛОБАЛЬНЫЙ ПРОМПТ для обучения бота
+  apiMessages.push({ "role": "system", "content": SYSTEM_PROMPT }); 
+  
+  apiMessages.push({
+      role: 'user',
+      content: messageText
+  });
+  
+  // 2. Формирование тела запроса
+  const body = {
+      model: model,
+      messages: apiMessages,
+      stream: false,
+      temperature: 0.7,
+      max_tokens: 4096,
+  };
+
+  const url = `${baseUrl}/chat/completions`;
+
+  // 3. Отправка запроса
+  const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+      const errorText = await response.text();
+      
+      throw new Error(`BOTHUB API error (Status ${response.status}): ${errorText}`);
+  }
+
+  // 4. Обработка ответа
+  const data = await response.json();
+  let responseText = '';
+
+  if (data.choices && data.choices.length > 0) {
+      responseText = data.choices[0].message.content.trim();
+  } 
+  
+  if (responseText) {
+      return responseText;
+  } else {
+      throw new Error(`BOTHUB API response error: Received empty content from model.`);
+  }
+}
+
+
+// --- ГЛОБАЛЬНАЯ КОНФИГУРАЦИЯ AI-СЕРВИСОВ (AI_MODELS) ---
+const AI_MODELS = {
+  // --- WORKERS AI (БЕСПЛАТНЫЕ, РАБОЧИЕ) ---
+
+  // ✅ [Текст в Текст]
+  TEXT_TO_TEXT_WORKERS_AI: { 
+      SERVICE: 'WORKERS_AI', 
+      FUNCTION: callWorkersAIChat, 
+      //MODEL: '@cf/google/gemma-2b-it-lora', // тупой ЛЛама
+      MODEL: '@cf/qwen/qwen2.5-coder-32b-instruct', // программерская
+      //MODEL: '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b', // думающая
+      //MODEL: '@cf/qwen/qwq-32b', // думающая
+      API_KEY: 'CLOUDFLARE_API_TOKEN', 
+      BASE_URL: 'AI_RUN' // Вызов через env.AI.run
+  },
+  // ✅ [Изображение в Текст (Видение)]
+  IMAGE_TO_TEXT_WORKERS_AI: { 
+    SERVICE: 'WORKERS_AI', 
+    FUNCTION: callWorkersAIVision,
+    MODEL: '@cf/unum/uform-gen2-qwen-500m', 
+    API_KEY: 'CLOUDFLARE_API_TOKEN', 
+    BASE_URL: 'AI_RUN'
+  },
+
+  // --- СЕРВИСЫ GOOGLE ---
+
+  // --- GEMINI ---
+  // ✅ Прекрасно работает текстовый чат
+  TEXT_TO_TEXT_GEMINI: { 
+    SERVICE: 'GEMINI', 
+    FUNCTION: callGeminiChat, 
+    MODEL: 'gemini-2.5-flash', 
+    API_KEY: 'GEMINI_API_KEY', 
+    BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
+  },
+  // ✅ Работает распознавание голоса
+  AUDIO_TO_TEXT_GEMINI: { 
+    SERVICE: 'GEMINI', 
+    //FUNCTION: callGeminiSpeechToText,
+    MODEL: 'gemini-2.5-flash', 
+    API_KEY: 'GEMINI_API_KEY', 
+    BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
+  },
+  // ✅ Работает распознавание голоса
+  VIDEO_TO_TEXT_GEMINI: { 
+    SERVICE: 'GEMINI', 
+    //FUNCTION: callGeminiSpeechToText,
+    MODEL: 'gemini-2.5-flash', 
+    API_KEY: 'GEMINI_API_KEY', 
+    BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
+  },
+  // ✅ Работает распознавание фото
+  IMAGE_TO_TEXT_GEMINI: { 
+    SERVICE: 'GEMINI', 
+    FUNCTION: callGeminiVision, 
+    //MODEL: 'gemini-2.0-flash', 
+    MODEL: 'gemini-2.5-flash', 
+    API_KEY: 'GEMINI_API_KEY', 
+    BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
+  },
+  // ✅ Работает распознавание видео
+  VIDEO_TO_ANALYSIS_GEMINI: { 
+    SERVICE: 'GEMINI', 
+    FUNCTION: callGeminiVideoVision, 
+    MODEL: 'gemini-2.5-flash', 
+    API_KEY: 'GEMINI_API_KEY', 
+    BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
+  },
+
+  // --- BOTHUB (ПЛАТНЫЕ, ТЕСТОВЫЕ) ---
+
+  // --- BOTHUB TEXT --- (БЕСПЛАТНО)
+  TEXT_TO_TEXT_BOTHUB: { 
+    SERVICE: 'BOTHUB', 
+    FUNCTION: callBotHubTextChat, 
+    //MODEL: 'deepseek-chat-v3-0324:free', 
+    //MODEL: 'gpt-oss-20b:free',   
+    MODEL: 'gemini-2.5-flash',       
+    API_KEY: 'BOTHUB_API_KEY', 
+    //BASE_URL: 'https://bothub.chat/api/v2/openai/v1/chat/completions'
+    BASE_URL: 'https://bothub.chat/api/v2/openai/v1'
+},
+  // --- BOTHUB WHISPER-1 --- (ПЛАТНО)
+  AUDIO_TO_TEXT_BOTHUB: { 
+    SERVICE: 'BOTHUB', 
+    //FUNCTION: callBotHubAudioToText,
+    MODEL: 'whisper-1', 
+    API_KEY: 'BOTHUB_API_KEY', 
+    BASE_URL: 'https://bothub.chat/api/v2/openai/v1'
+  },
+  // --- BOTHUB VISION --- (ПЛАТНО и нестабильно)
+  IMAGE_TO_TEXT_BOTHUB: { 
+    SERVICE: 'BOTHUB', 
+    //FUNCTION: callBotHubVisionChat, 
+    //MODEL: 'gemini-2.0-flash-exp:free', 
+    //MODEL: 'gpt-4o',   
+    MODEL: 'gemini-2.5-flash',         
+    API_KEY: 'BOTHUB_API_KEY', 
+    //BASE_URL: 'https://bothub.chat/api/v2/openai/v1/chat/completions'
+    BASE_URL: 'https://bothub.chat/api/v2/openai/v1'
+  },
+  // --- BOTHUB WHISPER-1 --- (ПЛАТНО)
+  VIDEO_TO_TEXT_BOTHUB: { 
+    SERVICE: 'BOTHUB', 
+    //FUNCTION: callBotHubAudioToText,
+    MODEL: 'whisper-1', 
+    API_KEY: 'BOTHUB_API_KEY', 
+    BASE_URL: 'https://bothub.chat/api/v2/openai/v1'
+  },
+  // --- BOTHUB VIDEO VISION --- (ПЛАТНО)
+  VIDEO_TO_ANALYSIS_BOTHUB: { 
+    SERVICE: 'BOTHUB', 
+    //FUNCTION: callBothubVideoVision, 
+    MODEL: 'gemini-2.5-flash',         
+    API_KEY: 'BOTHUB_API_KEY', 
+    //BASE_URL: 'https://bothub.chat/api/v2/openai/v1/chat/completions'
+    BASE_URL: 'https://bothub.chat/api/v2/openai/v1'
+  },
+  /* --- DEEPSEEK --- (ПЛАТНО $0.028 минимум)
+    TEXT_TO_TEXT_DEEPSEEK: { 
+        SERVICE: 'DEEPSEEK', 
+        FUNCTION: callDeepSeekChat, 
+        MODEL: 'deepseek-chat', 
+        API_KEY: 'DEEPSEEK_API_KEY', 
+        BASE_URL: 'https://api.deepseek.com/v1'
+    },  */  
+};
+// --- КАРТА СЕРВИСОВ ДЛЯ АДМИН-МЕНЮ ---
+const SERVICE_TYPE_MAP = {
+  'TEXT_TO_TEXT': { name: '✍️ Text → Text', kvKey: 'ACTIVE_MODEL_TEXT_TO_TEXT' },
+  'AUDIO_TO_TEXT': { name: '🎤 Audio → Text', kvKey: 'ACTIVE_MODEL_AUDIO_TO_TEXT' },
+  'VIDEO_TO_TEXT': { name: '🎧 Video → Text', kvKey: 'ACTIVE_MODEL_VIDEO_TO_TEXT' },
+  'IMAGE_TO_TEXT': { name: '👁️ Image → Text', kvKey: 'ACTIVE_MODEL_IMAGE_TO_TEXT' },
+  'VIDEO_TO_ANALYSIS' : {name: '👀 Video → Analysis', kvKey: 'ACTIVE_MODEL_VIDEO_TO_ANALYSIS' }
+};
+// !!! ВАЖНО: Определите эту константу после AI_MODELS !!!
+const AI_MODEL_MENU_CONFIG = generateModelMenuConfig(AI_MODELS);
+
+/**
+ * @description Генерирует полную карту AI-сервисов для меню, группируя модели по типу.
+ * @param {Object} AI_MODELS - Глобальный объект AI-моделей.
+ * @returns {Object} Структура для меню.
+ */
+function generateModelMenuConfig(AI_MODELS) {
+  const config = {};
+
+  for (const [modelKey, modelDetails] of Object.entries(AI_MODELS)) {
+      // Извлекаем тип сервиса (например, 'TEXT_TO_TEXT')
+      const parts = modelKey.split('_');
+      // Собираем первые три части: TEXT_TO_TEXT, IMAGE_TO_IMAGE и т.д.
+      const serviceType = parts.slice(0, 3).join('_');
+
+      if (!SERVICE_TYPE_MAP[serviceType]) continue; // Пропускаем неизвестные типы
+
+      if (!config[serviceType]) {
+          config[serviceType] = {
+              name: SERVICE_TYPE_MAP[serviceType].name,
+              kvKey: SERVICE_TYPE_MAP[serviceType].kvKey,
+              models: {}
+          };
+      }
+
+      // Формируем пользовательское название модели
+      let friendlyName = `${modelDetails.SERVICE}: ${modelDetails.MODEL}`;
+      
+      config[serviceType].models[modelKey] = friendlyName;
+  }
+  return config;
+  // Можно хранить выбор в KV, но пока — жёстко зададим Gemini как основной
+  //return AI_MODELS.TEXT_TO_TEXT_GEMINI;
+}
+
+/**
+ * Загружает активную AI-модель из KV по типу сервиса.
+ * @param {string} serviceType - Тип сервиса (например, 'TEXT_TO_TEXT').
+ * @param {Object} env - Окружение с доступом к KV (`USER_DB`).
+ * @returns {Promise<Object>} Конфигурация модели из AI_MODELS.
+ */
+async function loadActiveConfig(serviceType, env) {
+  const serviceConfig = SERVICE_TYPE_MAP[serviceType];
+  if (!serviceConfig) {
+    throw new Error(`Неизвестный тип сервиса: ${serviceType}`);
+  }
+
+  const kvKey = serviceConfig.kvKey;
+  const defaultModelKey = Object.keys(AI_MODEL_MENU_CONFIG[serviceType]?.models || AI_MODELS).find(
+    key => key.startsWith(serviceType)
+  ) || Object.keys(AI_MODELS).find(key => key.startsWith(serviceType));
+
+  const activeModelKey = await env.USER_DB.get(kvKey) || defaultModelKey;
+  const modelConfig = AI_MODELS[activeModelKey];
+  if (!modelConfig) {
+    throw new Error(`Модель ${activeModelKey} не найдена в AI_MODELS`);
+  }
+
+  await logDebug(`🧠 Активная модель для ${serviceType}: <code>${activeModelKey}</code>`, env);
+  return modelConfig;
 }
