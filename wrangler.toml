@@ -2,10 +2,32 @@ name = "leshiy-storage-bot"
 main = "worker.js"
 compatibility_date = "2024-03-12"
 
-kv_namespaces = [
-  { binding = "USER_DB", id = "e64956db59994e7285cad1bf7ef015f1" }
-]
+# Переменные окружения (заглушки)
+# Секреты нужно настраивать в панели Cloudflare, а не здесь
+[vars]
+ADMIN_ID = ""
+BOT_USERNAME = ""
 
+[secrets]
+# Здесь Wrangler будет искать СЕКРЕТЫ, которые вы настроили
+# Вам не нужно указывать их значения здесь, только имена.
+# API-ключи из секретных переменных
+TELEGRAM_TOKEN = ""
+GEMINI_API_KEY = ""
+YANDEX_CLIENT_ID = ""
+YANDEX_CLIENT_SECRET = ""
+GOOGLE_CLIENT_ID = ""
+GOOGLE_CLIENT_SECRET = ""
+DROPBOX_CLIENT_ID = ""
+DROPBOX_CLIENT_SECRET = ""
+BOTHUB_API_KEY = ""
+
+# [[kv_namespaces]] - Здесь Привязки KV
+[[kv_namespaces]]
+binding = "USER_DB"
+id = "e64956db59994e7285cad1bf7ef015f1"
+
+# [[d1_databases]] - Здесь Привязки D1
 [[d1_databases]]
 binding = "FILES_DB"
 database_name = "files_db"
