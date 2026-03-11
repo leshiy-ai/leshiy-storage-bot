@@ -10,7 +10,7 @@ Telegram-бот для автоматической загрузки фото и
 Скрытая функция: Команда /search для поиска и возможность достать файлы с хранилки.
 */
 // Глобальные константы
-const version = "v2.3.3 от 11.01.2026"; // актуальная версия
+const version = "v2.3.4 от 11.01.2026"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -1202,223 +1202,12 @@ async function handleVK(body, env, hostname, ctx) {
 
         ctx.waitUntil((async () => {
           for (const attach of message.attachments) {
-            try {
-              let url = "", name = "", fType = attach.type;
-              let dbFileType = fType;
-              let mimeType = ""; // Нужно для Gemini
-
-              const now = new Date();
-              const dateStr = now.getFullYear() + '-' + 
-                              String(now.getMonth() + 1).padStart(2, '0') + '-' + 
-                              String(now.getDate()).padStart(2, '0') + '_' + 
-                              String(now.getHours()).padStart(2, '0') + '-' + 
-                              String(now.getMinutes()).padStart(2, '0') + '-' + 
-                              String(now.getSeconds()).padStart(2, '0');
-
-              // --- 1. ЛОГИКА ОПРЕДЕЛЕНИЯ ТИПА (КАК В TG ВЕРСИИ) ---
-              if (fType === "photo") {
-                url = attach.photo.sizes.sort((a,b) => b.width - a.width)[0].url;
-                name = `Photo_${dateStr}.jpg`;
-                mimeType = "image/jpeg";
-              } 
-              else if (fType === "doc") {
-                url = attach.doc.url;
-                name = attach.doc.title || `Doc_${dateStr}.${attach.doc.ext}`;
-                dbFileType = "document";
-                // Определяем MIME для AI
-                const ext = (attach.doc.ext || "").toLowerCase();
-                if (ext === "pdf") mimeType = "application/pdf";
-                else if (["jpg","jpeg","png"].includes(ext)) mimeType = "image/jpeg";
-                else mimeType = "text/plain";
-              }
-              else if (fType === "audio") {
-                url = attach.audio.url;
-                const artist = (attach.audio.artist || "Unknown").replace(/[\\/:*?"<>|]/g, "");
-                const title = (attach.audio.title || "Track").replace(/[\\/:*?"<>|]/g, "");
-                name = `${artist} - ${title}.mp3`;
-                dbFileType = "audio";
-                mimeType = "audio/mpeg";
-              } 
-              else if (fType === "video") {
-                const v = attach.video;
-                let vFiles = v.files || {};
-                
-                // 1. Стандартный поиск
-                url = vFiles.mp4_1080 || vFiles.mp4_720 || vFiles.mp4_480 || vFiles.mp4_360 || vFiles.src;
-
-                // 2. Если API молчит, идем ПАРСИТЬ плеер
-                if (!url && v.player) {
-                  try {
-                    const playerRes = await fetch(v.player, {
-                      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-                    });
-                    
-                    if (playerRes.ok) {
-                      const html = await playerRes.text();
-                      // Ищем ссылки в объекте видеоконфига внутри HTML
-                      const videoMatch = html.match(/https?:\/\/[^\s"'<>]+?\.mp4[^\s"'<>]*\?[\w=&%-]+/g);
-                      
-                      if (videoMatch) {
-                        // Берем первую попавшуюся ссылку (обычно это среднее качество)
-                        url = videoMatch[0].replace(/\\/g, ''); 
-                        console.log("Found link via Player Parsing:", url);
-                      } else {
-                        // Попытка №2: поиск через JSON-подобную структуру
-                        const flashVarsMatch = html.match(/\"url(\d+)\"\:\"(https?.*?)\"/g);
-                        if (flashVarsMatch) {
-                          // Берем самое высокое качество из найденных
-                          const lastMatch = flashVarsMatch[flashVarsMatch.length - 1];
-                          url = lastMatch.split('":"')[1].replace('"', '').replace(/\\/g, '');
-                        }
-                      }
-                    }
-                  } catch (e) { console.error("Player parsing failed", e); }
-                }
-
-                // 3. Если всё еще нет - вот теперь мы реально бессильны (приватное видео)
-                if (!url) {
-                  await sendVKMessage(chatId, `⚠️ ВК запрещает использовать свой плеер. Отправь пожалуйста непожатое видео как документ.`, env);
-                  continue; 
-                }
-
-                name = (v.title || `Video_${dateStr}`).replace(/[\\/:*?"<>|]/g, "") + ".mp4";
-                dbFileType = "video";
-                mimeType = "video/mp4";
-              }
-              else if (fType === "video_message") {
-                url = attach.video_message.video_url; // У заметок обычно прямая ссылка здесь
-                name = `VideoNote_${dateStr}.mp4`;
-                dbFileType = "video";
-                mimeType = "video/mp4";
-              }
-              else if (fType === "audio_message") {
-                url = attach.audio_message.link_mp3 || attach.audio_message.link_ogg;
-                name = `Voice_${dateStr}.mp3`;
-                dbFileType = "audio_message";
-                mimeType = "audio/mpeg";
-              }
-
-              if (!url) continue;
-
-              // --- 2. СКАЧИВАНИЕ С ИМИТАЦИЕЙ БРАУЗЕРА ---
-              let fileRes = await fetch(url, {
-                headers: {
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
-                  'Accept': '*/*'
-                }
-              });
-
-              if (!fileRes.ok) {
-                await sendVKMessage(chatId, `❌ Ошибка загрузки с ВК: ${fileRes.status} для ${fType}`, env);
-                continue;
-              }
-
-              // --- УЛЬТИМАТИВНЫЙ ПЕРЕХВАТЧИК (ФИНАЛ) ---
-              let fileBuffer = await fileRes.arrayBuffer();
-              const contentType = fileRes.headers.get("Content-Type") || "";
-
-              // Если ВК прислал HTML (страницу-заглушку) вместо файла
-              if (contentType.includes("text/html")) {
-                const textContent = new TextDecoder().decode(fileBuffer);
-                
-                // Ищем ЛЮБУЮ ссылку на сервера документов ВК (psv4, vk.me, userapi)
-                // Ищем в кавычках или сразу после src/href
-                const match = textContent.match(/https?:\/\/[^\s"'<>]+(?:psv4|userapi|vk-cdn|vk\.me)[^\s"'<>]+\b/);
-                
-                if (match) {
-                  // Очищаем ссылку от HTML-сущностей (&amp; -> &)
-                  let directUrl = match[0].replace(/&amp;/g, '&');
-                  
-                  // ВАЖНО: Если ссылка обрывается на токене, убедимся, что она полная
-                  console.log("Redirect found! New attempt to:", directUrl);
-                  
-                  const secondRes = await fetch(directUrl, {
-                    headers: { 
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                        'Referer': 'https://vk.com/'
-                    }
-                  });
-                  
-                  if (secondRes.ok) {
-                    const secondType = secondRes.headers.get("Content-Type") || "";
-                    // Если второй запрос реально вернул не HTML, значит мы победили
-                    if (!secondType.includes("text/html")) {
-                        fileBuffer = await secondRes.arrayBuffer();
-                        console.log("Bypass success: Real file size:", fileBuffer.byteLength);
-                    }
-                  }
-                }
-              }
-
-              if (fileBuffer.byteLength < 100) continue;
-
-              // --- 3. ЗАПИСЬ В БАЗУ (INSERT) ---
-              const vkId = String(attach[fType]?.id || Date.now());
-              await env.FILES_DB.prepare(
-                "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
-              ).bind(String(userId), name, vkId, dbFileType, userData.provider, userData.folderId || "Root", Date.now()).run();
-
-              // --- 4. ЗАГРУЗКА В ОБЛАКО ---
-              let uploadOk = false;
-              if (userData.provider === "google") {
-                uploadOk = await uploadToGoogleFromArrayBuffer(fileBuffer, name, userData.access_token, userData.folderId || "root");
-              } else if (userData.provider === "yandex") {
-                uploadOk = await uploadToYandexFromArrayBuffer(fileBuffer, name, userData.access_token, userData.folderId || "");
-              } else if (userData.provider === "webdav") {
-                uploadOk = await uploadWebDAVFromArrayBuffer(fileBuffer, name, userData, env);
-              }
-
-              if (uploadOk) {
-                await sendVKMessage(chatId, `✅ Сохранен: ${name}`, env);
-
-                // --- 5. AI АНАЛИТИКА (КАК В TG ВЕРСИИ) ---
-                try {
-                  let sType = "";
-                  if (dbFileType === "photo") sType = "IMAGE_TO_TEXT";
-                  else if (dbFileType === "document") {
-                    const ext = name.split('.').pop().toLowerCase();
-                    sType = ["jpg","jpeg","png","webp"].includes(ext) ? "IMAGE_TO_TEXT" : "DOCUMENT_TO_TEXT";
-                  }
-                  else if (dbFileType === "audio" || dbFileType === "audio_message") sType = "AUDIO_TO_TEXT";
-                  else if (dbFileType === "video") sType = "VIDEO_TO_ANALYSIS";
-                  else if (dbFileType === "document") {
-                    const ext = name.split('.').pop().toLowerCase();
-                    if (["jpg","jpeg","png","webp"].includes(ext)) sType = "IMAGE_TO_TEXT";
-                    else sType = "DOCUMENT_TO_TEXT";
-                  }
-
-                  if (sType) {
-                    const cfg = await loadActiveConfig(sType, env);
-                    if (cfg && cfg.FUNCTION) {
-                      let description = "";
-
-                      // Вызываем функции согласно их сигнатурам в твоем AI_MODELS
-                      if (sType === "DOCUMENT_TO_TEXT" || sType === "VIDEO_TO_ANALYSIS") {
-                        // Этим функциям в твоем коде нужен mimeType 4-м аргументом
-                        description = await cfg.FUNCTION(cfg, fileBuffer, env, mimeType);
-                      } else {
-                        // IMAGE_TO_TEXT и AUDIO_TO_TEXT обычно принимают 3 аргумента
-                        description = await cfg.FUNCTION(cfg, fileBuffer, env);
-                      }
-
-                      if (description) {
-                        await env.FILES_DB.prepare("UPDATE files SET ai_description = ? WHERE userId = ? AND fileName = ?")
-                          .bind(description, String(userId), name).run();
-                      }
-                    }
-                  }
-                } catch (aiErr) {
-                  console.error("AI Error:", aiErr);
-                }
-              } else {
-                await sendVKMessage(chatId, `❌ Облако отклонило файл: ${name}`, env);
-              }
-            } catch (err) {
-              console.error("Critical Loop Error:", err);
-              await sendVKMessage(chatId, `⚠️ Системная ошибка при обработке вложения: ${err.message}`, env);
-            }
+            // Каждый файл обрабатывается по очереди, не забивая память и не вылетая
+            await processOneAttachment(attach, userData, userId, chatId, env);
+            await new Promise(r => setTimeout(r, 100));
           }
         })());
+
         return new Response("OK");
       }
 
@@ -2369,18 +2158,179 @@ async function editMessageWithKeyboard(chatId, messageId, text, env, keyboard) {
   }
 }
 
-/**
- * Проверяет, является ли текст реф-токеном или ссылкой.
- * @param {string} text - Входящее сообщение.
- * @returns {boolean} true, если это реф-токен или ссылка.
- */
-function isRefTokenOrLink(text) {
-  // Реф-токен: короткая строка из букв и цифр (например, p1u6ast5)
-  const refTokenRegex = /^[a-zA-Z0-9]{6,12}$/;
-  // Ссылка на бота с ref (например, https://t.me/...?start=ref_...)
-  const refLinkRegex = /https?:\/\/t\.me\/[a-zA-Z0-9_]+(\?start=ref_[a-zA-Z0-9]+)?/;
-  
-  return refTokenRegex.test(text) || refLinkRegex.test(text);
+// Функция обработки каждого файла в карусели сообщения ВК
+async function processOneAttachment(attach, userData, userId, chatId, env) {
+  try {
+    let url = "", name = "", fType = attach.type;
+    let dbFileType = fType;
+    let mimeType = ""; 
+
+    const now = new Date();
+    const dateStr = now.getFullYear() + '-' + 
+                    String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                    String(now.getDate()).padStart(2, '0') + '_' + 
+                    String(now.getHours()).padStart(2, '0') + '-' + 
+                    String(now.getMinutes()).padStart(2, '0') + '-' + 
+                    String(now.getSeconds()).padStart(2, '0');
+
+    // --- 1. ЛОГИКА ОПРЕДЕЛЕНИЯ ТИПА (ПОЛНАЯ) ---
+    if (fType === "photo") {
+      url = attach.photo.sizes.sort((a,b) => b.width - a.width)[0].url;
+      name = `Photo_${dateStr}.jpg`;
+      mimeType = "image/jpeg";
+    } 
+    else if (fType === "doc") {
+      url = attach.doc.url;
+      name = attach.doc.title || `Doc_${dateStr}.${attach.doc.ext}`;
+      dbFileType = "document";
+      // Определяем MIME для AI
+      const ext = (attach.doc.ext || "").toLowerCase();
+      if (ext === "pdf") mimeType = "application/pdf";
+      else if (["jpg","jpeg","png"].includes(ext)) mimeType = "image/jpeg";
+      else mimeType = "text/plain";
+    }
+    else if (fType === "audio") {
+      url = attach.audio.url;
+      const artist = (attach.audio.artist || "Unknown").replace(/[\\/:*?"<>|]/g, "");
+      const title = (attach.audio.title || "Track").replace(/[\\/:*?"<>|]/g, "");
+      name = `${artist} - ${title}.mp3`;
+      dbFileType = "audio";
+      mimeType = "audio/mpeg";
+    } 
+    else if (fType === "video") {
+      const v = attach.video;
+      let vFiles = v.files || {};
+      url = vFiles.mp4_1080 || vFiles.mp4_720 || vFiles.mp4_480 || vFiles.mp4_360 || vFiles.src;
+
+      if (!url && v.player) {
+        try {
+          const playerRes = await fetch(v.player, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+          if (playerRes.ok) {
+            const html = await playerRes.text();
+            const videoMatch = html.match(/https?:\/\/[^\s"'<>]+?\.mp4[^\s"'<>]*\?[\w=&%-]+/g);
+            if (videoMatch) {
+              url = videoMatch[0].replace(/\\/g, ''); 
+            } else {
+              const flashVarsMatch = html.match(/\"url(\d+)\"\:\"(https?.*?)\"/g);
+              if (flashVarsMatch) {
+                const lastMatch = flashVarsMatch[flashVarsMatch.length - 1];
+                url = lastMatch.split('":"')[1].replace('"', '').replace(/\\/g, '');
+              }
+            }
+          }
+        } catch (e) { console.error("Player parsing failed", e); }
+      }
+      if (!url) return false;
+      name = (v.title || `Video_${dateStr}`).replace(/[\\/:*?"<>|]/g, "") + ".mp4";
+      dbFileType = "video";
+      mimeType = "video/mp4";
+    }
+    else if (fType === "video_message") {
+      url = attach.video_message.video_url;
+      name = `VideoNote_${dateStr}.mp4`;
+      dbFileType = "video";
+      mimeType = "video/mp4";
+    }
+    else if (fType === "audio_message") {
+      url = attach.audio_message.link_mp3 || attach.audio_message.link_ogg;
+      name = `Voice_${dateStr}.mp3`;
+      dbFileType = "audio_message";
+      mimeType = "audio/mpeg";
+    }
+
+    if (!url) return false;
+
+    // --- 2. СКАЧИВАНИЕ ---
+    let fileRes = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': '*/*'
+      }
+    });
+    if (!fileRes.ok) return false;
+
+    // --- 3. ФИНАЛЬНЫЙ ПЕРЕХВАТЧИК REDIRECT/HTML ---
+    let fileBuffer = await fileRes.arrayBuffer();
+    const contentType = fileRes.headers.get("Content-Type") || "";
+
+    if (contentType.includes("text/html")) {
+      const textContent = new TextDecoder().decode(fileBuffer);
+      const match = textContent.match(/https?:\/\/[^\s"'<>]+(?:psv4|userapi|vk-cdn|vk\.me)[^\s"'<>]+\b/);
+      if (match) {
+        let directUrl = match[0].replace(/&amp;/g, '&');
+        const secondRes = await fetch(directUrl, {
+          headers: { 
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://vk.com/'
+          }
+        });
+        if (secondRes.ok) {
+          const secondType = secondRes.headers.get("Content-Type") || "";
+          if (!secondType.includes("text/html")) {
+            fileBuffer = await secondRes.arrayBuffer();
+          }
+        }
+      }
+    }
+
+    if (fileBuffer.byteLength < 100) return false;
+
+    // --- 4. ЗАПИСЬ В БАЗУ ---
+    const vkId = String(attach[fType]?.id || Date.now());
+    await env.FILES_DB.prepare(
+      "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).bind(String(userId), name, vkId, dbFileType, userData.provider, userData.folderId || "Root", Date.now()).run();
+
+    // --- 5. ЗАГРУЗКА В ОБЛАКО ---
+    let uploadOk = false;
+    if (userData.provider === "google") {
+      uploadOk = await uploadToGoogleFromArrayBuffer(fileBuffer, name, userData.access_token, userData.folderId || "root");
+    } else if (userData.provider === "yandex") {
+      uploadOk = await uploadToYandexFromArrayBuffer(fileBuffer, name, userData.access_token, userData.folderId || "");
+    } else if (userData.provider === "webdav") {
+      uploadOk = await uploadWebDAVFromArrayBuffer(fileBuffer, name, userData, env);
+    }
+
+    if (uploadOk) {
+      await sendVKMessage(chatId, `✅ Сохранен: ${name}`, env);
+
+      // --- 6. AI АНАЛИТИКА (ПОЛНАЯ) ---
+      try {
+        let sType = "";
+        if (dbFileType === "photo") sType = "IMAGE_TO_TEXT";
+        else if (dbFileType === "document") {
+          const ext = name.split('.').pop().toLowerCase();
+          sType = ["jpg","jpeg","png","webp"].includes(ext) ? "IMAGE_TO_TEXT" : "DOCUMENT_TO_TEXT";
+        }
+        else if (dbFileType === "audio" || dbFileType === "audio_message") sType = "AUDIO_TO_TEXT";
+        else if (dbFileType === "video") sType = "VIDEO_TO_ANALYSIS";
+
+        if (sType) {
+          const cfg = await loadActiveConfig(sType, env);
+          if (cfg && cfg.FUNCTION) {
+            let description = "";
+            if (sType === "DOCUMENT_TO_TEXT" || sType === "VIDEO_TO_ANALYSIS") {
+              description = await cfg.FUNCTION(cfg, fileBuffer, env, mimeType);
+            } else {
+              description = await cfg.FUNCTION(cfg, fileBuffer, env);
+            }
+            if (description) {
+              await env.FILES_DB.prepare("UPDATE files SET ai_description = ? WHERE userId = ? AND fileName = ?")
+                .bind(description, String(userId), name).run();
+            }
+          }
+        }
+      } catch (aiErr) { console.error("AI Error:", aiErr); }
+    }
+    
+    fileBuffer = null;
+    return uploadOk;
+  } catch (err) {
+    console.error("Critical OneAttach Error:", err);
+    return false;
+  }
 }
 
 // --- Вспомогательные функции для работы с буферами (необходимы для multipart/form-data) ---
@@ -3894,6 +3844,90 @@ async function callBothubVideoVision(config, videoData, env, videoMimeType) {
   }
 }
 
+// ✅ *** callBothubDocumentVision - Обработчик для Document Analysis (BotHub/Gemini)
+/**
+ * @description Отправляет запрос на анализ документов через Bothub (Gemini 2.5 Flash).
+ * @param {Object} config - Объект активной конфигурации
+ * @param {ArrayBuffer} arrayBuffer - Файл в виде ArrayBuffer.
+ * @param {Object} env - Объект окружения.
+ * @param {string} mimeType - MIME-тип документа (e.g., 'application/pdf'). 
+* @returns {Promise<string>} Сгенерированный текстовый анализ.
+ */
+async function callBothubDocumentVision(config, arrayBuffer, env, mimeType) {
+  const apiKey = env[config.API_KEY];
+  const baseUrl = config.BASE_URL;
+  const model = config.MODEL;
+
+  if (!apiKey) {
+      throw new Error(`API Key для Document_to_Text (на BotHub) не настроен.`);
+  }
+
+   // Конвертируем ArrayBuffer в Base64
+  const base64Data = arrayBufferToBase64(arrayBuffer);
+
+  // --- ПЕРЕФОРМУЛИРОВАННАЯ СИСТЕМНАЯ ИНСТРУКЦИЯ (для Видеоаналитика) ---
+  const systemMessage = "РОЛЬ И ЯЗЫК: Ты — эксперт по анализу документов.";
+  
+  // 2. Формирование тела запроса (мультимодальный формат для видео)
+  const userPrompt = "Проанализируй документ. Дай краткое и информативное описание этого документа на русском языке. Сосредоточься на сути.";
+
+  const messages = [
+    { role: "system", content: systemMessage },
+    {
+      role: "user",
+      content: [
+        { type: "text", text: userPrompt },
+        { 
+          type: "image_url", 
+          image_url: { 
+            url: `data:${mimeType};base64,${base64Data}` 
+          } 
+        }
+      ]
+    }
+  ];
+  
+  const body = {
+      model: model,
+      messages: messages,
+      stream: false,
+      temperature: 0.7,
+      max_tokens: 4096,
+  };
+
+  const url = `${baseUrl}/chat/completions`;
+
+  // 3. Отправка запроса (Остается без изменений)
+  const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+      const errorText = await response.text();
+      // Уточнено сообщение об ошибке для BotHub
+      throw new Error(`BOTHUB DOC2TXT API error (Status ${response.status}): ${errorText}. Это может быть связано с тем, что BotHub не пропускает видео в формате 'image_url', даже для Gemini.`);
+  }
+
+  // 4. Обработка ответа (Остается без изменений)
+  const data = await response.json();
+  let responseText = '';
+  
+  if (data.choices && data.choices.length > 0) {
+      responseText = data.choices[0].message.content.trim();
+  } 
+  
+  if (responseText) {
+      return responseText;
+  } else {
+      throw new Error(`BOTHUB DOC2TXT API response error: Received empty content from model.`);
+  }
+}
+
 // --- ГЛОБАЛЬНАЯ КОНФИГУРАЦИЯ AI-СЕРВИСОВ (AI_MODELS) ---
 const AI_MODELS = {
 
@@ -4041,7 +4075,15 @@ const AI_MODELS = {
     //BASE_URL: 'https://bothub.chat/api/v2/openai/v1/chat/completions'
     BASE_URL: 'https://bothub.chat/api/v2/openai/v1'
   },
-
+  // --- BOTHUB VIDEO VISION --- (ПЛАТНО)
+  DOCUMENT_TO_TEXT_BOTHUB: { 
+    SERVICE: 'BOTHUB', 
+    FUNCTION: callBothubDocumentVision, 
+    MODEL: 'gemini-2.5-flash',         
+    API_KEY: 'BOTHUB_API_KEY', 
+    //BASE_URL: 'https://bothub.chat/api/v2/openai/v1/chat/completions'
+    BASE_URL: 'https://bothub.chat/api/v2/openai/v1'
+  },
   /* --- DEEPSEEK --- (ПЛАТНО $0.028 минимум)
     TEXT_TO_TEXT_DEEPSEEK: { 
         SERVICE: 'DEEPSEEK', 
