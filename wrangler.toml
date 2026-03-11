@@ -10,3 +10,7 @@ kv_namespaces = [
 binding = "FILES_DB"
 database_name = "files_db"
 database_id = "50a338f2-dcbd-4e5d-b6cd-bfb93bb7dd91"
+
+# [ai] - для Workers AI
+[ai]
+binding = "AI"
