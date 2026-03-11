@@ -7,9 +7,10 @@ Telegram-бот для автоматической загрузки фото и
 Умное именование: Сохраняет исходные имена для файлов без сжатия и генерирует имена по дате/времени для сжатых фото/видео.
 Поддержка WEBM: Возможность сохранять видеофайлы в современных форматах без потери качества.
 Диагностика: Команда /debug для проверки статуса подключения к хранилищу в реальном времени.
+Скрытая функция: Команда /search для поиска и возможность достать файлы с хранилки.
 */
 // Глобальные константы
-const version = "v2.1.6"; // актуальная версия
+const version = "v2.2.0 от 29.12.2025"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -101,19 +102,19 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
   let userData = await env.USER_DB.get(userKey, { type: "json" });
 
   // --- 1. МОСТ ДЛЯ РЕФЕРАЛА (Приоритет) ---
-  // Если у пользователя в базе есть пометка shared_from, подтягиваем данные владельца
   if (userData && userData.shared_from) {
     const ownerId = String(userData.shared_from);
     const ownerData = await env.USER_DB.get(`user:${ownerId}`, { type: "json" });
 
     if (ownerData) {
-      // Сохраняем ID рефа, но для сессии используем токены владельца
-      const originalRefId = userId;
+      // Сохраняем папку, которая прописана у реферала в его ключе user:ID
+      const refFolder = userData.folderId || "/"; 
+
       userData = { 
-        ...ownerData, 
+        ...ownerData, // Берем токены владельца
         is_ref: true, 
-        real_user_id: originalRefId, 
-        shared_from: ownerId 
+        shared_from: ownerId,
+        folderId: refFolder // <--- ОСТАВЛЯЕМ ПАПКУ РЕФЕРАЛА, А НЕ ВЛАДЕЛЬЦА
       };
     }
   }
@@ -135,12 +136,13 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
           userData = { 
             provider: ownerData.provider, 
             shared_from: String(inviteData.inviterId), 
-            connected_at: Date.now() 
+            connected_at: Date.now(),
+            folderId: ownerData.folderId, // <--- ПАПКА ТЕПЕРЬ ТУТ
           };
-          await env.USER_DB.put(userKey, JSON.stringify(userData));
-          
-          await sendMessage(chatId, `🤝 <b>Готово!</b>\nТы подключился к хранилке пользователя <code>${inviteData.inviterId}</code> (${ownerData.provider}).`, null, env);
-          await sendMessage(inviteData.inviterId, `🔔 Твоей хранилкой начал пользоваться ID <code>${userId}</code>`, null, env);
+          await env.USER_DB.put(userKey, JSON.stringify(userData));          
+          // Добавляем инфо о папке в сообщение, чтобы сразу видеть результат
+          await sendMessage(chatId, `🤝 <b>Готово!</b>\nТы подключился к хранилке пользователя <code>${inviteData.inviterId}</code> (${ownerData.provider}).\n📁 Папка: <code>${ownerData.folderId}</code>`, null, env);
+          await sendMessage(inviteData.inviterId, `🔔 Твоей хранилкой начал пользоваться ID <code>${userId}</code> (папка: ${userData.folderId})`, null, env);
         }
       } else {
         await sendMessage(chatId, "❌ Ссылка недействительна или устарела.", null, env);
@@ -169,6 +171,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
                   `📖 <b>Команды:</b>\n` +
                   `/folder — Выбрать папку для загрузки\n` +
                   `/share — Создать ссылку для друга\n` +
+                  `/search — Поиск файлов по хранилке\n` +
                   `/disconnect — Отключить диск друга\n` +
                   `/debug — Техническая информация`;
     
@@ -189,31 +192,48 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
   }
 
   // --- КОМАНДА /SHARE ---
-  if (text === "/share") {
+  if (text.startsWith("/share")) {
     if (userData.is_ref) {
       return await sendMessage(chatId, "⚠️ Ты используешь чужой диск и не можешь создавать свои реф-ссылки.", null, env);
     }
+    
+    // Берем папку из команды (напр. /share STORAGE) или текущую выбранную
+    const currentFolder = userData?.folderId || "Не установлена (Root)";
     
     const inviteToken = Math.random().toString(36).substring(2, 12);
     const inviteData = {
       inviterId: userId,
       provider: userData.provider,
       token: inviteToken,
+      folderId: currentFolder, // КЛЮЧЕВОЕ: Добавили папку в объект инвайта
       timestamp: Date.now()
     };
     
     await env.USER_DB.put(`invite:${inviteToken}`, JSON.stringify(inviteData));
+    
     const botName = env.BOT_USERNAME || "leshiy_storage_bot"; 
     const inviteLink = `https://t.me/${botName}?start=ref_${inviteToken}`;
-    return await sendMessage(chatId, `🚀 <b>Твоя ссылка для друга:</b>\n<code>${inviteLink}</code>\n\nДруг подключится к твоему облаку <b>${userData.provider}</b>.`, null, env);
+    
+    return await sendMessage(chatId, 
+      `🚀 <b>Твоя ссылка для друга:</b>\n<code>${inviteLink}</code>\n\n` +
+      `📁 Папка: <b>${currentFolder}</b>\n` +
+      `Облако: <b>${userData.provider}</b>`, 
+      null, env
+    );
   }
 
   // --- КОМАНДА /DEBUG ---
   if (text === "/debug") {
-    const currentFolder = userData?.folderId || "Не установлена (Root)";
+    // Используем ?. чтобы бот не падал, если userData пустой
+    const currentProvider = userData?.provider || "Не определён";
+    const currentFolder = userData?.folderId || "Не установлена";
+    
+    // Статус меняется в зависимости от наличия провайдера
+    const statusIcon = userData?.provider ? "✅ Соединение активно" : "❌ Не подключен";
     const debugMsg = `🤖 <b>Бот онлайн</b>\n` +
                      `📦 Версия: ${version}\n` +
-                     `🔗 Статус: ✅ Соединение активно\n` +
+                     `🔗 Статус: ${statusIcon}\n` +
+                     `🔌 Провайдер: ${currentProvider}\n` +
                      `📁 Папка: <code>${currentFolder}</code>\n` +
                      `👤 Твой ID: <code>${userId}</code>\n` +
                      `${isAdmin ? "👑 Админ: Да" : "👑 Админ: Нет"}`;
@@ -236,31 +256,24 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
 
   // --- КОМАНДА /FOLDER ---
   if (text === "/folder") {
-    let userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
     let folders = [];
     try {
-        // Проверяем, что userData существует
-        if (!userData) {
-            throw new Error("User data not found");
-        }
-
-        if (userData.provider === "google") {
-            folders = await listGoogleFolders(userData.access_token);
-        } else if (userData.provider === "dropbox") {
-            folders = await listDropboxFolders(userData.access_token);
-        } else if (userData.provider === "yandex") {
-            folders = await listYandexFolders(userData.access_token);
-        }
+      if (userData.provider === "google") {
+        folders = await listGoogleFolders(userData.access_token);
+      } else if (userData.provider === "dropbox") {
+        folders = await listDropboxFolders(userData.access_token);
+      } else if (userData.provider === "yandex") {
+        folders = await listYandexFolders(userData.access_token);
+      }
     } catch (e) {
       return await sendMessage(chatId, `❌ Ошибка списка папок: ${e.message}`, null, env);
     }
 
     const buttons = folders.map(f => [
-      { text: `📁 ${f.name}`, callback_data: `set_folder:${userId}:${userData.provider === 'google' ? f.id : f.name}` },
+      { text: `📁 ${f.name}`, callback_data: `set_folder:${userId}:${userData.provider === 'google' ? f.id : f.name}` }
     ]);
-    //buttons.push([{ text: "✏️ Указать папку вручную", callback_data: `manual_folder:${userId}` }]);
     
-    if (userData.provider === "webdav") {
+    if (userData.provider === "mailru-webdav") {
       buttons.push([{ text: "✏️ Указать папку вручную", callback_data: `manual_folder:${userId}` }]);
     }
     
@@ -270,46 +283,76 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     return await sendMessage(chatId, msgText, { inline_keyboard: buttons }, env);
   }
 
-  // - КОМАНДА /SEARCH - 
+  // --- КОМАНДА /SEARCH ---
   if (text.startsWith("/search")) {
-    let userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
+    // ПРОВЕРКА: Если диска нет, то и искать не в чем
+    if (!userData || (!userData.provider && !userData.shared_from)) {
+      const noDiscMsg = `⚠️ <b>Поиск недоступен</b>\n\n` +
+                        `Твоё хранилище не подключено. Сначала авторизуйся или подключись к другу, чтобы я мог просканировать файлы.`;
+      return await sendMessage(chatId, noDiscMsg, null, env);
+    }
     const query = text.replace(/^\/search\s*/i, '').trim();
+
+    // Если запрос пустой — выдаем инструкцию и ставим стейт
     if (!query) {
-      return await sendMessage(chatId, "🔎 Напиши, что искать: /search вечеринка 15 декабря", null, env);
+      // Ставим стейт ожидания поиска на 5 минут
+      await env.USER_DB.put(`state:${userId}`, "waiting_for_search", { expirationTtl: 300 });
+
+      const helpMsg = `🔎 <b>Поиск по архиву</b>\n\n` +
+                      `Пришли мне название файла или его часть.\n` +
+                      `<i>Примеры: "сейф", "jpg", "2025"</i>\n\n` +
+                      `🔹 Ищу только по именам файлов.\n` +
+                      `🔹 Поиск не чувствителен к регистру.\n\n` +
+                      `👇 <b>Просто напиши, что искать:</b>`;
+      
+      return await sendMessage(chatId, helpMsg, null, env);
     }
 
+    // Если запрос есть — выполняем поиск
+    await sendMessage(chatId, "⏳ <b>Выполняю поиск файлов...</b>", null, env);
+    
     const searchResult = await searchFilesByQuery(userId, query, env);
 
-    if (!searchResult.success) {
-      return await sendMessage(chatId, `❌ Ошибка поиска: ${searchResult.message}`, null, env);
+    if (!searchResult.success || searchResult.fileIds.length === 0) {
+      return await sendMessage(chatId, `❌ По запросу "<b>${query}</b>" ничего не найдено.`, null, env);
     }
 
-    if (searchResult.fileIds.length === 0) {
+    const shortId = Math.random().toString(36).substring(2, 8);
+    const searchKey = `s:${userId}:${shortId}`;
+    
+    await env.USER_DB.put(searchKey, JSON.stringify({
+      ids: searchResult.fileIds,
+      q: query
+    }), { expirationTtl: 3600 });
+
+    const { text: msgText, kb } = await renderSearchPage(searchKey, 0, env, userId);
+    return await sendMessage(chatId, msgText, kb, env);
+  }
+
+  // - КОМАНДА /AI_SEARCH - 
+  if (text.startsWith("/ai_search") && isAdmin) {
+    const query = text.replace(/^\/ai_search\s*/i, '').trim();
+    if (!query) return await sendMessage(chatId, "🔎 Что ищем с помощью ИИ?", null, env);
+  
+    await sendMessage(chatId, "⏳ <b>Выполняю интеллектуальный поиск...</b>", null, env);
+    const searchResult = await searchAIFilesByQuery(userId, query, env);
+  
+    if (!searchResult.success || searchResult.fileIds.length === 0) {
       return await sendMessage(chatId, "❌ Ничего не найдено.", null, env);
     }
-
-    // Сохраняем результат поиска в KV (для пагинации)
-    const searchKey = `search:${userId}:${Date.now()}`;
+  
+    // Ключ теперь короткий, чтобы влезть в лимиты кнопок TG (64 байта)
+    const shortId = Math.random().toString(36).substring(2, 8); // Очень короткий ID
+    const searchKey = `s:${userId}:${shortId}`;
     await env.USER_DB.put(searchKey, JSON.stringify({
-      query,
-      fileIds: searchResult.fileIds,
-      timestamp: Date.now()
-    }), { expirationTtl: 60 * 10 }); // 10 минут
-
-    // Отправляем первые 5 файлов
-    const firstFive = searchResult.fileIds.slice(0, 5);
-    let fileList = "";
-    for (const fileId of firstFive) {
-      const fileRow = await env.FILES_DB.prepare("SELECT fileName FROM files WHERE id = ?").bind(fileId).first();
-      if (fileRow) {
-        fileList += `📄 ${fileRow.fileName}\n`;
-      }
-    }
-    return await sendMessage(chatId, 
-      `🔍 Найдено ${searchResult.fileIds.length} файлов:\n\n${fileList}\n\n👉 Для просмотра всех результатов — нажми «Показать ещё»`,
-      { inline_keyboard: [[{ text: "➡️ Показать ещё", callback_data: `show_more_search:${searchKey}` }]] },
-      env
-    );
+      ids: searchResult.fileIds,
+      q: query
+    }), { expirationTtl: 3600 }); // 1 час
+  
+    // Генерируем интерфейс (функцию создадим ниже)
+    // Вызываем рендер
+    const { text: msgText, kb } = await renderSearchPage(searchKey, 0, env, userId);
+    return await sendMessage(chatId, msgText, kb, env);
   }
 
   // --- КОМАНДА /ADMIN ---
@@ -320,15 +363,15 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     const allUniqueIds = [...new Set([...authIds, ...allowedIds])];
   
     const adminMsg = `⚙️ <b>Панель администратора</b>\n\n` +
+      `🆔 Админ ID: <code>${userId}</code>\n\n` +
       `✅ <b>Авторизованы (диск подключен):</b>\n` +
       (authIds.length > 0 ? authIds.map(id => `• <code>${id}</code>`).join("\n") : "—") +
-      `\n\n🔑 <b>Разрешенные ID (ждут входа):</b>\n` +
-      (allowedIds.length > 0 ? allowedIds.map(id => `• <code>${id}</code>`).join("\n") : "—") +
-      `\n\n👤 <b>Всего охвачено:</b> ${allUniqueIds.length}`;
   
+      `\n\n🚀 Версия: ${version}`;
     const adminKeyboard = {
       inline_keyboard: [
-        [{ text: "🧠 Настройки ИИ", callback_data: "ai_menu_main" }]
+        [{ text: "🧠 Настройки ИИ", callback_data: "ai_menu_main" }],
+        [{ text: "🚪 Выход из режима админа", callback_data: "admin_exit" }]
       ]
     };
     return await sendMessage(chatId, adminMsg, adminKeyboard, env);
@@ -389,7 +432,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
 
   // --- ОБРАБОТКА ФАЙЛОВ (Документы, Видео, Фото, Аудио, Голосовые) ---
   const isDoc = !!msg.document;
-  const isVideo = !!msg.video;
+  const isVideo = !!msg.video || !!msg.video_note;
   const isPhoto = !!msg.photo;
   const isAudio = !!msg.audio;
   const isVoice = !!msg.voice;
@@ -398,7 +441,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
   if (isDoc || isVideo || isPhoto || isAudio || isVoice) {
     await sendMessage(chatId, "⏳ <b>Начинаю загрузку в облако...</b>", null, env);
     try {
-      const fileObj = msg.document || msg.video || msg.audio || msg.voice || (msg.photo ? msg.photo[msg.photo.length - 1] : null);
+      const fileObj = msg.document || msg.video || msg.video_note || msg.audio || msg.voice || (msg.photo ? msg.photo[msg.photo.length - 1] : null);
       if (!fileObj == null) throw new Error("Файл не найден");
 
       let fileName = "";
@@ -433,7 +476,8 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
       }
 
       if (isDoc || isVideo || isAudio) {
-        fileName = fileObj.file_name || `file_${Date.now()}`;
+        const dateStr = new Date().toISOString().replace(/T/, '_').replace(/\..+/, '').replace(/:/g, '-');
+        fileName = fileObj.file_name || `file_${dateStr}.mp4`;
       } else if (isVoice) {
         const dateStr = new Date().toISOString().replace(/T/, '_').replace(/\..+/, '').replace(/:/g, '-');
         fileName = `Voice_${dateStr}.ogg`;
@@ -466,7 +510,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
         ).run();
 
         // ✅ Фоновая генерация описания (если фото/видео/аудио/голос)
-        if (fType === "photo" || fType === "video" || fType === "audio" || fType === "voice") {
+        if (fType === "photo" || fType === "video" || fType === "audio" || fType === "voice" || fType === "document") {
           ctx.waitUntil(
             (async () => {
               try {
@@ -482,6 +526,11 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
                 } else if (fType === "audio" || fType === "voice") {
                   const modelConfig = await loadActiveConfig('AUDIO_TO_TEXT', env);
                   description = await modelConfig.FUNCTION(modelConfig, arrayBuffer, env);
+                } else if (fType === "document") {
+                  const mimeType = msg.document?.mime_type || getMimeTypeFromExtension(msg.document?.file_name);
+                  //const mimeType = "application/pdf";
+                  const modelConfig = await loadActiveConfig('DOCUMENT_TO_TEXT', env);
+                  description = await modelConfig.FUNCTION(modelConfig, arrayBuffer, env, mimeType);
                 }
                 await env.FILES_DB.prepare(
                   "UPDATE files SET ai_description = ? WHERE userId = ? AND fileName = ?"
@@ -570,6 +619,33 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
       console.error("WebDAV Parse Error:", e);
       return new Response("OK");
     }
+  }
+
+  // Проверка активного стейта поиска
+  if (userState === "waiting_for_search" && !text.startsWith("/")) {
+    // Сбрасываем стейт, чтобы не зациклиться
+    await env.USER_DB.delete(`state:${userId}`);
+    
+    // Перенаправляем текст в логику поиска, как будто ввели /search ТЕКСТ
+    const searchQuery = text.trim();
+    // Вызываем поиск. Для простоты здесь просто повторяем вызов sendMessage с поиском:
+    await sendMessage(chatId, `🔍 Ищу: <b>${searchQuery}</b>...`, null, env);
+    const searchResult = await searchFilesByQuery(userId, searchQuery, env);
+
+    if (!searchResult.success || searchResult.fileIds.length === 0) {
+      return await sendMessage(chatId, `❌ По запросу "<b>${searchQuery}</b>" ничего не найдено.`, null, env);
+    }
+
+    const shortId = Math.random().toString(36).substring(2, 8);
+    const searchKey = `s:${userId}:${shortId}`;
+    
+    await env.USER_DB.put(searchKey, JSON.stringify({
+      ids: searchResult.fileIds,
+      q: searchQuery
+    }), { expirationTtl: 3600 });
+
+    const { text: msgText, kb } = await renderSearchPage(searchKey, 0, env, userId);
+    return await sendMessage(chatId, msgText, kb, env);
   }
 
   if (userState === "wait_manual_folder") {
@@ -700,6 +776,53 @@ function getAIServiceMenuKeyboard() {
   ]);
 }
 
+async function renderSearchPage(searchKey, offset, env, userId) {
+  const dataRaw = await env.USER_DB.get(searchKey);
+  if (!dataRaw) return { text: "❌ Поиск устарел или не найден.", kb: null };
+  
+  const searchData = JSON.parse(dataRaw);
+  const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
+
+  const total = searchData.ids.length;
+  const pageIds = searchData.ids.slice(offset, offset + 5);
+  
+  let list = `🔍 <b>Найдено всего: ${total}</b> (Страница ${Math.floor(offset/5) + 1})\n\n`;
+  const userFolder = userData?.folderId || "/";
+
+  for (const id of pageIds) {
+    const f = await env.FILES_DB.prepare("SELECT fileName, provider, remotePath FROM files WHERE id = ?").bind(id).first();
+    // ПРОВЕРКА: провайдер совпадает И путь файла соответствует папке юзера
+    const isProviderOk = userData && f?.provider === userData.provider;
+    const isPathOk = f?.remotePath ? f.remotePath === userFolder : false;
+    
+    const status = (isProviderOk && isPathOk) ? '🟢' : '🔴';
+    list += `${status} <code>${f?.fileName || 'Файл'}</code>\n`;
+  }
+
+  list += `\nАктивное подключение:`;
+  list += `\n<b>🔌 Провайдер: ${userData?.provider}</b> 📁 Папка: ${userData?.folderId}`;
+  list += `\n<b>🟢 доступно</b> | <b>🔴 не доступно</b> для выгрузки`;
+  //list += `\n<b>🔴 не доступно</b>, смените диск`;
+
+  // Формат кнопок сокращаем до предела: pg:KEY:OFFSET и dl:KEY:OFFSET
+  const kb = { inline_keyboard: [
+    [{ text: "📥 Выгрузить эти файлы", callback_data: `dl:${searchKey}:${offset}` },
+    { text: "🔎 Изменить поиск", callback_data: "search_retry" }],
+    [] 
+  ]};
+
+  if (offset > 0) {
+    kb.inline_keyboard[1].push({ text: `⬅️ стр. ${Math.floor(offset/5) + 0}`, callback_data: `pg:${searchKey}:${offset - 5}` });
+  }
+  if (offset + 5 < total) {
+    kb.inline_keyboard[1].push({ text: `⬆️ стр. ${Math.floor(offset/5) + 1}`, callback_data: `dummy_ignore` });
+  }
+  if (offset + 5 < total) {
+    kb.inline_keyboard[1].push({ text: `стр. ${Math.floor(offset/5) + 2} ➡️`, callback_data: `pg:${searchKey}:${offset + 5}` });
+  }
+  return { text: list, kb };
+}
+
 async function handleCallbackQuery(query, env, ctx) {
   // 1. Сразу гасим часики на кнопке
   await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/answerCallbackQuery`, {
@@ -711,34 +834,378 @@ async function handleCallbackQuery(query, env, ctx) {
   const data = query.data; // Пример: "set_folder:12345:ID_ПАПКИ"
   const chatId = query.message.chat.id;
   const userId = query.from.id;
-
+  const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
   const parts = data.split(":");
   const action = parts[0];
   //const targetUserId = parts[1] || userId; // Для команды /add или личного использования
   //const folderIdOrName = parts[parts.length - 1]; 
 
   try {
-    if (action === "show_more_search") {
-      const searchKey = parts[1];
-      const searchState = await env.USER_DB.get(searchKey, { type: "json" });
-      if (!searchState) {
-        return await sendMessage(chatId, "❌ Результат поиска устарел или не найден.", null, env);
+    // --- ПАГИНАЦИЯ (Стрелочки) ---
+    if (data.startsWith("pg:")) {
+      const [_, prefix, uId, sId, offset] = data.split(":");
+      const key = `${prefix}:${uId}:${sId}`; // Собираем s:userId:shortId
+      
+      const { text: newText, kb } = await renderSearchPage(key, parseInt(offset), env, userId);
+
+      await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/editMessageText`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: query.message.message_id,
+          text: newText,
+          parse_mode: "HTML",
+          reply_markup: kb
+        })
+      });
+    }
+
+    // --- ВЫГРУЗКА (dl:) ---
+    if (data.startsWith("dl:")) {
+      const parts = data.split(":");
+      // Собираем ключ обратно: s : userId : shortId
+      const key = `${parts[1]}:${parts[2]}:${parts[3]}`;
+      const offset = parts[4] || "0";
+
+      const dataRaw = await env.USER_DB.get(key);
+      const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
+
+      if (!dataRaw || !userData) {
+        return await sendMessage(chatId, "❌ Ошибка: данные поиска не найдены.", null, env);
       }
-    
-      const remainingIds = searchState.fileIds.slice(5); // Пропускаем первые 5
-      if (remainingIds.length === 0) {
-        return await sendMessage(chatId, "✅ Все файлы уже показаны.", null, env);
-      }
-    
-      let fileList = "";
-      for (const fileId of remainingIds) {
-        const fileRow = await env.FILES_DB.prepare("SELECT fileName FROM files WHERE id = ?").bind(fileId).first();
-        if (fileRow) {
-          fileList += `📄 ${fileRow.fileName}\n`;
+
+      const searchData = JSON.parse(dataRaw);
+      const toDl = searchData.ids.slice(parseInt(offset), parseInt(offset) + 5);
+
+      await sendMessage(chatId, `⏳ Начинаю выгрузку ${toDl.length} файл(ов)...`, null, env);
+
+      for (const fileId of toDl) {
+        try {
+          const file = await env.FILES_DB.prepare("SELECT * FROM files WHERE id = ?").bind(fileId).first();
+          
+          // Проверка провайдера (чтобы не пытаться качать с яндекса, если выбран дропбокс)
+          if (!file || file.provider !== userData.provider) continue;
+
+          let downloadUrl = "";
+          
+          const headers = new Headers();
+
+          if (file.provider === 'webdav') {
+            downloadUrl = `${userData.host}/${file.remotePath}/${file.fileName}`.replace(/([^:])\/\//g, '$1/');
+            headers.set("Authorization", "Basic " + btoa(userData.user + ":" + userData.pass));
+          } else if (file.provider === 'yandex') {
+            const yaRes = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/download?path=${encodeURIComponent(file.remotePath + "/" + file.fileName)}`, {
+              headers: { "Authorization": "OAuth " + userData.access_token }
+            });
+            const yaData = await yaRes.json();
+            downloadUrl = yaData.href;
+          } else if (file.provider === 'dropbox') {
+            try {
+              // 1. Формируем правильный путь (Dropbox требует / в начале)
+              const fullPath = (file.remotePath + "/" + file.fileName).replace(/\/+/g, '/');
+              const path = fullPath.startsWith('/') ? fullPath : '/' + fullPath;
+
+              // 2. Получаем временную ссылку
+              const dbxRes = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
+                method: "POST",
+                headers: { 
+                  "Authorization": "Bearer " + userData.access_token, 
+                  "Content-Type": "application/json" 
+                },
+                body: JSON.stringify({ path: path })
+              });
+
+              const dbxData = await dbxRes.json();
+
+              if (dbxData.link) {
+                // 3. Качаем файл по ссылке
+                const fileResp = await fetch(dbxData.link);
+                const dbxBuffer = await fileResp.arrayBuffer();
+
+                if (dbxBuffer && dbxBuffer.byteLength > 0) {
+                  const formData = new FormData();
+                  formData.append('chat_id', String(chatId));
+                  
+                  // Шлем как документ (самый надежный вариант)
+                  formData.append('document', new Blob([dbxBuffer]), file.fileName);
+                  
+                  const tgRes = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendDocument`, {
+                    method: 'POST',
+                    body: formData
+                  });
+
+                  if (tgRes.ok) {
+                    await logDebug(`✅ Dropbox отправил: ${file.fileName}`, env);
+                  } else {
+                    await logDebug(`❌ Ошибка ТГ (Dropbox): ${await tgRes.text()}`, env);
+                  }
+                }
+              } else {
+                await logDebug(`❌ Dropbox не дал ссылку. Ошибка: ${JSON.stringify(dbxData)}`, env);
+              }
+            } catch (e) {
+              await logDebug(`❌ Крит. ошибка Dropbox: ${e.message}`, env);
+            }
+            continue; // Важно: уходим на следующий файл
+
+          } else if (file.provider === 'google') {
+            const gBuffer = await downloadFromGoogle(file.remotePath, file.fileName, userData.access_token, env);
+            
+            if (gBuffer && gBuffer.byteLength > 0) {
+              const formData = new FormData();
+              formData.append('chat_id', String(chatId));
+          
+              const ext = file.fileName.toLowerCase().split('.').pop();
+              let method = 'sendDocument';
+              let typeKey = 'document';
+          
+              // Мапим расширения на методы Telegram
+              if (['jpg', 'jpeg', 'png'].includes(ext)) { method = 'sendPhoto'; typeKey = 'photo'; }
+              else if (['mp4', 'mov'].includes(ext)) { method = 'sendVideo'; typeKey = 'video'; }
+              else if (['ogg', 'opus'].includes(ext)) { method = 'sendVoice'; typeKey = 'voice'; } 
+              else if (['mp3', 'wav'].includes(ext)) { method = 'sendAudio'; typeKey = 'audio'; }
+          
+              formData.append(typeKey, new Blob([gBuffer]), file.fileName);
+              
+              await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/${method}`, {
+                method: 'POST',
+                body: formData
+              });
+              
+              await logDebug(`✅ Отправлен: ${file.fileName}`, env);
+            }
+            continue; 
+          }
+
+          if (!downloadUrl) continue;
+
+          // --- СКАЧИВАНИЕ И ОТПРАВКА В TG ---
+          const fileResp = await fetch(downloadUrl, { headers: headers });
+          if (!fileResp.ok) continue;
+          
+          const fileBuffer = await fileResp.arrayBuffer();
+          const formData = new FormData();
+          formData.append('chat_id', String(chatId));
+
+          let method = 'sendDocument';
+          let typeKey = 'document';
+          if (file.fileType === 'photo') { method = 'sendPhoto'; typeKey = 'photo'; }
+          else if (file.fileType === 'video') { method = 'sendVideo'; typeKey = 'video'; }
+
+          formData.append(typeKey, new Blob([fileBuffer]), file.fileName);
+          
+          await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/${method}`, {
+            method: 'POST',
+            body: formData
+          });
+
+        } catch (e) {
+          console.error("Ошибка при выгрузке конкретного файла:", e);
         }
       }
-      return await sendMessage(chatId, `✅ Остальные файлы:\n\n${fileList}`, null, env);
+
+      await sendMessage(chatId, "✅ Готово!", null, env);
+      return new Response("OK");
     }
+    // --- 1. ВЫГРУЗКА (deliver_files) ---
+    if (data.startsWith("deliver_files:")) {
+      const parts = data.split(":");
+      // ПРОВЕРКА: Если в ключе 4 части (старый формат) или 5 (новый)
+      // Собираем ключ: это части с индексами 1, 2, 3 (search:userId:timestamp)
+      const searchKey = `${parts[1]}:${parts[2]}:${parts[3]}`;
+      const mode = parts[4] || "0"; 
+
+      const searchData = await env.USER_DB.get(searchKey, { type: "json" });
+      const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
+
+      if (!searchData) return await sendMessage(chatId, `❌ Ошибка: Ключ ${searchKey} не найден в базе.`, null, env);
+      if (!userData) return await sendMessage(chatId, "❌ Ошибка: Профиль пользователя не найден.", null, env);
+        
+      let filesToDownload = (mode === "all") 
+      ? searchData.fileIds 
+      : searchData.fileIds.slice(parseInt(mode), parseInt(mode) + 5);
+
+      if (mode === "all") {
+        filesToDownload = searchData.fileIds;
+      } else {
+        const start = parseInt(mode);
+        filesToDownload = searchData.fileIds.slice(start, start + 5);
+      }
+  
+      await sendMessage(chatId, `⏳ Начинаю выгрузку файлов (${filesToDownload.length})...`, null, env); 
+  
+      let successCount = 0;
+      let failCount = 0;
+  
+      for (const fileId of filesToDownload) {
+        try {
+          const file = await env.FILES_DB.prepare("SELECT * FROM files WHERE id = ?").bind(fileId).first();
+          if (!file || file.provider !== userData.provider) {
+            failCount++;
+            continue;
+          }
+  
+          let downloadUrl = "";
+          const headers = new Headers();
+  
+          // Формирование ссылки
+          if (file.provider === 'webdav') {
+            downloadUrl = `${userData.host}/${file.remotePath}/${file.fileName}`.replace(/([^:])\/\//g, '$1/');
+            headers.set("Authorization", "Basic " + btoa(userData.user + ":" + userData.pass));
+          } else if (file.provider === 'yandex') {
+            const yaRes = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/download?path=${encodeURIComponent(file.remotePath + "/" + file.fileName)}`, {
+              headers: { "Authorization": "OAuth " + userData.access_token }
+            });
+            const yaData = await yaRes.json();
+            downloadUrl = yaData.href;
+          } else if (file.provider === 'google') {
+            const gBuffer = await downloadFromGoogle(file.remotePath, file.fileName, userData.access_token, env);
+            
+            if (gBuffer && gBuffer.byteLength > 0) {
+              const formData = new FormData();
+              formData.append('chat_id', String(chatId));
+
+              formData.append('document', new Blob([gBuffer]), file.fileName);
+              
+              await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendDocument`, {
+                method: 'POST',
+                body: formData
+              });
+              await logDebug(`✅ Отправлен: ${file.fileName}`, env);
+            }
+            continue; 
+          }
+  
+          if (!downloadUrl) {
+            failCount++;
+            continue;
+          }
+  
+          // Скачиваем файл во временный буфер
+          const fileResp = await fetch(downloadUrl, { headers: headers });
+          if (!fileResp.ok) {
+            failCount++;
+            continue;
+          }
+          
+          const fileBuffer = await fileResp.arrayBuffer();
+          const formData = new FormData();
+          formData.append('chat_id', String(chatId));
+  
+          let method = 'sendDocument';
+          let typeKey = 'document';
+          if (file.fileType === 'photo') { method = 'sendPhoto'; typeKey = 'photo'; }
+          else if (file.fileType === 'video') { method = 'sendVideo'; typeKey = 'video'; }
+  
+          // Ключевой момент: создаем Blob с правильным типом
+          formData.append(typeKey, new Blob([fileBuffer]), file.fileName);
+  
+          // Отправка в Telegram с проверкой ответа
+          const tgRes = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/${method}`, {
+            method: 'POST',
+            body: formData
+          });
+  
+          if (tgRes.ok) {
+            successCount++;
+          } else {
+            const errText = await tgRes.text();
+            console.error("TG Error:", errText);
+            failCount++;
+          }
+  
+        } catch (e) { 
+          console.error("Critical Error:", e); 
+          failCount++;
+        }
+      }
+  
+      const finalMsg = successCount > 0 
+        ? `✅ Успешно выгружено: ${successCount}\n❌ Ошибок: ${failCount}` 
+        : `❌ Не удалось выгрузить ни одного файла. Ошибок: ${failCount}`;
+      
+      await sendMessage(chatId, finalMsg, null, env);
+      return new Response("OK");
+    }
+
+  // --- 2. ПОКАЗАТЬ ЕЩЁ (show_more_search) ---
+  if (data.startsWith("show_more_search:")) {
+    const parts = data.split(":");
+    // формат: show_more_search : search : userId : timestamp : offset
+    const searchKey = `${parts[1]}:${parts[2]}:${parts[3]}`;
+    const offset = parseInt(parts[4] || "5");
+
+    const searchData = await env.USER_DB.get(searchKey, { type: "json" });
+    const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
+
+    if (!searchData) return await sendMessage(chatId, "❌ Поиск устарел.", null, env);
+
+    const nextBatch = searchData.fileIds.slice(offset, offset + 5);
+    if (nextBatch.length === 0) return sendMessage(chatId, "🏁 Больше файлов нет.", null, env);
+
+    let list = "";
+    for (const id of nextBatch) {
+      const f = await env.FILES_DB.prepare("SELECT fileName, provider FROM files WHERE id = ?").bind(id).first();
+      if (f) {
+        const status = (userData && f.provider === userData.provider) ? '🟢' : '🔴';
+        list += `${status} <code>${f.fileName}</code>\n`;
+      }
+    }
+
+    const nextOffset = offset + 5;
+    const kb = { 
+      inline_keyboard: [
+        // Кнопка выгрузки именно ЭТОЙ пачки (теперь передаем смещение)
+        [{ text: `📥 Выгрузить эти 5 файлов`, callback_data: `deliver_files:${searchKey}:${offset}` }]
+      ] 
+    };
+    
+    if (searchData.fileIds.length > nextOffset) {
+      kb.inline_keyboard.push([{ text: "➡️ Еще 5", callback_data: `show_more_search:${searchKey}:${nextOffset}` }]);
+    }
+
+    await sendMessage(chatId, `🔍 <b>Результаты ${offset + 1}-${offset + nextBatch.length}:</b>\n\n${list}`, kb, env);
+    return new Response("OK");
+  }
+
+  // --- 3. ПОКАЗАТЬ ВСЁ (show_all_search) ---
+  if (data.startsWith("show_all_search:")) {
+    const parts = data.split(":");
+    const searchKey = `${parts[1]}:${parts[2]}:${parts[3]}`;
+    
+    const searchData = await env.USER_DB.get(searchKey, { type: "json" });
+    const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
+
+    if (!searchData) return await sendMessage(chatId, "❌ Поиск устарел.", null, env);
+  
+    let allList = "📑 <b>Полный список результатов:</b>\n\n";
+    for (const id of searchData.fileIds.slice(0, 50)) { // Лимит 50 чтобы не упасть
+      const f = await env.FILES_DB.prepare("SELECT fileName, provider FROM files WHERE id = ?").bind(id).first();
+      if (f) {
+        const status = (userData && f.provider === userData.provider) ? '🟢' : '🔴';
+        allList += `${status} <code>${f.fileName}</code>\n`;
+      }
+    }
+    
+    const kb = {
+      inline_keyboard: [[{ text: "📥 Выгрузить ВООБЩЕ ВСЁ", callback_data: `deliver_files:${searchKey}:all` }]]
+    };
+
+    await sendMessage(chatId, allList, kb, env);
+    return new Response("OK");
+  }
+
+  if (data === "search_retry") {
+    // Ставим стейт ожидания заново
+    await env.USER_DB.put(`state:${userId}`, "waiting_for_search", { expirationTtl: 300 });
+  
+    const retryMsg = `🔎 <b>Новый поиск</b>\n\nВведите название файла или тег:`;
+    
+    // Отвечаем на колбэк и отправляем новое сообщение (или редактируем старое)
+    await sendMessage(chatId, retryMsg, null, env);
+    return new Response("OK");
+  }
 
     if (action === "manual_folder") {
       await env.USER_DB.put(`state:${userId}`, "wait_manual_folder");
@@ -785,6 +1252,10 @@ async function handleCallbackQuery(query, env, ctx) {
       await sendMessage(chatId, `📂 Папка выбрана: <b>${folderIdOrName}</b>`, null, env);
     }
     
+    if (action === "admin_exit") {
+      return await sendMessage(chatId, `🚪 <b>Вы вышли из режима администратора.</b>\n\nНажмите /admin для возврата.`, null, env);
+    }
+
     // Обработка переключения сервиса в продвинутом меню
     if (data.startsWith("admin_model_show_")) {
       const serviceType = data.substring("admin_model_show_".length);
@@ -900,7 +1371,7 @@ async function handleCallbackQuery(query, env, ctx) {
         null, env
       );
     }
-
+    
     if (action === "ask_custom_server_info") {
       const customServerGuide = 
         `📁 <b>Подключение своего сервера</b>\n\n` +
@@ -1099,6 +1570,93 @@ function getFileType(fileName) {
 }
 
 /**
+ * Возвращает правильный MIME-тип для файла на основе его расширения.
+ * Поддерживает изображения, видео, аудио, документы, текст и архивы.
+ * @param {string} fileName - Имя файла (например, "report.pdf", "photo.jpg", "song.mp3")
+ * @returns {string} MIME-тип. По умолчанию — "application/octet-stream"
+ */
+function getMimeTypeFromExtension(fileName) {
+  if (!fileName) return "application/octet-stream";
+  
+  const ext = fileName.toLowerCase().split('.').pop();
+
+  const mimeTypes = {
+    // === Текст и код ===
+    'txt': 'text/plain',
+    'html': 'text/html',
+    'htm': 'text/html',
+    'css': 'text/css',
+    'js': 'application/javascript',
+    'json': 'application/json',
+    'xml': 'application/xml',
+    'csv': 'text/csv',
+    'md': 'text/markdown',
+    'log': 'text/plain',
+
+    // === Изображения ===
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'gif': 'image/gif',
+    'bmp': 'image/bmp',
+    'webp': 'image/webp',
+    'svg': 'image/svg+xml',
+    'ico': 'image/x-icon',
+    'tiff': 'image/tiff',
+    'tif': 'image/tiff',
+
+    // === Аудио ===
+    'mp3': 'audio/mpeg',
+    'wav': 'audio/wav',
+    'ogg': 'audio/ogg',
+    'oga': 'audio/ogg',
+    'flac': 'audio/flac',
+    'aac': 'audio/aac',
+    'm4a': 'audio/mp4',
+    'opus': 'audio/opus',
+
+    // === Видео ===
+    'mp4': 'video/mp4',
+    'mov': 'video/quicktime',
+    'avi': 'video/x-msvideo',
+    'mkv': 'video/x-matroska',
+    'webm': 'video/webm',
+    'flv': 'video/x-flv',
+    'wmv': 'video/x-ms-wmv',
+    'mpeg': 'video/mpeg',
+    'mpg': 'video/mpeg',
+    'm4v': 'video/mp4',
+
+    // === Документы (PDF, Office) ===
+    'pdf': 'application/pdf',
+    'doc': 'application/msword',
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'xls': 'application/vnd.ms-excel',
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'ppt': 'application/vnd.ms-powerpoint',
+    'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'odt': 'application/vnd.oasis.opendocument.text',
+    'ods': 'application/vnd.oasis.opendocument.spreadsheet',
+    'odp': 'application/vnd.oasis.opendocument.presentation',
+
+    // === Архивы ===
+    'zip': 'application/zip',
+    'rar': 'application/vnd.rar',
+    '7z': 'application/x-7z-compressed',
+    'tar': 'application/x-tar',
+    'gz': 'application/gzip',
+
+    // === Прочее ===
+    'epub': 'application/epub+zip',
+    'mobi': 'application/x-mobipocket-ebook',
+    'ics': 'text/calendar',
+    'rtf': 'application/rtf'
+  };
+
+  return mimeTypes[ext] || "application/octet-stream";
+}
+
+/**
  * Генерирует таблицу текущих активных моделей.
  * @param {Object} env - Окружение.
  * @returns {Promise<string>} HTML-таблица.
@@ -1293,6 +1851,27 @@ async function handleGoogleCallback(req, env) {
     return new Response("Успешно! Возвращайся в Telegram.");
   }
   return new Response("Error");
+}
+
+async function downloadFromGoogle(folderId, fileName, token, env) {
+  try {
+    // Ищем файлы в облаке
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?pageSize=100&fields=files(id,name,mimeType,parents)`, {
+      headers: { "Authorization": `Bearer ${token}` }
+    });
+    const data = await res.json();
+    const file = data.files?.find(f => f.name.trim() === fileName.trim());
+
+    if (!file) return null;
+
+    let url = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
+    if (file.mimeType.includes('vnd.google-apps')) {
+      url = `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=application/pdf`;
+    }
+
+    const fileRes = await fetch(url, { headers: { "Authorization": `Bearer ${token}` } });
+    return fileRes.ok ? await fileRes.arrayBuffer() : null;
+  } catch (e) { return null; }
 }
 
 async function uploadToGoogle(stream, name, token, folderId = "root") {
@@ -1662,6 +2241,47 @@ async function createDropboxFolder(folderName, token) {
 
 async function searchFilesByQuery(userId, query, env) {
   try {
+    // 1. Очищаем запрос от лишних символов для безопасности
+    const searchTerm = `%${query.trim()}%`;
+
+    // 2. Ищем прямо в базе: по имени файла ИЛИ по тегам
+    // Это гораздо быстрее, чем грузить всё в массив и фильтровать вручную
+    const filesResult = await env.FILES_DB.prepare(
+      `SELECT id FROM files 
+       WHERE userId = ? 
+       AND (fileName LIKE ? OR tags LIKE ?) 
+       ORDER BY timestamp DESC LIMIT 50`
+    )
+    .bind(String(userId), searchTerm, searchTerm)
+    .all();
+
+    if (!filesResult.success || !filesResult.results || filesResult.results.length === 0) {
+      return { success: false, message: `По запросу "${query}" ничего не найдено.` };
+    }
+
+    // 3. Собираем только ID
+    const relevantIds = filesResult.results.map(f => f.id);
+
+    return { 
+      success: true, 
+      fileIds: relevantIds 
+    };
+
+  } catch (e) {
+    console.error("Search error:", e);
+    return { success: false, message: "Ошибка поиска: " + e.message };
+  }
+}
+
+/**
+ * Выполняет семантический поиск по файлам пользователя.
+ * Использует гибридный подход: быстрый pre-filter + ИИ-ранжирование.
+ * @param {string|number} userId - ID пользователя.
+ * @param {string} query - Поисковый запрос.
+ * @param {Object} env - Окружение.
+ */
+async function searchAIFilesByQuery(userId, query, env) {
+  try {
     // 1. Выбираем ВСЕ метаданные (добавили tags!)
     const filesResult = await env.FILES_DB.prepare(
       "SELECT id, fileName, ai_description, tags FROM files WHERE userId = ? ORDER BY timestamp DESC LIMIT 300"
@@ -1707,7 +2327,7 @@ ${filesList}
     };
 
   } catch (e) {
-    console.error("Search error:", e);
+    logDebug(`Search error: ${e}`, env);
     return { success: false, message: "Ошибка ИИ: " + e.message };
   }
 }
@@ -1888,6 +2508,51 @@ async function callGeminiVision(config, imageBuffer, env) {
   }
 
   return textResult.trim();
+}
+
+// ✅ *** Исправленная функция для Gemini Document Analysis ***
+/**
+ * Анализирует документ (PDF, изображение) с помощью Gemini API.
+ * @param {Object} config - Конфигурация модели из AI_MODELS.
+ * @param {ArrayBuffer} arrayBuffer - Данные файла.
+ * @param {Object} env - Окружение с API-ключом.
+ * @param {string} mimeType - MIME-тип документа (e.g., 'application/pdf'). 
+* @returns {Promise<string>} Описание документа.
+ */
+async function callGeminiDocument(config, arrayBuffer, env, mimeType) {
+  const API_KEY_ENV_NAME = config.API_KEY;
+  const API_KEY = env[API_KEY_ENV_NAME];
+  const BASE_URL = config.BASE_URL;
+  const MODEL = config.MODEL;
+
+  if (!API_KEY) throw new Error(`API key ${config.API_KEY} не задан`);
+
+  // Конвертируем ArrayBuffer в Base64
+  const base64Data = arrayBufferToBase64(arrayBuffer);
+
+  const url = `${BASE_URL}/models/${MODEL}:generateContent?key=${API_KEY}`;
+  
+  const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+          contents: [{
+              parts: [
+                  { text: "Ты — эксперт по анализу документов. Дай краткое и информативное описание этого документа на русском языке. Сосредоточься на сути." },
+                  {
+                    inlineData: {
+                          mimeType: mimeType,
+                          data: base64Data // ← Тут будет base64
+                      }
+                  }
+              ]
+          }]
+      })
+  });
+
+  const data = await response.json();
+  if (data.error) throw new Error(`Gemini error: ${data.error.message}`);
+  return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
 }
 
 // ✅ *** Gemini Video Vision (видео аналитика) - ИСПРАВЛЕНО ***
@@ -2498,6 +3163,14 @@ const AI_MODELS = {
     API_KEY: 'GEMINI_API_KEY', 
     BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
   },
+  // Новая модель для документов
+  DOCUMENT_TO_TEXT_GEMINI: { 
+    SERVICE: 'GEMINI', 
+    FUNCTION: callGeminiDocument, // Новая функция
+    MODEL: 'gemini-2.5-flash',
+    API_KEY: 'GEMINI_API_KEY', 
+    BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
+},
 
   // --- BOTHUB (ПЛАТНЫЕ, ТЕСТОВЫЕ) ---
 
@@ -2548,6 +3221,7 @@ const AI_MODELS = {
     //BASE_URL: 'https://bothub.chat/api/v2/openai/v1/chat/completions'
     BASE_URL: 'https://bothub.chat/api/v2/openai/v1'
   },
+
   /* --- DEEPSEEK --- (ПЛАТНО $0.028 минимум)
     TEXT_TO_TEXT_DEEPSEEK: { 
         SERVICE: 'DEEPSEEK', 
@@ -2563,7 +3237,9 @@ const SERVICE_TYPE_MAP = {
   'AUDIO_TO_TEXT': { name: '🎤 Audio → Text', kvKey: 'ai_config:ACTIVE_MODEL_AUDIO_TO_TEXT' },
   'VIDEO_TO_TEXT': { name: '🎧 Video → Text', kvKey: 'ai_config:ACTIVE_MODEL_VIDEO_TO_TEXT' },
   'IMAGE_TO_TEXT': { name: '👁️ Image → Text', kvKey: 'ai_config:ACTIVE_MODEL_IMAGE_TO_TEXT' },
+  'DOCUMENT_TO_TEXT': { name: '📄 Document → Text', kvKey: 'ai_config:ACTIVE_MODEL_DOCUMENT_TO_TEXT' },
   'VIDEO_TO_ANALYSIS': { name: '👀 Video → Analysis', kvKey: 'ai_config:ACTIVE_MODEL_VIDEO_TO_ANALYSIS' }
+
 };
 // !!! ВАЖНО: Определите эту константу после AI_MODELS !!!
 const AI_MODEL_MENU_CONFIG = generateModelMenuConfig(AI_MODELS);
