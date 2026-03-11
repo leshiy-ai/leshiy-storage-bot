@@ -5,3 +5,8 @@ compatibility_date = "2024-03-12"
 kv_namespaces = [
   { binding = "USER_DB", id = "e64956db59994e7285cad1bf7ef015f1" }
 ]
+
+[[d1_databases]]
+binding = "FILES_DB"
+database_name = "files_db"
+database_id = "50a338f2-dcbd-4e5d-b6cd-bfb93bb7dd91"
