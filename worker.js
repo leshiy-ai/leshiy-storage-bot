@@ -10,7 +10,7 @@ Telegram-бот для автоматической загрузки фото и
 Скрытая функция: Команда /search для поиска и возможность достать файлы с хранилки.
 */
 // Глобальные константы
-const version = "v2.3.6 от 12.01.2026"; // актуальная версия
+const version = "v2.3.7 от 12.01.2026"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -19,11 +19,19 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const hostname = url.hostname;
+    
+    // --- Single Read & Safety ---
+    let body = null;
     if (request.method === "POST") {
-      const bodyPreview = await request.clone().text().catch(() => '');
-      console.log("REQUEST POST:", url.pathname, bodyPreview.substring(0, 200));
+      try {
+        body = await request.json();
+        console.log("REQUEST POST:", url.pathname, JSON.stringify(body).substring(0, 200));
+      } catch (e) {
+        // Если пришел не-JSON запрос, например, от другого вебхука, игнорируем его
+        return new Response('OK'); 
+      }
     } else {
-      console.log("REQUEST:", request.method, url.pathname);
+       console.log("REQUEST:", request.method, url.pathname);
     }
 
     // 1. ВЕБ-ИНТЕРФЕЙС
@@ -105,31 +113,30 @@ export default {
       return new Response(receiverHtml, { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
 
-    // --- 3. ВЕБХУКИ (POST запросы) ---
-    if (request.method === "POST") {
-      try {
-        const url = new URL(request.url);
-        const body = await request.json(); // ← Читаем ОДИН РАЗ
-
-        if (url.pathname === "/vk") {
-          // Передаём уже распаршенное тело
-          return await handleVK(body, env, hostname, ctx);
-        } else {
-          // Telegram
-          if (body.callback_query) {
-            await handleCallbackQuery(body.callback_query, env, ctx);
-            return new Response("OK");
+        // --- 3. ВЕБХУКИ (POST запросы) ---
+        if (request.method === "POST") {
+          try {
+            const url = new URL(request.url);
+            const body = await request.json(); // ← Читаем ОДИН РАЗ
+    
+            if (url.pathname === "/vk") {
+              // Передаём уже распаршенное тело
+              return await handleVK(body, env, hostname, ctx);
+            } else {
+              // Telegram
+              if (body.callback_query) {
+                await handleCallbackQuery(body.callback_query, env, ctx);
+                return new Response("OK");
+              }
+              if (body.message || body.edited_message) {
+                return await handleTelegramUpdate({ ...body }, env, hostname, ctx);
+              }
+            }
+          } catch (e) {
+            console.error("Критическая ошибка:", e);
           }
-          if (body.message || body.edited_message) {
-            return await handleTelegramUpdate({ ...body }, env, hostname, ctx);
-          }
+          return new Response("OK", { status: 200 });
         }
-      } catch (e) {
-        console.error("Критическая ошибка:", e);
-      }
-      return new Response("OK", { status: 200 });
-    }
-
     // Все остальное — 404
     return new Response("Not Found", { status: 404 });
   }
