@@ -1,6 +1,6 @@
 name = "leshiy-storage-bot"
 main = "worker.js"
-version = "2.3.0"
+version = "2.3.2"
 compatibility_date = "2024-03-12"
 
 # Переменные окружения (заглушки)
@@ -8,6 +8,7 @@ compatibility_date = "2024-03-12"
 [vars]
 ADMIN_ID = ""
 BOT_USERNAME = ""
+VK_GROUP_ID = ""
 
 [secrets]
 # Здесь Wrangler будет искать СЕКРЕТЫ, которые вы настроили
@@ -22,6 +23,10 @@ GOOGLE_CLIENT_SECRET = ""
 DROPBOX_CLIENT_ID = ""
 DROPBOX_CLIENT_SECRET = ""
 BOTHUB_API_KEY = ""
+VK_GROUP_TOKEN = ""
+VK_TOKEN = ""
+MAILRU_CLIENT_ID = ""
+MAILRU_CLIENT_SECRET = ""
 
 # [[kv_namespaces]] - Здесь Привязки KV
 [[kv_namespaces]]

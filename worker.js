@@ -10,7 +10,7 @@ Telegram-бот для автоматической загрузки фото и
 Скрытая функция: Команда /search для поиска и возможность достать файлы с хранилки.
 */
 // Глобальные константы
-const version = "v2.3.0 от 09.01.2026"; // актуальная версия
+const version = "v2.3.2 от 11.01.2026"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -111,44 +111,72 @@ async function sendVKMessage(peerId, text, env) {
  * @param {Object} kb - Клавиатура (объект inline_keyboard).
  * @param {Object} env - Окружение.
  */
-async function sendVKMessageWithKeyboard(peerId, text, kb, env) {
+async function sendVKMessageWithKeyboard(peerId, text, env, kb = null) {
   const url = "https://api.vk.com/method/messages.send";
+  
   const payload = {
     v: "5.199",
     access_token: env.VK_GROUP_TOKEN,
-    peer_id: Number(peerId),
+    peer_id: peerId.toString(), // В строку для URLSearchParams
     message: text,
-    random_id: Date.now(),
-    dont_parse_links: true
+    random_id: Math.floor(Math.random() * 2147483647).toString(), // В строку
+    dont_parse_links: "1"
   };
 
   if (kb) {
-    // VK требует строку JSON для keyboard
     payload.keyboard = JSON.stringify(kb);
   }
 
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(payload)
   });
-  return response;
+
+  return await response.json();
 }
 
 function getStartKeyboardVK(userId, hostname, env, inviteData = null) {
-  let rows = [];
-  // Все кнопки — через payload
-  rows.push([{ text: "🔗 Яндекс.Диск", payload: JSON.stringify({ cmd: "auth", provider: "yandex" }) }]);
-  rows.push([{ text: "🔗 Google Drive", payload: JSON.stringify({ cmd: "auth", provider: "google" }) }]);
-  rows.push([{ text: "🔗 Dropbox", payload: JSON.stringify({ cmd: "auth", provider: "dropbox" }) }]);
-  rows.push([{ text: "🔗 Mail.ru (WebDAV)", payload: JSON.stringify({ cmd: "auth_mailru" }) }]);
-  rows.push([{ text: "🖥️ Свой WebDAV", payload: JSON.stringify({ cmd: "auth_webdav" }) }]);
-  if (inviteData) {
-    rows.push([{ text: "🤝 Подтвердить", payload: JSON.stringify({ cmd: "confirm_ref", token: inviteData.token }) }]);
-  } else {
-    rows.push([{ text: "🤝 Подключить друга", payload: JSON.stringify({ cmd: "ask_ref" }) }]);
+  let buttons = [];
+  
+  // Если мы нашли инвайт в этом запросе, вешаем кнопку сверху
+  if (inviteData && inviteData.token) {
+    buttons.push([{
+      action: {
+        type: "text",
+        label: "✅ Подключить диск",
+        payload: JSON.stringify({ cmd: "confirm_ref", token: inviteData.token })
+      },
+      color: "positive"
+    }]);
   }
-  return { inline_keyboard: rows };
+  // Функция-помощник для создания кнопки ВК
+  const createBtn = (label, cmd, extra = {}) => {
+    return {
+      action: {
+        type: "text",
+        label: label, // В ВК именно label!
+        payload: JSON.stringify({ cmd, ...extra })
+      }
+    };
+  };
+  
+  buttons.push([createBtn("🔗 Яндекс.Диск", "auth", { provider: "yandex" })]);
+  buttons.push([createBtn("🔗 Google Drive", "auth", { provider: "google" })]);
+  buttons.push([createBtn("🔗 Dropbox", "auth", { provider: "dropbox" })]);
+  buttons.push([createBtn("🖥️ Свой WebDAV", "auth_webdav")]);
+
+  if (inviteData) {
+    buttons.push([createBtn("🤝 Подтвердить", "confirm_ref", { token: inviteData.token })]);
+    //buttons.push([{ action: { type: "text", label: "📂 Выбрать папку", payload: JSON.stringify({ cmd: "/folder" }) }, color: "primary" }]);
+  } else {
+    buttons.push([createBtn("🤝 Пригласить друга", "ask_ref")]);
+  }
+
+  return {
+    inline: true, // Кнопки будут внутри сообщения
+    buttons: buttons
+  };
 }
 
 /**
@@ -818,6 +846,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
 
 /**
  * Обрабатывает входящие запросы от VK API.
+ * Исправлено: Мультизагрузка, AI Description, Кнопки, Состояния. 
  * @param {Object} body - Уже распаршенное тело запроса.
  * @param {Object} env - Окружение Cloudflare Worker.
  * @param {string} hostname - Хост (например, leshiy-storage-bot.leshiyalex.workers.dev)
@@ -826,6 +855,8 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
  */
 async function handleVK(body, env, hostname, ctx) {
   let chatId = null;
+  const VK_GROUP_ID = env.VK_GROUP_ID
+
   try {
     // --- 1. Подтверждение сервера ---
     if (body.type === "confirmation") {
@@ -839,37 +870,131 @@ async function handleVK(body, env, hostname, ctx) {
       const userId = message.from_id;
       const text = (message.text || "").trim();
       const userKey = `user:${userId}`;
-
+      // Запоминаем реф, если он пришел в ссылке
+      if (message.ref && message.ref.startsWith("ref_")) {
+        await env.USER_DB.put(`pending_ref:${userId}`, message.ref, { expirationTtl: 300 });
+      }
       let userData = await env.USER_DB.get(userKey, { type: "json" });
       const adminCfg = await env.USER_DB.get("admin:config", { type: "json" });
       const isAdmin = adminCfg?.admins?.includes(String(userId));
 
-      // --- КОМАНДА /START ---
-      if (text.startsWith("/start")) {
-        const args = text.split(" ")[1];
-        let inviteData = null;
+      // Определяем команду из текста или payload
+      let command = text.toLowerCase();
+      let payloadData = null;
+      if (message.payload) {
+        try {
+          payloadData = JSON.parse(message.payload);
+          if (payloadData.cmd) command = payloadData.cmd;
+        } catch (e) {}
+      }
 
-        if (args && args.startsWith("ref_")) {
-          const token = args.split("_")[1];
-          inviteData = await env.USER_DB.get(`invite:${token}`, { type: "json" });
-          if (inviteData) {
-            const ownerData = await env.USER_DB.get(`user:${inviteData.inviterId}`, { type: "json" });
-            if (ownerData) {
-              userData = {
-                provider: ownerData.provider,
-                shared_from: String(inviteData.inviterId),
-                connected_at: Date.now(),
-                folderId: ownerData.folderId,
-              };
-              await env.USER_DB.put(userKey, JSON.stringify(userData));
-              await sendVKMessage(chatId, `🤝 Готово!\nТы подключился к хранилке пользователя ${inviteData.inviterId} (${ownerData.provider}).\n📁 Папка: ${ownerData.folderId}`, env);
-              await sendVKMessage(inviteData.inviterId, `🔔 Твоей хранилкой начал пользоваться ID ${userId} (папка: ${userData.folderId})`, env);
-            }
-          } else {
-            await sendVKMessage(chatId, "❌ Ссылка недействительна или устарела.", env);
+      // --- ОБРАБОТКА PAYLOAD КОМАНД (КНОПКИ) ---
+      if (command === "auth") {
+        const provider = payloadData.provider;
+        let authUrl = "";
+        if (provider === "yandex") authUrl = `https://oauth.yandex.ru/authorize?response_type=code&client_id=${env.YANDEX_CLIENT_ID}&state=${userId}`;
+        if (provider === "google") authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${env.GOOGLE_CLIENT_ID}&redirect_uri=https://${hostname}/auth/google/callback&response_type=code&scope=${encodeURIComponent("https://www.googleapis.com/auth/drive.file")}&state=${userId}&access_type=offline&prompt=consent`;
+        if (provider === "dropbox") authUrl = `https://www.dropbox.com/oauth2/authorize?client_id=${env.DROPBOX_CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(`https://${hostname}/auth/dropbox/callback`)}&token_access_type=offline&state=${userId}`;
+        
+        await sendVKMessage(chatId, `🔗 Ссылка для авторизации ${provider}:\n${authUrl}`, env);
+        return new Response("OK");
+      }
+
+      if (command === "auth_webdav") {
+        await env.USER_DB.put(`state:${userId}`, "wait_webdav_url");
+        await sendVKMessage(chatId, "🖥️ Введи данные WebDAV в формате:\nURL|Логин|Пароль\n\nПример:\nhttps://webdav.yandex.ru|myuser|mypass", env);
+        return new Response("OK");
+      }
+
+      if (command === "ask_ref") {
+        const token = Math.random().toString(36).substring(2, 10);
+        const inviteInfo = { 
+          inviterId: userId, 
+          provider: userData?.provider,
+          folderId: userData?.folderId 
+        };
+        await env.USER_DB.put(`invite:${token}`, JSON.stringify(inviteInfo), { expirationTtl: 86400 });
+        
+        const refLink = `https://vk.com/write-${VK_GROUP_ID}?ref=ref_${token}`;
+        const chatLink = "https://vk.me/join/GkFYvIVWAn5WaETpFi__j5lLouNOp9q2Hns=";
+      
+        let shareMsg = `🤝 Пригласи друга в облако!\n\n`;
+        shareMsg += `Перешли другу эту ссылку для активации диска:\n${refLink}\n\n`;
+        shareMsg += `После активации пригласи его в наш общий чат:\n${chatLink}`;
+      
+        await sendVKMessage(chatId, shareMsg, env);
+        return new Response("OK");
+      }
+
+      // Обработка нажатия кнопки "Подтвердить"
+      if (command === "confirm_ref") {
+        const token = payloadData?.token;
+        const inviteData = await env.USER_DB.get(`invite:${token}`, { type: "json" });
+      
+        if (inviteData) {
+          const ownerData = await env.USER_DB.get(`user:${inviteData.inviterId}`, { type: "json" });
+          if (ownerData) {
+            // Клонируем доступ
+            userData = {
+              provider: ownerData.provider,
+              shared_from: String(inviteData.inviterId),
+              connected_at: Date.now(),
+              folderId: ownerData.folderId,
+              access_token: ownerData.access_token,
+              refresh_token: ownerData.refresh_token
+            };
+            await env.USER_DB.put(`user:${userId}`, JSON.stringify(userData));
+      
+            // Ссылка на чат
+            const chatLink = "https://vk.me/join/GkFYvIVWAn5WaETpFi__j5lLouNOp9q2Hns=";
+      
+            // Создаем клавиатуру с кнопкой-ссылкой на чат
+            const joinChatKb = {
+              inline: true,
+              buttons: [[{
+                action: {
+                  type: "open_link",
+                  link: chatLink,
+                  label: "🚀 Перейти в рабочий чат"
+                }
+              }]]
+            };
+      
+            await sendVKMessageWithKeyboard(
+              chatId, 
+              `✅ **Успешно!**\n\nТы подключился к диску друга ${inviteData.inviterId}.\nТеперь все файлы, которые ты отправишь в общий чат, будут улетать в облако ${inviteData.provider}.`, 
+              env, 
+              joinChatKb
+            );
+            
+            // Уведомляем владельца
+            await sendVKMessage(inviteData.inviterId, `🔔 Пользователь ${userId} теперь использует твое облако!`, env);
+          }
+        } else {
+          await sendVKMessage(chatId, "❌ Ошибка: Ссылка просрочена (24ч) или неверна.", env);
+        }
+        return new Response("OK");
+      }
+
+      // --- КОМАНДА /START ---
+      if (command.startsWith("/start") || command === "start" || command === "Начать" || message.ref) {
+        // 1. Извлекаем токен (из прямой ссылки ВК или из текста сообщения)
+        let refParam = message.ref || ""; 
+        if (!refParam && text.includes(" ")) {
+          const parts = text.split(" ");
+          if (parts[1] && parts[1].startsWith("ref_")) refParam = parts[1];
+        }
+
+        let inviteData = null;
+        if (refParam.startsWith("ref_")) {
+          const token = refParam.split("_")[1];
+          const foundInvite = await env.USER_DB.get(`invite:${token}`, { type: "json" });
+          if (foundInvite) {
+            inviteData = { ...foundInvite, token: token };
           }
         }
 
+        // 2. Формируем статус с эмодзи
         let statusText = "❌ Диск не подключен";
         if (userData && userData.provider) {
           const folderInfo = userData.folderId ? ` (папка: ${userData.folderId})` : " (корень)";
@@ -877,389 +1002,497 @@ async function handleVK(body, env, hostname, ctx) {
           statusText = `✅ ${userData.provider} подключен${folderInfo}${sharedInfo}`;
         }
 
-        let welcome = `👋 Привет! Я твоя личная хранилка.\n📁 Просто пришли мне фото или видео, и я закину их на сервер.\n⚙️ Статус: ${statusText}\n📖 Команды:\n/folder — Выбрать папку\n/share — Создать ссылку для друга\n/search — Поиск файлов\n/disconnect — Отключить диск\n/debug — Техническая информация`;
-
+        // 3. Возвращаем классическое приветствие с командами
+        let welcome = `👋 Привет! Я твоя личная хранилка.\n`;
+        welcome += `📁 Просто пришли мне фото или видео, и я закину их на сервер.\n`;
+        welcome += `⚙️ Статус: ${statusText}\n`;
+        welcome += `📖 Команды:\n`;
+        welcome += `/folder — 📂 Выбрать папку\n`;
+        welcome += `/share — 🤝 Ссылка для друга\n`;
+        welcome += `/search — 🔎 Поиск файлов\n`;
+        welcome += `/disconnect — 🔌 Отключить диск\n`;
+        welcome += `/debug — 🛠️ Техническая информация`;
+        
         if (inviteData && !userData?.shared_from) {
-          welcome += `\n\n🎁 Найдено приглашение!\nОт владельца облака ${inviteData.provider}.`;
+          welcome += `\n\n🎁 **Найдено приглашение!**\nОт владельца облака ${inviteData.provider}. Нажми "Подтвердить" на клавиатуре, чтобы начать работу.`;
         }
 
-        await sendVKMessage(chatId, welcome, env);
-
-        // Отправляем ссылки авторизации как текст (кнопки не работают в ЛС)
-        if (!userData || !userData.provider) {
-          const yAuth = `https://oauth.yandex.ru/authorize?response_type=code&client_id=${env.YANDEX_CLIENT_ID}&state=${userId}`;
-          const gAuth = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${env.GOOGLE_CLIENT_ID}&redirect_uri=https://${hostname}/auth/google/callback&response_type=code&scope=${encodeURIComponent("https://www.googleapis.com/auth/drive.file")}&state=${userId}&access_type=offline&prompt=consent`;
-          const dbxAuth = `https://www.dropbox.com/oauth2/authorize?client_id=${env.DROPBOX_CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(`https://${hostname}/auth/dropbox/callback`)}&token_access_type=offline&state=${userId}`;
-          await sendVKMessage(chatId, `🔗 Подключить Яндекс.Диск:\n${yAuth}\n\n🔗 Подключить Google Drive:\n${gAuth}\n\n🔗 Подключить Dropbox:\n${dbxAuth}`, env);
-        }
-
+        // 4. Генерируем клавиатуру (она подхватит inviteData и добавит кнопку подтверждения)
+        const kb = getStartKeyboardVK(userId, hostname, env, inviteData);
+        
+        await sendVKMessageWithKeyboard(chatId, welcome, env, kb);
         return new Response("OK");
       }
 
       // --- КОМАНДА /ADMIN ---
-      if (text === "/admin" && isAdmin) {
+      if (command === "/admin" && isAdmin) {
         const list = await env.USER_DB.list({ prefix: "user:" });
-        const authIds = list.keys.map(k => k.name.split(":")[1]);
-        const adminMsg = `⚙️ Панель администратора\n
-🆔 Админ ID: ${userId}\n
-✅ Авторизованы (диск подключен):\n${authIds.length > 0 ? authIds.join("\n") : "—"}
-\n🚀 Версия: ${version}`;
-        await sendVKMessage(chatId, adminMsg, env);
+        const adminMsg = `⚙️ Панель администратора\n✅ Авторизовано: ${list.keys.length}\n🚀 Версия: ${version}\n\nВыбери раздел настроек:`;
+        
+        const adminKb = {
+          inline: true,
+          buttons: [
+            [{ action: { type: "text", label: "🤖 Настройки ИИ", payload: JSON.stringify({ cmd: "/ai_settings" }) }, color: "primary" }],
+            [{ action: { type: "text", label: "📊 Статистика", payload: JSON.stringify({ cmd: "/debug" }) }, color: "secondary" }]
+          ]
+        };
+
+        await sendVKMessageWithKeyboard(chatId, adminMsg, env, adminKb);
         return new Response("OK");
       }
 
-      // --- КОМАНДА /AI_SETTINGS ---
-      if (text === "/ai_settings" && isAdmin) {
-        let msg = "🧠 Настройки ИИ-моделей\n";
-        for (const [type, info] of Object.entries(SERVICE_TYPE_MAP)) {
-          const modelKey = await env.USER_DB.get(info.kvKey) || Object.keys(AI_MODELS).find(k => k.startsWith(type)) || "—";
-          const modelName = AI_MODELS[modelKey]?.MODEL || "—";
-          msg += `\n${info.name}: ${modelName}`;
+      // --- КОМАНДА /AI_SETTINGS (ЗЕРКАЛО ТЕЛЕГРАМА) ---
+      if (command === "/ai_settings" && isAdmin) {
+        const type = payloadData?.type;
+
+        if (!type) {
+          let msg = "🧠 Текущие модели ИИ:\n";
+          for (const [type, info] of Object.entries(SERVICE_TYPE_MAP)) {
+            const modelKey = await env.USER_DB.get(info.kvKey) || Object.keys(AI_MODEL_MENU_CONFIG[type]?.models || {})[0];
+            const modelName = AI_MODEL_MENU_CONFIG[type]?.models[modelKey] || "—";
+            msg += `• ${info.name}: ${modelName}\n`;
+          }
+          msg += `Выберите раздел для изменения:`;
+
+          const aiKb = {
+            inline: true,
+            buttons: [
+              [{ action: { type: "text", label: "📝 Text → Text", payload: JSON.stringify({ cmd: "/ai_settings", type: "TEXT_TO_TEXT" }) }, color: "primary" }],
+              [{ action: { type: "text", label: "🎙️ Audio → Text", payload: JSON.stringify({ cmd: "/ai_settings", type: "AUDIO_TO_TEXT" }) }, color: "primary" }],
+              [{ action: { type: "text", label: "🎥 Video → Text", payload: JSON.stringify({ cmd: "/ai_settings", type: "VIDEO_TO_TEXT" }) }, color: "primary" }],
+              [{ action: { type: "text", label: "🖼️ Image → Text", payload: JSON.stringify({ cmd: "/ai_settings", type: "IMAGE_TO_TEXT" }) }, color: "primary" }],
+              [{ action: { type: "text", label: "📄 Document → Text", payload: JSON.stringify({ cmd: "/ai_settings", type: "DOCUMENT_TO_TEXT" }) }, color: "primary" }],
+              [{ action: { type: "text", label: "🎞️ Video → Analysis", payload: JSON.stringify({ cmd: "/ai_settings", type: "VIDEO_TO_ANALYSIS" }) }, color: "primary" }]
+            ]
+          };
+          await sendVKMessageWithKeyboard(chatId, msg, env, aiKb);
+        } else {
+          // Выбор конкретной модели в разделе
+          const currentConfig = await loadActiveConfig(type, env);
+          const availableModels = Object.keys(AI_MODELS).filter(k => k.startsWith(type));
+          
+          let msg = `⚙️ Настройка: ${type}\n✅ Текущая: ${currentConfig.MODEL}\n\nДоступные модели:`;
+          let buttons = [];
+          
+          availableModels.forEach(mKey => {
+            buttons.push([{
+              action: { type: "text", label: AI_MODELS[mKey].MODEL, payload: JSON.stringify({ cmd: "/set_model", type, model: mKey }) },
+              color: "secondary"
+            }]);
+          });
+          // Кнопка Назад
+          buttons.push([{ action: { type: "text", label: "⬅️ Назад", payload: JSON.stringify({ cmd: "/ai_settings" }) }, color: "default" }]);
+
+          await sendVKMessageWithKeyboard(chatId, msg, env, { inline: true, buttons });
         }
-        await sendVKMessage(chatId, msg, env);
         return new Response("OK");
       }
 
-      // --- КОМАНДА /ADD ---
-      if (text.startsWith("/add") && isAdmin) {
-        const targetId = text.split(" ")[1];
-        if (!targetId) {
-          await sendVKMessage(chatId, "⚠️ Формат: /add [ID]", env);
-          return new Response("OK");
-        }
-        const myData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
-        if (!myData) {
-          await sendVKMessage(chatId, "❌ Сначала авторизуй свой диск!", env);
-          return new Response("OK");
-        }
-        // Копируем твои данные целевому пользователю
-        await env.USER_DB.put(`user:${targetId}`, JSON.stringify({
-          provider: myData.provider,
-          access_token: myData.access_token,
-          folderId: "Storage"
-        }));
-        await sendVKMessage(chatId, `✅ Пользователь ${targetId} инициализирован на ${myData.provider}`, env);
-        return new Response("OK");
+      if (command === "/set_model" && isAdmin) {
+        const { type, model } = payloadData;
+        const kvKey = SERVICE_TYPE_MAP[type].kvKey;
+        await env.USER_DB.put(kvKey, model);
+        await sendVKMessage(chatId, `✅ Модель для ${type} изменена на ${model}`, env);
+        // Возвращаемся в меню
+        return await handleVK({ type: "message_new", object: { message: { peer_id: chatId, from_id: userId, text: "/ai_settings" } } }, env, hostname, ctx);
       }
 
       // --- КОМАНДА /DEBUG ---
-      if (text === "/debug") {
-        let debugInfo = `🔧 DEBUG INFO\nUser ID: ${userId}\nIs Admin: ${isAdmin}\nHostname: ${hostname}`;
-        if (userData) {
-          debugInfo += `\nProvider: ${userData.provider || '—'}\nFolder: ${userData.folderId || 'Root'}\nShared from: ${userData.shared_from || '—'}`;
-        } else {
-          debugInfo += "\nUser data: not found";
-        }
+      if (command === "/debug") {
+        const hasToken = !!(userData?.access_token || userData?.webdav_pass || userData?.shared_from);
+        let debugInfo = `🔧 DEBUG INFO\n`;
+        debugInfo += `📦 Версия: ${version}\n`;
+        debugInfo += `🔗 Статус: ${hasToken ? "✅ Соединение активно" : "❌ Не подключен"}\n`;
+        debugInfo += `🔌 Провайдер: ${userData?.provider || '—'}\n`;
+        debugInfo += `📁 Папка: ${userData?.folderId || 'Root'}\n`;
+        debugInfo += `👤 Твой ID: ${userId}\n`;
+        debugInfo += `👑 Админ: ${isAdmin ? "Да" : "Нет"}`;
         await sendVKMessage(chatId, debugInfo, env);
         return new Response("OK");
       }
 
-      // --- Общая проверка доступа ---
-      const hasAccess = isAdmin || (userData && (userData.access_token || userData.provider === 'webdav' || userData.shared_from));
-      if (!hasAccess && !text.startsWith("/")) {
-        await sendVKMessage(chatId, "🚫 Доступ ограничен.\nУ тебя не подключено облако и нет активной ссылки от друга.", env);
-        return new Response("OK");
-      }
-
       // --- КОМАНДА /SHARE ---
-      if (text.startsWith("/share")) {
-        if (userData.is_ref) {
-          await sendVKMessage(chatId, "⚠️ Ты используешь чужой диск и не можешь создавать свои реф-ссылки.", env);
+      if (command === "/share") {
+        if (!userData?.provider) {
+          await sendVKMessage(chatId, "⚠️ Сначала подключи диск!", env);
           return new Response("OK");
         }
-        const currentFolder = userData?.folderId || "Root";
         const inviteToken = Math.random().toString(36).substring(2, 12);
-        const inviteData = {
-          inviterId: userId,
-          provider: userData.provider,
-          token: inviteToken,
-          folderId: currentFolder,
-          timestamp: Date.now()
-        };
-        await env.USER_DB.put(`invite:${inviteToken}`, JSON.stringify(inviteData));
-        const botName = env.BOT_USERNAME || "leshiy_storage_bot";
-        const inviteLink = `https://t.me/${botName}?start=ref_${inviteToken}`;
-        await sendVKMessage(chatId, `🚀 Твоя ссылка для друга:\n${inviteLink}\n📁 Папка: ${currentFolder}\nОблако: ${userData.provider}`, env);
+        await env.USER_DB.put(`invite:${inviteToken}`, JSON.stringify({ inviterId: userId, provider: userData.provider }), { expirationTtl: 86400 });
+        const refLink = `https://vk.com/write-${VK_GROUP_ID}?ref=ref_${inviteToken}`;
+        await sendVKMessage(chatId, `🚀 Твоя ссылка для друга:\n${refLink}\n📁 Папка: ${userData.folderId || "Root"}\nОблако: ${userData.provider}`, env);
         return new Response("OK");
       }
-
+      
       // --- КОМАНДА /DISCONNECT ---
-      if (text === "/disconnect") {
+      if (command === "/disconnect") {
         await env.USER_DB.delete(userKey);
         await sendVKMessage(chatId, "🔌 Диск отключен.", env);
         return new Response("OK");
       }
 
       // --- КОМАНДА /FOLDER ---
-      if (text === "/folder") {
-        if (!userData || !userData.provider) {
-          await sendVKMessage(chatId, "❌ Сначала подключи облако (/start).", env);
+      if (command === "/folder") {
+        if (!userData?.access_token && !userData?.webdav_pass) {
+          await sendVKMessage(chatId, "❌ Сначала подключи облако.", env);
           return new Response("OK");
         }
-
         await sendVKMessage(chatId, "📂 Получаю список папок...", env);
         let folders = [];
         try {
-          if (userData.provider === "google") {
-            folders = await listGoogleFolders(userData.access_token);
-          } else if (userData.provider === "yandex") {
-            folders = await listYandexFolders(userData.access_token);
-          } else if (userData.provider === "dropbox") {
-            folders = await listDropboxFolders(userData.access_token);
-          }
+          if (userData.provider === "google") folders = await listGoogleFolders(userData.access_token);
+          else if (userData.provider === "yandex") folders = await listYandexFolders(userData.access_token);
+          else if (userData.provider === "dropbox") folders = await listDropboxFolders(userData.access_token);
         } catch (e) {
           await sendVKMessage(chatId, `❌ Ошибка: ${e.message}`, env);
           return new Response("OK");
         }
-
-        if (folders.length === 0) {
-          await sendVKMessage(chatId, "📁 Папок не найдено. Отправь:\n`/create Storage` — чтобы создать папку 'Storage'", env);
+        if (folders.length > 0) {
+          const buttons = folders.slice(0, 10).map(f => ([{
+            action: { type: "text", label: f.name.substring(0, 40), payload: JSON.stringify({ cmd: "select_folder", name: f.name, id: f.id }) },
+            color: "primary"
+          }]));
+          await sendVKMessageWithKeyboard(chatId, "📂 Выбери папку из списка:", env, { inline: true, buttons });
+        } else {
+          await sendVKMessage(chatId, "📁 Папок нет. Отправь: `/create Имя`", env);
           await env.USER_DB.put(`state:${userId}`, "wait_create_folder");
-          return new Response("OK");
         }
+        return new Response("OK");
+      }
 
-        let list = "📂 Доступные папки:\n";
-        folders.slice(0, 20).forEach((f, i) => {
-          list += `${i + 1}. ${f.name}\n`;
-        });
-        list += "\nОтветь номером папки (например: `2`) или:\n`/create Имя` — создать новую папку";
-        await env.USER_DB.put(`state:${userId}`, "wait_folder_choice");
-        await env.USER_DB.put(`temp_folders:${userId}`, JSON.stringify(folders));
-        await sendVKMessage(chatId, list, env);
+      if (command === "select_folder") {
+        userData.folderId = payloadData.name;
+        if (userData.provider === "google") userData.folderId = payloadData.id;
+        await env.USER_DB.put(userKey, JSON.stringify(userData));
+        await sendVKMessage(chatId, `✅ Выбрана папка: ${payloadData.name}`, env);
         return new Response("OK");
       }
 
       // --- КОМАНДА /SEARCH ---
-      if (text.startsWith("/search")) {
-        if (!userData || (!userData.provider && !userData.shared_from)) {
-          await sendVKMessage(chatId, "⚠️ Поиск недоступен.\nТвоё хранилище не подключено.", env);
-          return new Response("OK");
-        }
+      if (command.startsWith("/search")) {
         const query = text.replace(/^\/search\s*/i, '').trim();
         if (!query) {
           await env.USER_DB.put(`state:${userId}`, "waiting_for_search", { expirationTtl: 300 });
-          await sendVKMessage(chatId, "🔎 Поиск по архиву\nПришли мне название файла или его часть.\nПримеры: \"сейф\", \"jpg\", \"2025\"\n🔹 Ищу только по именам файлов.\n🔹 Поиск не чувствителен к регистру.\n👇 Просто напиши, что искать:", env);
+          await sendVKMessage(chatId, "🔎 Напиши, что искать (имя файла):", env);
           return new Response("OK");
         }
-
-        await sendVKMessage(chatId, "⏳ Выполняю поиск файлов...", env);
-        const isAIQuery = query.includes(" ") && isAdmin;
-        let searchResult;
-        if (isAIQuery) {
-          searchResult = await searchAIFilesByQuery(userId, isAdmin, query, env);
-        } else {
-          searchResult = await searchFilesByQuery(userId, isAdmin, query, env);
-        }
-
+        await sendVKMessage(chatId, "⏳ Ищу...", env);
+        const searchResult = await searchFilesByQuery(userId, isAdmin, query, env);
         if (!searchResult.success || searchResult.fileIds.length === 0) {
-          await sendVKMessage(chatId, `❌ По запросу "${query}" ничего не найдено.`, env);
+          await sendVKMessage(chatId, `❌ Ничего не найдено по запросу "${query}".`, env);
           return new Response("OK");
         }
-
-        let list = `🔍 Найдено всего: ${searchResult.fileIds.length}\n`;
+        let resList = `🔍 Найдено: ${searchResult.fileIds.length}\n`;
         for (const id of searchResult.fileIds.slice(0, 5)) {
           const f = await env.FILES_DB.prepare("SELECT fileName FROM files WHERE id = ?").bind(id).first();
-          list += `• ${f?.fileName || 'Файл'}\n`;
+          resList += `• ${f?.fileName || 'Файл'}\n`;
         }
-        await sendVKMessage(chatId, list, env);
+        await sendVKMessage(chatId, resList, env);
         return new Response("OK");
       }
 
-      // --- КОМАНДА /AI_SEARCH ---
-      if (text.startsWith("/ai_search") && isAdmin) {
-        const query = text.replace(/^\/ai_search\s*/i, '').trim();
-        if (!query) {
-          await sendVKMessage(chatId, "🔎 Что ищем с помощью ИИ?", env);
-          return new Response("OK");
-        }
-        await sendVKMessage(chatId, "⏳ Выполняю интеллектуальный поиск...", env);
-        const searchResult = await searchAIFilesByQuery(userId, isAdmin, query, env);
-        if (!searchResult.success || searchResult.fileIds.length === 0) {
-          await sendVKMessage(chatId, "🔍 По вашему запросу ничего не найдено.", env);
-          return new Response("OK");
-        }
-        let list = `🧠 Найдено (ИИ): ${searchResult.fileIds.length}\n`;
-        for (const id of searchResult.fileIds.slice(0, 5)) {
-          const f = await env.FILES_DB.prepare("SELECT fileName FROM files WHERE id = ?").bind(id).first();
-          list += `• ${f?.fileName || 'Файл'}\n`;
-        }
-        await sendVKMessage(chatId, list, env);
-        return new Response("OK");
-      }
-
-      // --- ОБРАБОТКА ФАЙЛОВ ---
+      // --- ОБРАБОТКА ВЛОЖЕНИЙ (МУЛЬТИЗАГРУЗКА) ---
       if (message.attachments && message.attachments.length > 0) {
-        await sendVKMessage(chatId, "⏳ Начинаю загрузку в облако...", env);
-        try {
-          for (const attachment of message.attachments) {
-            let fileObj = null;
-            let fileName = "";
-            let fType = "document";
+        if (!(isAdmin || (userData && (userData.access_token || userData.webdav_pass || userData.shared_from)))) {
+          await sendVKMessage(chatId, "🚫 Хранилище не подключено!", env);
+          return new Response("OK");
+        }
 
-            if (attachment.type === "photo") {
-              fileObj = attachment.photo;
-              fType = "photo";
-              fileName = `Photo_${Date.now()}.jpg`;
-            } else if (attachment.type === "video") {
-              // Видео из VK нельзя скачать напрямую → пропускаем
-              await sendVKMessage(chatId, "⚠️ Загрузка видео из VK временно недоступна. Используй Telegram.", env);
-              continue;
-            } else if (attachment.type === "audio") {
-              fileObj = attachment.audio;
-              fType = "audio";
-              fileName = attachment.audio.title || `Audio_${Date.now()}.mp3`;
-            } else if (attachment.type === "doc") {
-              fileObj = attachment.doc;
-              fType = "document";
-              fileName = fileObj.title || `file_${Date.now()}.pdf`;
-            }
+        await sendVKMessage(chatId, `⏳ Вижу вложений: ${message.attachments.length}. Начинаю...`, env);
 
-            if (!fileObj || !fileObj.url) continue;
+        ctx.waitUntil((async () => {
+          for (const attach of message.attachments) {
+            try {
+              let url = "", name = "", fType = attach.type;
+              let dbFileType = fType;
+              let mimeType = ""; // Нужно для Gemini
 
-            const arrayBuffer = await fetch(fileObj.url).then(res => res.arrayBuffer());
+              const now = new Date();
+              const dateStr = now.getFullYear() + '-' + 
+                              String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                              String(now.getDate()).padStart(2, '0') + '_' + 
+                              String(now.getHours()).padStart(2, '0') + '-' + 
+                              String(now.getMinutes()).padStart(2, '0') + '-' + 
+                              String(now.getSeconds()).padStart(2, '0');
 
-            let success = false;
-            if (userData.provider === "google") {
-              success = await uploadToGoogleFromArrayBuffer(arrayBuffer, fileName, userData.access_token, userData.folderId || "root");
-            } else if (userData.provider === "yandex") {
-              success = await uploadToYandexFromArrayBuffer(arrayBuffer, fileName, userData.access_token, userData.folderId || "");
-            } else if (userData.provider === "dropbox") {
-              success = await uploadToDropboxFromArrayBuffer(arrayBuffer, fileName, userData.access_token, userData.folderId || "Storage");
-            } else if (userData.provider === "webdav") {
-              success = await uploadWebDAVFromArrayBuffer(arrayBuffer, fileName, userData, env);
-            }
+              // --- 1. ЛОГИКА ОПРЕДЕЛЕНИЯ ТИПА (КАК В TG ВЕРСИИ) ---
+              if (fType === "photo") {
+                url = attach.photo.sizes.sort((a,b) => b.width - a.width)[0].url;
+                name = `Photo_${dateStr}.jpg`;
+                mimeType = "image/jpeg";
+              } 
+              else if (fType === "doc") {
+                url = attach.doc.url;
+                name = attach.doc.title || `Doc_${dateStr}.${attach.doc.ext}`;
+                dbFileType = "document";
+                // Определяем MIME для AI
+                const ext = (attach.doc.ext || "").toLowerCase();
+                if (ext === "pdf") mimeType = "application/pdf";
+                else if (["jpg","jpeg","png"].includes(ext)) mimeType = "image/jpeg";
+                else mimeType = "text/plain";
+              }
+              else if (fType === "audio") {
+                url = attach.audio.url;
+                const artist = (attach.audio.artist || "Unknown").replace(/[\\/:*?"<>|]/g, "");
+                const title = (attach.audio.title || "Track").replace(/[\\/:*?"<>|]/g, "");
+                name = `${artist} - ${title}.mp3`;
+                dbFileType = "audio";
+                mimeType = "audio/mpeg";
+              } 
+              else if (fType === "video") {
+                const v = attach.video;
+                let vFiles = v.files || {};
+                
+                // 1. Пытаемся взять ссылку из того, что прислал Callback API
+                url = vFiles.mp4_1080 || vFiles.mp4_720 || vFiles.mp4_480 || vFiles.mp4_360 || vFiles.src;
 
-            if (success) {
-              await env.FILES_DB.prepare(
-                "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
-              ).bind(String(userId), fileName, fileObj.id, fType, userData.provider, userData.folderId || "Root", Date.now()).run();
-
-              if (["photo", "audio", "document"].includes(fType)) {
-                ctx.waitUntil((async () => {
+                // 2. Если пусто (пожатое видео), идем в API ВК за ссылками
+                if (!url && v.id) {
                   try {
-                    let description;
-                    const modelConfig = await loadActiveConfig(`${fType.toUpperCase()}_TO_TEXT`, env);
-                    description = await modelConfig.FUNCTION(modelConfig, arrayBuffer, env);
-                    await env.FILES_DB.prepare("UPDATE files SET ai_description = ? WHERE userId = ? AND fileName = ?")
-                      .bind(description, String(userId), fileName).run();
+                    // Используем твой VK_TOKEN из env
+                    const vkApiUrl = `https://api.vk.com/method/video.get?owner_id=${v.owner_id}&videos=${v.owner_id}_${v.id}&access_token=${env.VK_TOKEN}&v=5.199`;
+                    const vkRes = await fetch(vkApiUrl);
+                    const vkData = await vkRes.json();
+                    
+                    if (vkData.response && vkData.response.items && vkData.response.items[0]) {
+                      const realFiles = vkData.response.items[0].files || {};
+                      url = realFiles.mp4_1080 || realFiles.mp4_720 || realFiles.mp4_480 || realFiles.mp4_360 || realFiles.src;
+                      
+                      // Если ВК отдал внешнюю ссылку (например, YouTube), её не скачаем просто так
+                      if (!url && realFiles.external) {
+                         await sendVKMessage(chatId, `ℹ️ Видео "${v.title}" — внешняя ссылка (${realFiles.external}). Такие пока не качаю.`, env);
+                         continue;
+                      }
+                    }
                   } catch (e) {
-                    await logDebug(`⚠️ Ошибка генерации описания: ${e.message}`, env);
+                    console.error("VK API Video.get Error:", e);
                   }
-                })());
+                }
+
+                if (!url) {
+                  await sendVKMessage(chatId, `❌ Не удалось извлечь видеопоток для "${v.title}". Попробуй как файл.`, env);
+                  continue;
+                }
+
+                name = (v.title || `Video_${dateStr}`).replace(/[\\/:*?"<>|]/g, "") + ".mp4";
+                dbFileType = "video";
+                mimeType = "video/mp4";
+              }
+              else if (fType === "video_message") {
+                url = attach.video_message.video_url; // У заметок обычно прямая ссылка здесь
+                name = `VideoNote_${dateStr}.mp4`;
+                dbFileType = "video";
+                mimeType = "video/mp4";
+              }
+              else if (fType === "audio_message") {
+                url = attach.audio_message.link_mp3 || attach.audio_message.link_ogg;
+                name = `Voice_${dateStr}.mp3`;
+                dbFileType = "audio_message";
+                mimeType = "audio/mpeg";
               }
 
-              await sendVKMessage(chatId, `✅ Файл ${fileName} сохранен в ${userData.provider}!`, env);
-              return new Response("OK");
-            } else {
-              await sendVKMessage(chatId, "❌ Ошибка при загрузке. Проверьте токены или место на диске.", env);
-              return new Response("OK");
+              if (!url) continue;
+
+              // --- 2. СКАЧИВАНИЕ С ИМИТАЦИЕЙ БРАУЗЕРА ---
+              let fileRes = await fetch(url, {
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+                  'Accept': '*/*'
+                }
+              });
+
+              if (!fileRes.ok) {
+                await sendVKMessage(chatId, `❌ Ошибка загрузки с ВК: ${fileRes.status} для ${fType}`, env);
+                continue;
+              }
+
+              // --- УЛЬТИМАТИВНЫЙ ПЕРЕХВАТЧИК (ФИНАЛ) ---
+              let fileBuffer = await fileRes.arrayBuffer();
+              const contentType = fileRes.headers.get("Content-Type") || "";
+
+              // Если ВК прислал HTML (страницу-заглушку) вместо файла
+              if (contentType.includes("text/html")) {
+                const textContent = new TextDecoder().decode(fileBuffer);
+                
+                // Ищем ЛЮБУЮ ссылку на сервера документов ВК (psv4, vk.me, userapi)
+                // Ищем в кавычках или сразу после src/href
+                const match = textContent.match(/https?:\/\/[^\s"'<>]+(?:psv4|userapi|vk-cdn|vk\.me)[^\s"'<>]+\b/);
+                
+                if (match) {
+                  // Очищаем ссылку от HTML-сущностей (&amp; -> &)
+                  let directUrl = match[0].replace(/&amp;/g, '&');
+                  
+                  // ВАЖНО: Если ссылка обрывается на токене, убедимся, что она полная
+                  console.log("Redirect found! New attempt to:", directUrl);
+                  
+                  const secondRes = await fetch(directUrl, {
+                    headers: { 
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'Referer': 'https://vk.com/'
+                    }
+                  });
+                  
+                  if (secondRes.ok) {
+                    const secondType = secondRes.headers.get("Content-Type") || "";
+                    // Если второй запрос реально вернул не HTML, значит мы победили
+                    if (!secondType.includes("text/html")) {
+                        fileBuffer = await secondRes.arrayBuffer();
+                        console.log("Bypass success: Real file size:", fileBuffer.byteLength);
+                    }
+                  }
+                }
+              }
+
+              if (fileBuffer.byteLength < 100) continue;
+
+              // --- 3. ЗАПИСЬ В БАЗУ (INSERT) ---
+              const vkId = String(attach[fType]?.id || Date.now());
+              await env.FILES_DB.prepare(
+                "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
+              ).bind(String(userId), name, vkId, dbFileType, userData.provider, userData.folderId || "Root", Date.now()).run();
+
+              // --- 4. ЗАГРУЗКА В ОБЛАКО ---
+              let uploadOk = false;
+              if (userData.provider === "google") {
+                uploadOk = await uploadToGoogleFromArrayBuffer(fileBuffer, name, userData.access_token, userData.folderId || "root");
+              } else if (userData.provider === "yandex") {
+                uploadOk = await uploadToYandexFromArrayBuffer(fileBuffer, name, userData.access_token, userData.folderId || "");
+              } else if (userData.provider === "webdav") {
+                uploadOk = await uploadWebDAVFromArrayBuffer(fileBuffer, name, userData, env);
+              }
+
+              if (uploadOk) {
+                await sendVKMessage(chatId, `✅ Сохранен: ${name}`, env);
+
+                // --- 5. AI АНАЛИТИКА (КАК В TG ВЕРСИИ) ---
+                try {
+                  let sType = "";
+                  if (dbFileType === "photo") sType = "IMAGE_TO_TEXT";
+                  else if (dbFileType === "document") {
+                    const ext = name.split('.').pop().toLowerCase();
+                    sType = ["jpg","jpeg","png","webp"].includes(ext) ? "IMAGE_TO_TEXT" : "DOCUMENT_TO_TEXT";
+                  }
+                  else if (dbFileType === "audio" || dbFileType === "audio_message") sType = "AUDIO_TO_TEXT";
+                  else if (dbFileType === "video") sType = "VIDEO_TO_ANALYSIS";
+                  else if (dbFileType === "document") {
+                    const ext = name.split('.').pop().toLowerCase();
+                    if (["jpg","jpeg","png","webp"].includes(ext)) sType = "IMAGE_TO_TEXT";
+                    else sType = "DOCUMENT_TO_TEXT";
+                  }
+
+                  if (sType) {
+                    const cfg = await loadActiveConfig(sType, env);
+                    if (cfg && cfg.FUNCTION) {
+                      let description = "";
+
+                      // Вызываем функции согласно их сигнатурам в твоем AI_MODELS
+                      if (sType === "DOCUMENT_TO_TEXT" || sType === "VIDEO_TO_ANALYSIS") {
+                        // Этим функциям в твоем коде нужен mimeType 4-м аргументом
+                        description = await cfg.FUNCTION(cfg, fileBuffer, env, mimeType);
+                      } else {
+                        // IMAGE_TO_TEXT и AUDIO_TO_TEXT обычно принимают 3 аргумента
+                        description = await cfg.FUNCTION(cfg, fileBuffer, env);
+                      }
+
+                      if (description) {
+                        await env.FILES_DB.prepare("UPDATE files SET ai_description = ? WHERE userId = ? AND fileName = ?")
+                          .bind(description, String(userId), name).run();
+                      }
+                    }
+                  }
+                } catch (aiErr) {
+                  console.error("AI Error:", aiErr);
+                }
+              } else {
+                await sendVKMessage(chatId, `❌ Облако отклонило файл: ${name}`, env);
+              }
+            } catch (err) {
+              console.error("Critical Loop Error:", err);
+              await sendVKMessage(chatId, `⚠️ Системная ошибка при обработке вложения: ${err.message}`, env);
             }
           }
-        } catch (e) {
-          await sendVKMessage(chatId, `❌ Ошибка: ${e.message}`, env);
-          return new Response("OK");
-        }
+        })());
+        return new Response("OK");
       }
 
-      // Обработка выбора папки
+      // --- ЛОГИКА СОСТОЯНИЙ (FOLDER / SEARCH / CREATE) ---
       const userState = await env.USER_DB.get(`state:${userId}`);
-      if (userState === "wait_folder_choice") {
-        const folders = await env.USER_DB.get(`temp_folders:${userId}`, { type: "json" });
-        if (!folders) {
-          await sendVKMessage(chatId, "❌ Сессия выбора папки устарела. Повтори /folder.", env);
+      if (userState && !text.startsWith("/")) {
+        if (userState === "wait_folder_choice") {
+          const folders = await env.USER_DB.get(`temp_folders:${userId}`, { type: "json" });
+          const num = parseInt(text);
+          if (folders && num > 0 && num <= folders.length) {
+            const sel = folders[num - 1];
+            userData.folderId = userData.provider === "google" ? sel.id : sel.name;
+            await env.USER_DB.put(userKey, JSON.stringify(userData));
+            await sendVKMessage(chatId, `✅ Выбрана папка: ${sel.name}`, env);
+            await env.USER_DB.delete(`state:${userId}`);
+            return new Response("OK");
+          }
+        }
+        
+        if (userState === "waiting_for_search") {
+          await env.USER_DB.delete(`state:${userId}`);
+          await sendVKMessage(chatId, `⏳ Ищу "${text}"...`, env);
+          const searchResult = await searchFilesByQuery(userId, isAdmin, text, env);
+          if (searchResult.success && searchResult.fileIds.length > 0) {
+            let resList = `🔍 Результаты:\n`;
+            for (const id of searchResult.fileIds.slice(0, 5)) {
+              const f = await env.FILES_DB.prepare("SELECT fileName FROM files WHERE id = ?").bind(id).first();
+              resList += `• ${f?.fileName || 'Файл'}\n`;
+            }
+            await sendVKMessage(chatId, resList, env);
+          } else {
+            await sendVKMessage(chatId, "❌ Ничего не найдено.", env);
+          }
           return new Response("OK");
         }
 
-        const input = text.trim();
-        if (input.startsWith("/create ")) {
-          const folderName = input.replace("/create ", "").trim();
-          if (!folderName) {
-            await sendVKMessage(chatId, "🔤 Укажи имя папки: `/create Имя`", env);
+        if (userState === "wait_webdav_url") {
+            const parts = text.split("|");
+            if (parts.length === 3) {
+                userData = { provider: "webdav", webdav_url: parts[0], webdav_user: parts[1], webdav_pass: parts[2] };
+                await env.USER_DB.put(userKey, JSON.stringify(userData));
+                await sendVKMessage(chatId, "✅ WebDAV подключен!", env);
+                await env.USER_DB.delete(`state:${userId}`);
+            } else {
+                await sendVKMessage(chatId, "❌ Неверный формат. Нужно: URL|Логин|Пароль", env);
+            }
             return new Response("OK");
-          }
-          // Создаём папку
-          let success = false;
-          if (userData.provider === "google") {
-            success = await createGoogleFolder(folderName, userData.access_token);
-          } else if (userData.provider === "yandex") {
-            success = await createYandexFolder(folderName, userData.access_token);
-          } else if (userData.provider === "dropbox") {
-            success = await createDropboxFolder(folderName, userData.access_token);
-          }
+        }
 
-          if (success) {
+        if (text.startsWith("/create ")) {
+          const folderName = text.replace("/create ", "").trim();
+          let ok = false;
+          if (userData.provider === "google") ok = await createGoogleFolder(folderName, userData.access_token);
+          else if (userData.provider === "yandex") ok = await createYandexFolder(folderName, userData.access_token);
+          else if (userData.provider === "dropbox") ok = await createDropboxFolder(folderName, userData.access_token);
+          if (ok) {
             userData.folderId = folderName;
-            await env.USER_DB.put(`user:${userId}`, JSON.stringify(userData));
-            await sendVKMessage(chatId, `✅ Папка "${folderName}" создана и выбрана!`, env);
-          } else {
-            await sendVKMessage(chatId, "❌ Не удалось создать папку.", env);
+            await env.USER_DB.put(userKey, JSON.stringify(userData));
+            await sendVKMessage(chatId, `✅ Папка "${folderName}" создана!`, env);
           }
-          await env.USER_DB.delete(`temp_folders:${userId}`);
           await env.USER_DB.delete(`state:${userId}`);
           return new Response("OK");
         }
-
-        const num = parseInt(input);
-        if (isNaN(num) || num < 1 || num > folders.length) {
-          await sendVKMessage(chatId, "🔢 Введи корректный номер папки или `/create Имя`", env);
-          return new Response("OK");
-        }
-
-        const selected = folders[num - 1];
-        userData.folderId = userData.provider === "google" ? selected.id : selected.name;
-        await env.USER_DB.put(`user:${userId}`, JSON.stringify(userData));
-        await sendVKMessage(chatId, `📂 Выбрана папка: ${selected.name}`, env);
-        await env.USER_DB.delete(`temp_folders:${userId}`);
-        await env.USER_DB.delete(`state:${userId}`);
-        return new Response("OK");
       }
 
-      // Состояние: ожидание текста для поиска
-    if (userState === "waiting_for_search" && !text.startsWith("/")) {
-      await env.USER_DB.delete(`state:${userId}`);
-      const query = text.trim();
-      await sendVKMessage(chatId, `🔍 Ищу: "${query}"...`, env);
-
-      const isAIQuery = query.includes(" ") && isAdmin;
-      let searchResult;
-      if (isAIQuery) {
-        searchResult = await searchAIFilesByQuery(userId, isAdmin, query, env);
-      } else {
-        searchResult = await searchFilesByQuery(userId, isAdmin, query, env);
-      }
-
-      if (!searchResult.success || searchResult.fileIds.length === 0) {
-        await sendVKMessage(chatId, `❌ Ничего не найдено по запросу "${query}".`, env);
-        return new Response("OK");
-      }
-
-      // Отображаем результаты (как в Telegram)
-      let list = `🔍 Найдено: ${searchResult.fileIds.length}\n`;
-      for (const id of searchResult.fileIds.slice(0, 5)) {
-        const f = await env.FILES_DB.prepare("SELECT fileName FROM files WHERE id = ?").bind(id).first();
-        list += `• ${f?.fileName || 'Файл'}\n`;
-      }
-      await sendVKMessage(chatId, list, env);
-      return new Response("OK");
-    }
-
-      // --- ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ (чат с ИИ) ---
-      if (text && userData) {
-        try {
-          const modelConfig = await loadActiveConfig('TEXT_TO_TEXT', env);
-          const responseText = await handleChatRequest(text, modelConfig, env);
-          await sendVKMessage(chatId, responseText.substring(0, 4000), env);
-        } catch (e) {
-          console.error("AI Error:", e);
-        }
+      // --- ЧАТ С ИИ (Если нет других команд) ---
+      if (text && !text.startsWith("/")) {
+        ctx.waitUntil((async () => {
+          try {
+            const modelConfig = await loadActiveConfig('TEXT_TO_TEXT', env);
+            const responseText = await handleChatRequest(text, modelConfig, env);
+            await sendVKMessage(chatId, responseText, env);
+          } catch (e) {}
+        })());
         return new Response("OK");
       }
     }
+    
   } catch (e) {
     console.error("VK Error:", e);
-    if (chatId) {
-      await sendVKMessage(chatId, `❌ Критическая ошибка: ${e.message}`, env);
-    }
+    if (chatId) await sendVKMessage(chatId, `❌ Критическая ошибка: ${e.message}`, env);
   }
   return new Response("OK");
 }
