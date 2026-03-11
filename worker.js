@@ -10,7 +10,7 @@ Telegram-бот для автоматической загрузки фото и
 Скрытая функция: Команда /search для поиска и возможность достать файлы с хранилки.
 */
 // Глобальные константы
-const version = "v2.2.0 от 29.12.2025"; // актуальная версия
+const version = "v2.2.2 от 30.12.2025"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -310,8 +310,18 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
 
     // Если запрос есть — выполняем поиск
     await sendMessage(chatId, "⏳ <b>Выполняю поиск файлов...</b>", null, env);
-    
-    const searchResult = await searchFilesByQuery(userId, query, env);
+    //const searchResult = await searchFilesByQuery(userId, isAdmin, query, env);
+    // Определяем тип поиска: обычный или интеллектуальный
+    const isAIQuery = query.includes(" ") && isAdmin; // Только у админа и только если есть пробел
+
+    let searchResult;
+    if (isAIQuery) {
+      // Интеллектуальный поиск (только по своим файлам, даже для админа)
+      searchResult = await searchAIFilesByQuery(userId, isAdmin, query, env);
+    } else {
+      // Обычный поиск (админ — по всем, пользователь — по своим)
+      searchResult = await searchFilesByQuery(userId, isAdmin, query, env);
+    }
 
     if (!searchResult.success || searchResult.fileIds.length === 0) {
       return await sendMessage(chatId, `❌ По запросу "<b>${query}</b>" ничего не найдено.`, null, env);
@@ -335,10 +345,13 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     if (!query) return await sendMessage(chatId, "🔎 Что ищем с помощью ИИ?", null, env);
   
     await sendMessage(chatId, "⏳ <b>Выполняю интеллектуальный поиск...</b>", null, env);
-    const searchResult = await searchAIFilesByQuery(userId, query, env);
+    const searchResult = await searchAIFilesByQuery(userId, isAdmin, query, env);
   
-    if (!searchResult.success || searchResult.fileIds.length === 0) {
-      return await sendMessage(chatId, "❌ Ничего не найдено.", null, env);
+    if (!searchResult.success) {
+      return await sendMessage(chatId, "❌ Ошибка поиска.", null, env);
+    }
+    if (searchResult.fileIds.length === 0) {
+      return await sendMessage(chatId, "🔍 По вашему запросу ничего не найдено.", null, env);
     }
   
     // Ключ теперь короткий, чтобы влезть в лимиты кнопок TG (64 байта)
@@ -630,7 +643,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     const searchQuery = text.trim();
     // Вызываем поиск. Для простоты здесь просто повторяем вызов sendMessage с поиском:
     await sendMessage(chatId, `🔍 Ищу: <b>${searchQuery}</b>...`, null, env);
-    const searchResult = await searchFilesByQuery(userId, searchQuery, env);
+    const searchResult = await searchFilesByQuery(userId, isAdmin, searchQuery, env);
 
     if (!searchResult.success || searchResult.fileIds.length === 0) {
       return await sendMessage(chatId, `❌ По запросу "<b>${searchQuery}</b>" ничего не найдено.`, null, env);
@@ -677,13 +690,88 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
   if (text && userData) {
     try {
       const modelConfig = await loadActiveConfig('TEXT_TO_TEXT', env);
-      const responseText = await modelConfig.FUNCTION(text, modelConfig, env);
+      //const responseText = await modelConfig.FUNCTION(text, modelConfig, env);
+      const responseText = await handleChatRequest(text, modelConfig, env);
       await sendMessage(chatId, responseText.substring(0, 4000), null, env);
     } catch (e) {
       console.error("AI Error:", e);
     }
     return new Response("OK");
   }
+}
+
+/**
+ * Универсальная обёртка для обработки чат-запросов.
+ * Применяет чатовую инструкцию и вызывает соответствующую функцию модели.
+ * @param {string} userPrompt - Сообщение пользователя.
+ * @param {Object} modelConfig - Конфигурация активной модели (из AI_MODELS).
+ * @param {Object} env - Окружение.
+ * @returns {Promise<string>} Ответ от ИИ.
+ */
+async function handleChatRequest(userPrompt, modelConfig, env) {
+  // --- 1. ФОРМИРУЕМ ЧАТОВУЮ ИНСТРУКЦИЮ (та же, что и в функциях) ---
+  const CHAT_INSTRUCTION = `🤖 ТЫ — многофункциональный AI-ассистент "Gemini AI" от Leshiy, отвечающий на русском языке.
+Твоя задача — вести диалог, отвечать на вопросы, соблюдая контекст и используя информацию о твоих функциях.
+
+СТРОГОЕ ПРАВИЛО: НИКОГДА НЕ УПОМИНАЙ LLaMA, Meta AI или Austin.
+
+Твои ключевые функции:
+✨ Основные функции: Автоматическая загрузка фото и видео на облачные платформы (Google, Яндекс.Диск, Облако Mail.Ru WebDAV и др.) прямо через телеграмм. 
+Возможность предоставления доступа к Вашему хранилищу друзьям и близким просто отправив им реферальную ссылку (команда /share) формирует ссылку с токеном.
+Универсальность: Поддержка облачного хранилища с авторизацией OAuth (Google, Яндекс.Диск, DropBox) и WebDAV (Облако Mail.Ru и др.)
+Умное именование: Сохраняет исходные имена для файлов без сжатия и генерирует имена по дате/времени для сжатых фото/видео/аудио/документов.
+💬 Чат: Ты ведешь диалог, отвечаешь на вопросы, ❔ помогаешь по менюшкам и окнам и сохраняешь контекст беседы.
+
+Когда пользователь спрашивает, что ты умеешь, обязательно упомяни о своих навыках.
+Ответы должны быть информативными и доброжелательными и по возможности компактными, старайся построить диалог понятно и не сильно рассуждая.`.trim();
+
+  // --- 2. ФОРМИРУЕМ ФИНАЛЬНЫЙ ПРОМПТ ---
+  // Workers AI и Bothub используют историю в формате messages, но Gemini — нет.
+  // Для простоты и совместимости используем один общий формат промпта.
+  const finalPrompt = `${CHAT_INSTRUCTION}\n\nВопрос пользователя: ${userPrompt}`;
+
+  // --- 3. ВЫЗЫВАЕМ СООТВЕТСТВУЮЩУЮ ФУНКЦИЮ ---
+  // Все существующие функции принимают (prompt, config, env, userMessageText)
+  // Мы передаём userPrompt как 4-й аргумент для совместимости.
+  //return await modelConfig.FUNCTION(finalPrompt, modelConfig, env, userPrompt);
+  if (modelConfig.SERVICE === 'WORKERS_AI') {
+    // Для Workers AI передаём отдельно system и user
+    return await modelConfig.FUNCTION(CHAT_INSTRUCTION, modelConfig, env, userPrompt);
+  } else {
+    // Для Gemini/Bothub — один общий промпт
+    const finalPrompt = `${CHAT_INSTRUCTION}\n\nВопрос пользователя: ${userPrompt}`;
+    return await modelConfig.FUNCTION(finalPrompt, modelConfig, env, userPrompt);
+  }
+}
+
+/**
+ * Универсальная обёртка для обработки запросов ИНТЕЛЛЕКТУАЛЬНОГО ПОИСКА.
+ * Применяет ПОИСКОВУЮ инструкцию и вызывает соответствующую функцию модели.
+ * @param {string} searchTask - Задача для ИИ (список кандидатов, запрос пользователя).
+ * @param {Object} modelConfig - Конфигурация активной модели (из AI_MODELS).
+ * @param {Object} env - Окружение.
+ * @returns {Promise<string>} Ответ от ИИ (должен содержать ID файлов).
+ */
+/**
+ * Универсальная обёртка для обработки запросов ИНТЕЛЛЕКТУАЛЬНОГО ПОИСКА.
+ * Применяет ПОИСКОВУЮ инструкцию и вызывает соответствующую функцию модели.
+ * @param {string} searchTask - Задача для ИИ (список кандидатов, запрос пользователя).
+ * @param {Object} modelConfig - Конфигурация активной модели (из AI_MODELS).
+ * @param {Object} env - Окружение.
+ * @returns {Promise<string>} Ответ от ИИ (должен содержать ID файлов).
+ */
+async function handleSearchRequest(searchTask, modelConfig, env) {
+  // --- ЕДИНАЯ ПОИСКОВАЯ ИНСТРУКЦИЯ ДЛЯ ВСЕХ МОДЕЛЕЙ ---
+  const SEARCH_INSTRUCTION = `Ты — эксперт по релевантности файлов.
+Твоя задача — проанализировать список кандидатов и выбрать самые подходящие под запрос пользователя.
+ИНСТРУКЦИЯ: Верни ТОЛЬКО список ID подходящих файлов через запятую (например: 1,5,12). 
+НЕ пиши приветствий, пояснений, комментариев, скобок, кода или любого другого текста.
+Если ничего не подходит, верни "0".`;
+
+  const finalPrompt = `${SEARCH_INSTRUCTION}\n\n${searchTask}`;
+  
+  // --- ВЫЗЫВАЕМ ФУНКЦИЮ МОДЕЛИ ---
+  return await modelConfig.FUNCTION(finalPrompt, modelConfig, env, searchTask);
 }
 
 /**
@@ -2239,21 +2327,36 @@ async function createDropboxFolder(folderName, token) {
   }
 }
 
-async function searchFilesByQuery(userId, query, env) {
+/**
+ * Выполняет поиск файлов по имени или тегам.
+ * Если вызвана админом — ищет по всем файлам.
+ * Если вызвана пользователем — ищет только по своим файлам.
+ * @param {string} userId - ID пользователя (для обычного поиска).
+ * @param {boolean} isAdmin - Флаг администратора.
+ * @param {string} query - Поисковый запрос.
+ * @param {Object} env - Окружение.
+ */
+async function searchFilesByQuery(userId, isAdmin, query, env) {
   try {
-    // 1. Очищаем запрос от лишних символов для безопасности
+    // Очищаем запрос от лишних символов для безопасности
     const searchTerm = `%${query.trim()}%`;
-
-    // 2. Ищем прямо в базе: по имени файла ИЛИ по тегам
-    // Это гораздо быстрее, чем грузить всё в массив и фильтровать вручную
-    const filesResult = await env.FILES_DB.prepare(
-      `SELECT id FROM files 
-       WHERE userId = ? 
-       AND (fileName LIKE ? OR tags LIKE ?) 
-       ORDER BY timestamp DESC LIMIT 50`
-    )
-    .bind(String(userId), searchTerm, searchTerm)
-    .all();
+    let filesResult;
+    if (isAdmin) {
+      // Админ: ищем по ВСЕМ файлам
+      filesResult = await env.FILES_DB.prepare(
+        `SELECT id FROM files 
+         WHERE (fileName LIKE ? OR tags LIKE ?) 
+         ORDER BY timestamp DESC LIMIT 100`
+      ).bind(searchTerm, searchTerm).all();
+    } else {
+      // Обычный пользователь: только свои файлы
+      filesResult = await env.FILES_DB.prepare(
+        `SELECT id FROM files 
+         WHERE userId = ? 
+         AND (fileName LIKE ? OR tags LIKE ?) 
+         ORDER BY timestamp DESC LIMIT 50`
+      ).bind(String(userId), searchTerm, searchTerm).all();
+    }
 
     if (!filesResult.success || !filesResult.results || filesResult.results.length === 0) {
       return { success: false, message: `По запросу "${query}" ничего не найдено.` };
@@ -2274,61 +2377,107 @@ async function searchFilesByQuery(userId, query, env) {
 }
 
 /**
- * Выполняет семантический поиск по файлам пользователя.
- * Использует гибридный подход: быстрый pre-filter + ИИ-ранжирование.
- * @param {string|number} userId - ID пользователя.
- * @param {string} query - Поисковый запрос.
- * @param {Object} env - Окружение.
+ * Простой и надёжный интеллектуальный поиск.
+ * - Ищет по ai_description с фильтрацией по fileType.
+ * - Использует логику ИЛИ для слов (как раньше).
+ * - Сортировка: сначала НОВЫЕ файлы (DESC по timestamp).
+ * - Лимит: 50 последних файлов (достаточно для поиска).
  */
-async function searchAIFilesByQuery(userId, query, env) {
-  try {
-    // 1. Выбираем ВСЕ метаданные (добавили tags!)
-    const filesResult = await env.FILES_DB.prepare(
-      "SELECT id, fileName, ai_description, tags FROM files WHERE userId = ? ORDER BY timestamp DESC LIMIT 300"
-    ).bind(String(userId)).all();
+async function searchAIFilesByQuery(userId, isAdmin, query, env) {
+  let candidates = [];
 
-    if (!filesResult.success || filesResult.results.length === 0) {
-      return { success: false, message: "Твой архив пуст, искать не в чем." };
+  try {
+    await logDebug(`🔍 [AI Search] Запуск для userID=${userId}, isAdmin=${isAdmin}, запрос: "${query}"`, env);
+
+    // --- Определяем тип файла ---
+    let fileTypeFilter = null;
+    const qLower = query.toLowerCase();
+    if (qLower.includes('фото') || qLower.includes('photo') || qLower.includes('изображение')) {
+      fileTypeFilter = 'photo';
+    } else if (qLower.includes('видео') || qLower.includes('video')) {
+      fileTypeFilter = 'video';
+    } else if (qLower.includes('голос') || qLower.includes('voice')) {
+      fileTypeFilter = 'voice';
+    } else if (qLower.includes('аудио') || qLower.includes('audio') || qLower.includes('mp3') || qLower.includes('ogg')) {
+      fileTypeFilter = 'audio';
     }
 
-    // 2. Формируем список для ИИ (включаем теги!)
-    const filesList = filesResult.results.map(f => 
-      `${f.id}. [${f.fileName}] Описание: ${f.ai_description || '-'} Теги: ${f.tags || '-'}`
-    ).join("\n");
+    // --- Извлекаем слова ---
+    const queryWords = query
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(w => w.length >= 3 && !['для', 'про', 'с', 'на', 'в', 'и', 'или', 'из', 'все'].includes(w));
 
-    const modelConfig = await loadActiveConfig('TEXT_TO_TEXT', env);
-    
-    // 3. Промпт, который не дает ИИ болтать лишнего
-    const prompt = `Ты — поисковый робот. 
-Пользователь ищет: "${query}"
+    await logDebug(`🔍 [AI Search] Тип файла: ${fileTypeFilter}, Слова: [${queryWords.join(', ')}]`, env);
 
-Список файлов:
-${filesList}
+    // --- Формируем SQL ---
+    let sql = `SELECT id, fileName, ai_description FROM files WHERE ai_description IS NOT NULL`;
+    let binds = [];
 
-ИНСТРУКЦИЯ:
-- Если поиск про "видео" — ищи файлы с расширением .mp4, .mov, .webm.
-- Если поиск про "маленькие" — ищи в названии размеры типа 60x60, 70x70.
-- Если поиск про объекты (снеговик, миньон) — ищи в описании и тегах.
+    if (!isAdmin) {
+      sql += ` AND userId = ?`;
+      binds.push(String(userId));
+    }
 
-Выдай ТОЛЬКО список ID через запятую (например: 1,5,12). Если ничего не нашел, напиши цифру 0.`;
+    if (fileTypeFilter) {
+      sql += ` AND fileType = ?`;
+      binds.push(fileTypeFilter);
+    }
 
-    const responseText = await modelConfig.FUNCTION(prompt, modelConfig, env);
-    
-    // 4. Гвардейский парсинг: выдираем только цифры, игнорируем вежливость ИИ
-    const relevantIds = responseText
-      .replace(/[^0-9,]/g, '') // Убираем буквы, оставляем цифры и запятые
-      .split(',')
-      .map(id => parseInt(id.trim()))
-      .filter(id => !isNaN(id) && id > 0);
+    // Используем ИЛИ для слов (как в самом начале)
+    if (queryWords.length > 0) {
+      const conditions = queryWords.map(() => `(ai_description LIKE ?)`).join(' OR ');
+      sql += ` AND (${conditions})`;
+      binds.push(...queryWords.map(w => `%${w}%`));
+    }
 
-    return { 
-      success: true, 
-      fileIds: relevantIds 
-    };
+    // ✅ Сортировка: СНАЧАЛА НОВЫЕ файлы (DESC по timestamp)
+    // ✅ Лимит: проверяем последние 50 файлов (достаточно для релевантности)
+    sql += ` ORDER BY timestamp DESC LIMIT 50`;
+
+    await logDebug(`🔍 [AI Search] SQL: ${sql} | Параметры: ${JSON.stringify(binds)}`, env);
+
+    const candidatesResult = await env.FILES_DB.prepare(sql).bind(...binds).all();
+    candidates = candidatesResult.results || [];
+
+    await logDebug(`🔍 [AI Search] Найдено кандидатов: ${candidates.length}`, env);
+
+    if (candidates.length === 0) {
+      return { success: true, fileIds: [] };
+    }
 
   } catch (e) {
-    logDebug(`Search error: ${e}`, env);
-    return { success: false, message: "Ошибка ИИ: " + e.message };
+    await logDebug(`⚠️ [AI Search] Ошибка SQL: ${e.message}`, env);
+    return { success: true, fileIds: [] };
+  }
+
+  // --- Вызов ИИ ---
+  try {
+    const candidatesList = candidates.map(f =>
+      `${f.id}. [${f.fileName}] ${f.ai_description.substring(0, 200).replace(/\n/g, ' ')}...`
+    ).join("\n");
+
+    const prompt = `Ты — эксперт по релевантности.
+Запрос: "${query}"
+Кандидаты:
+${candidatesList}
+ИНСТРУКЦИЯ: Верни ТОЛЬКО ID через запятую. Ничего больше.`;
+
+    const modelConfig = await loadActiveConfig('TEXT_TO_TEXT', env);
+    const responseText = await handleSearchRequest(prompt, modelConfig, env);
+
+    const relevantIds = [...responseText.matchAll(/\b\d+\b/g)]
+      .map(match => parseInt(match[0]))
+      .filter(id => id > 0);
+
+    if (relevantIds.length > 0) {
+      return { success: true, fileIds: relevantIds };
+    }
+    throw new Error("ИИ не вернул ID");
+
+  } catch (e) {
+    await logDebug(`❌ [AI Search] Сбой ИИ. Используем всех кандидатов.`, env);
+    return { success: true, fileIds: candidates.map(f => f.id) };
   }
 }
 
@@ -2611,59 +2760,35 @@ async function callGeminiVideoVision(config, videoBuffer, env, mimeType) {
 }
 
 // ✅ *** Workers AI Chat API (для текстового общения с историей) ***
-async function callWorkersAIChat(prompt, config, env, userMessageText) {
-    const { AI } = env;
-    if (!AI) {
-        throw new Error("Workers AI binding 'AI' не настроен. Проверьте Cloudflare Dashboard.");
-    }
+async function callWorkersAIChat(systemPrompt, config, env, userPrompt) {
+  const { AI } = env;
+  if (!AI) {
+      throw new Error("Workers AI binding 'AI' не настроен.");
+  }
 
-    const MODEL_NAME = config.MODEL;
-    // --- УДАЛЯЕМ ЛИШНИЕ ПЕРЕМЕННЫЕ ИЗ-ЗА НОВОЙ ЛОГИКИ ПЕРЕХВАТА ---
+  const MODEL_NAME = config.MODEL;
+  const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+  ];
 
-    // 1. ОПРЕДЕЛЕНИЕ СИСТЕМНОГО КОНТЕКСТА
-    // УДАЛЯЕМ ЛОГИКУ, КОТОРАЯ СТИМУЛИРУЕТ ТЕГИ <think>
-    const systemPromptText = `🤖 ТЫ — многофункциональный AI-ассистент "Gemini AI" от Leshiy, отвечающий на русском языке.
-Твоя задача — вести диалог, отвечать на вопросы, соблюдая контекст и используя информацию о твоих функциях.
+  try {
+      const response = await AI.run(MODEL_NAME, { 
+          messages: messages,
+          stream: false,
+          max_tokens: 500,
+          temperature: 0.7
+      });
 
-СТРОГОЕ ПРАВИЛО: НИКОГДА НЕ УПОМИНАЙ LLaMA, Meta AI или Austin.
+      if (!response?.response) {
+          throw new Error(`Workers AI не вернул ответ. Response: ${JSON.stringify(response)}`);
+      }
 
-Твои ключевые функции:
-✨ Основные функции: Автоматическая загрузка фото и видео на облачные платформы (Google, Яндекс.Диск, Облако Mail.Ru WebDAV и др.) прямо через телеграмм. 
-Возможность предоставления доступа к Вашему хранилищу друзьям и близким просто отправив им реферальную ссылку (команда /share) формирует ссылку с токеном.
-Универсальность: Поддержка облачного хранилища с авторизацией OAuth (Google, Яндекс.Диск, DropBox) и WebDAV (Облако Mail.Ru и др.)
-Умное именование: Сохраняет исходные имена для файлов без сжатия и генерирует имена по дате/времени для сжатых фото/видео/аудио/документов.
-💬 Чат: Ты ведешь диалог, отвечаешь на вопросы, ❔ помогаешь по менюшкам и окнам и сохраняешь контекст беседы.
-
-Когда пользователь спрашивает, что ты умеешь, обязательно упомяни о своих навыках.
-Ответы должны быть информативными и доброжелательными и по возможности компактными, старайся построить диалог понятно и не сильно рассуждая.
-`.trim();
-
-    // 2. ФОРМИРОВАНИЕ ИСТОРИИ (messages) (Оставляем как есть, но используем 'system' для основного промпта)
-
-    // Инициализация массива с СИСТЕМНЫМ КОНТЕКСТОМ.
-    // Используем роль 'system' если модель её поддерживает (Qwen должна),  иначе оставим 'user'.
-    const messages = [
-        { role: 'system', content: systemPromptText },
-    ];
-
-    try {
-        // *** ДОБАВЛЯЕМ ЛИМИТ ТОКЕНОВ И ТЕМПЕРАТУРУ ***
-        const response = await AI.run(MODEL_NAME, { 
-            messages: messages,
-            stream: false, // Отключаем стриминг, чтобы избежать обрезки
-            max_tokens: 1024, // Увеличиваем лимит токенов для безопасности
-            temperature: 0.7 // Умеренная температура
-        });
-
-        if (!response || !response.response) {
-            throw new Error(`Workers AI не вернул ожидаемый ответ. Response: ${JSON.stringify(response)}`);
-        }
-
-        return response.response.trim(); // Возвращаем сырой, но полный ответ
-    } catch (e) {
-        console.error("Workers AI call failed:", e);
-        throw new Error(`Ошибка Workers AI: ${e.message}`);
-    }
+      return response.response.trim();
+  } catch (e) {
+      console.error("Workers AI call failed:", e);
+      throw new Error(`Ошибка Workers AI: ${e.message}`);
+  }
 }
 
 // ✅ *** Workers AI Speech-to-Text (Whisper - голосовые сообщения) ***
@@ -3090,6 +3215,7 @@ const AI_MODELS = {
       SERVICE: 'WORKERS_AI', 
       FUNCTION: callWorkersAIChat, 
       //MODEL: '@cf/google/gemma-2b-it-lora', // тупой ЛЛама
+      //MODEL: '@cf/qwen/qwen3-30b-a3b-fp8', // думающая
       MODEL: '@cf/qwen/qwen2.5-coder-32b-instruct', // программерская
       API_KEY: 'CLOUDFLARE_API_TOKEN', 
       BASE_URL: 'AI_RUN' // Вызов через env.AI.run
@@ -3126,7 +3252,8 @@ const AI_MODELS = {
   TEXT_TO_TEXT_GEMINI: { 
     SERVICE: 'GEMINI', 
     FUNCTION: callGeminiChat, 
-    MODEL: 'gemini-2.5-flash', 
+    MODEL: 'gemini-2.5-flash',
+    //MODEL: 'gemini-2.5-flash-lite', 
     API_KEY: 'GEMINI_API_KEY', 
     BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
   },
@@ -3134,7 +3261,8 @@ const AI_MODELS = {
   AUDIO_TO_TEXT_GEMINI: { 
     SERVICE: 'GEMINI', 
     FUNCTION: callGeminiSpeechToText,
-    MODEL: 'gemini-2.5-flash', 
+    //MODEL: 'gemini-2.5-flash',
+    MODEL: 'gemini-2.5-flash-lite', 
     API_KEY: 'GEMINI_API_KEY', 
     BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
   },
@@ -3142,7 +3270,8 @@ const AI_MODELS = {
   VIDEO_TO_TEXT_GEMINI: { 
     SERVICE: 'GEMINI', 
     FUNCTION: callGeminiSpeechToText,
-    MODEL: 'gemini-2.5-flash', 
+    //MODEL: 'gemini-2.5-flash',
+    MODEL: 'gemini-2.5-flash-lite', 
     API_KEY: 'GEMINI_API_KEY', 
     BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
   },
@@ -3150,8 +3279,8 @@ const AI_MODELS = {
   IMAGE_TO_TEXT_GEMINI: { 
     SERVICE: 'GEMINI', 
     FUNCTION: callGeminiVision, 
-    //MODEL: 'gemini-2.0-flash', 
-    MODEL: 'gemini-2.5-flash', 
+    //MODEL: 'gemini-2.5-flash',
+    MODEL: 'gemini-2.5-flash-lite', 
     API_KEY: 'GEMINI_API_KEY', 
     BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
   },
@@ -3159,7 +3288,8 @@ const AI_MODELS = {
   VIDEO_TO_ANALYSIS_GEMINI: { 
     SERVICE: 'GEMINI', 
     FUNCTION: callGeminiVideoVision, 
-    MODEL: 'gemini-2.5-flash', 
+    //MODEL: 'gemini-2.5-flash',
+    MODEL: 'gemini-2.5-flash-lite', 
     API_KEY: 'GEMINI_API_KEY', 
     BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
   },
@@ -3167,7 +3297,8 @@ const AI_MODELS = {
   DOCUMENT_TO_TEXT_GEMINI: { 
     SERVICE: 'GEMINI', 
     FUNCTION: callGeminiDocument, // Новая функция
-    MODEL: 'gemini-2.5-flash',
+    //MODEL: 'gemini-2.5-flash',
+    MODEL: 'gemini-2.5-flash-lite', 
     API_KEY: 'GEMINI_API_KEY', 
     BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
 },
