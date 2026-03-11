@@ -1,4 +1,4 @@
-/* 🤖 Telegram Storage Bot "Хранилка" by Leshiy
+/* 🗄 Telegram Storage Bot "Хранилка" by Leshiy
 Личный Telegram-бот для автоматической загрузки фото и видео на домашний FTP/SFTP/WEBDAV-сервер. 
 Бот поддерживает сохранение исходных имен файлов и автоматическую сортировку по папкам пользователей.
 
@@ -9,7 +9,7 @@
 Диагностика: Команда /debug для проверки статуса подключения к хранилищу в реальном времени.
 */
 // Глобальные константы
-const version = "v2.1.3"; // актуальная версия
+const version = "v2.1.4"; // актуальная версия
 
 export default {
   async fetch(request, env) {
@@ -325,7 +325,7 @@ async function handleTelegramUpdate(update, env, hostname) {
 
     return await sendMessage(chatId, msgText, { inline_keyboard: buttons }, env);
   }
-  
+
   // --- ОБРАБОТКА ФАЙЛОВ (Документы, Видео, Фото, Аудио, Голосовые) ---
   const isDoc = !!msg.document;
   const isVideo = !!msg.video;
@@ -419,8 +419,6 @@ function getStartKeyboard(userId, hostname, env, inviteData = null) {
   // 4-я строка: Mail.Ru
   const mailruClientId = env.MAILRU_CLIENT_ID;
   const mailruRedirectUri = `https://${hostname}/auth/mailru/callback`;
-  //const mAuth = `https://connect.mail.ru/oauth/authorize?client_id=${mailruClientId}&response_type=code&scope=cloud.write.all&redirect_uri=${encodeURIComponent(mailruRedirectUri)}&state=${userId}`;
-  // В параметре scope добавляем cloud.write.all (или просто cloud)
   // Старый вариант: scope=cloud.write.all
   const scope = "cloud";
   const mAuth = `https://connect.mail.ru/oauth/authorize?client_id=${mailruClientId}&response_type=code&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(mailruRedirectUri)}&state=${userId}`;
@@ -428,7 +426,10 @@ function getStartKeyboard(userId, hostname, env, inviteData = null) {
   keyboard.push([{ 
     text: "🔗 Подключить Облако Mail.ru (WebDAV)", callback_data: "ask_mailru_webdav" }]);
   
-  // 4-я строка: Условие по рефу
+  // 5-я строка: Свои FTP/SFTP/WebDAV серверы
+  keyboard.push([{ text: "🖥️ Подключить свой FTP/SFTP/WebDAV", callback_data: "ask_custom_server_info" }]);
+
+  // 6-я строка: Условие по рефу
   if (inviteData) {
       keyboard.push([{ 
           text: "🤝 Подтвердить подключение к другу", 
@@ -515,6 +516,23 @@ async function handleCallbackQuery(query, env) {
         "<i>Я сразу удалю это сообщение из чата!</i>", 
         null, env
       );
+    }
+    if (action === "ask_custom_server_info") {
+      const customServerGuide = 
+        `📁 <b>Подключение своего сервера</b>\n\n` +
+        `Поддерживаются следующие протоколы:\n` +
+        `✅ <b>WebDAV</b> (рекомендуется) — работает в Cloudflare Workers\n` +
+        `❌ <b>FTP / SFTP</b> — НЕ работают в Cloudflare Workers (только в Python-версии)\n\n` +
+        `🔗 <b>Формат для WebDAV:</b>\n<code>https://user:pass@ваш-сервер.ru</code>\n\n` +
+        `❗ После отправки ссылки я удалю ваше сообщение из чата.\n\n` +
+        `📘 <b>Для FTP/SFTP</b> используйте <a href="https://github.com/leshiy-ai/leshiy-storage-bot">Python-версию бота</a> (на Render/VPS).\n` +
+        `Это полноценный продукт для личного хостинга.`;
+    
+      return await sendMessage(chatId, customServerGuide, { 
+        inline_keyboard: [[
+          { text: "🚀 Отправить WebDAV-ссылку", callback_data: "ask_custom_server" }
+        ]] 
+      }, env);
     }
     if (action === "ask_custom_server") {
       await env.USER_DB.put(`state:${userId}`, "wait_webdav_url");
