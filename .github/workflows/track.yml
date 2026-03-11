@@ -1,0 +1,14 @@
+name: Track Commits
+
+on:
+  push:
+    branches:
+      - main 
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Logging
+        run: echo "New version of Storage Bot pushed. Deploy is handled by Cloudflare."
