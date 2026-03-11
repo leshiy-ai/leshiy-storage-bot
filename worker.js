@@ -10,7 +10,7 @@ Telegram-бот для автоматической загрузки фото и
 Скрытая функция: Команда /search для поиска и возможность достать файлы с хранилки.
 */
 // Глобальные константы
-const version = "v2.3.4 от 11.01.2026"; // актуальная версия
+const version = "v2.3.5 от 12.01.2026"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -19,6 +19,12 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const hostname = url.hostname;
+    if (request.method === "POST") {
+      const bodyPreview = await request.clone().text().catch(() => '');
+      console.log("REQUEST POST:", url.pathname, bodyPreview.substring(0, 200));
+    } else {
+      console.log("REQUEST:", request.method, url.pathname);
+    }
 
     // 1. ВЕБ-ИНТЕРФЕЙС
     if (request.method === "GET" && url.pathname === "/") {
@@ -35,6 +41,38 @@ export default {
             </div>
           </body>
         </html>`, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
+
+    // --- 1. ВЕБ-ИНТЕРФЕЙС И МИНИ-ПРИЛОЖЕНИЕ VK ---
+    if (request.method === "GET") {
+      // Обычный веб-интерфейс
+      if (url.pathname === "/") {
+        return new Response(`
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head><meta charset="utf-8"><title>Telegram Bot "Storage" by Leshiy</title></head>
+    <body style="font-family:sans-serif; text-align:center; padding-top:100px; background:#f4f4f4;">
+    <div style="display:inline-block; background:white; padding:40px; border-radius:20px; box-shadow:0 10px 30px rgba(0,0,0,0.1);">
+    <h1 style="margin:0;">Telegram Storage Bot "Хранилка" by Leshiy</h1>
+    <p style="color:green; font-weight:bold;">✅ Система работает штатно</p>
+    <hr style="border:0; border-top:1px solid #eee; margin:20px 0;">
+    <a href="https://t.me/leshiy_storage_bot" style="display:inline-block; background:#0088cc; color:white; padding:12px 25px; border-radius:50px; text-decoration:none; font-weight:bold;">Открыть бота в Telegram</a>
+    </div>
+    </body>
+    </html>`, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+      }
+      // --- ОБРАБОТКА VK MINI APP И СТРАНИЦЫ АВТОРИЗАЦИИ ---
+      if (url.pathname === "/vk" || url.pathname.startsWith("/app")) {
+        const params = Object.fromEntries(url.searchParams);
+        const html = renderVKMiniAppHTML(params);
+        return new Response(html, {
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Content-Security-Policy": "frame-ancestors 'self' https://vk.com https://*.vk.com;",
+            "Access-Control-Allow-Origin": "*"
+          }
+        });
+      }
     }
 
     // 2. ОБРАБОТКА CALLBACKS (Auth)
@@ -61,7 +99,13 @@ export default {
     });
   }
 
-    // 3. ОБРАБОТКА ВЕБХУКОВ (POST запросы)
+    // Mail.ru receiver
+    if (url.pathname.endsWith("receiver.html")) {
+      const receiverHtml = `<html><body><script src="//connect.mail.ru/js/loader.js"></script><script>mailru.loader.require('receiver', function(){ mailru.receiver.init(); })</script></body></html>`;
+      return new Response(receiverHtml, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
+
+    // --- 3. ВЕБХУКИ (POST запросы) ---
     if (request.method === "POST") {
       try {
         const url = new URL(request.url);
@@ -89,6 +133,73 @@ export default {
     // Все остальное — 404
     return new Response("Not Found", { status: 404 });
   }
+}
+
+/**
+ * Рендерит базовую HTML-страницу для VK Mini App.
+ */
+function renderVKMiniAppHTML(params) {
+  const userId = params.vk_user_id || "UNKNOWN";
+  const groupId = params.vk_group_id || "235249123";
+  const ref = params.vk_ref || "";
+  let refLink = "";
+  if (ref && ref.startsWith("ref_")) {
+    refLink = `https://vk.com/write-${groupId}?ref=${ref}`;
+  }
+  return `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, user-scalable=no, viewport-fit=cover">
+  <title>Хранилка by Leshiy</title>
+  
+  <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
+  <style>
+    body { font-family: -apple-system, system-ui, "Helvetica Neue", Roboto, sans-serif; text-align: center; padding: 40px 20px; background: #f0f2f5; margin: 0; color: #000; }
+    .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    h1 { color: #4986cc; margin: 0 0 20px 0; font-size: 24px; }
+    p { margin: 12px 0; line-height: 1.5; }
+    .button {
+      display: inline-block;
+      background: #4986cc;
+      color: white;
+      padding: 14px 28px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 600;
+      margin: 10px 0;
+    }
+    .info { margin-top: 25px; font-size: 14px; color: #818c99; }
+    code { background: #ebedef; padding: 2px 6px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🗄 Хранилка by Leshiy</h1>
+    <p>Привет! Я твой личный помощник по загрузке файлов.</p>
+    
+    <a href="#" id="openChat" class="button">🤝 Открыть чат с ботом</a>
+    
+    ${refLink ? `<p>Твой инвайт: <a href="${refLink}">активировать</a></p>` : ''}
+    
+    <div class="info">
+      <p><strong>Как это работает?</strong></p>
+      <p>1. Нажми кнопку выше<br>
+         2. В чате нажми "Начать"<br>
+         3. Следуй инструкциям для подключения<br>
+         4. Отправляй фото/видео и они улетят в облако!</p>
+      <p>Твой ID: <code>${userId}</code></p>
+    </div>
+  </div>
+  <script>
+    vkBridge.send("VKWebAppInit").catch(console.error);
+    document.getElementById('openChat').addEventListener('click', function(e) {
+      window.top.location.href = "https://vk.com/write-${groupId}";
+    });
+  </script>
+</body>
+</html>`;
 }
 
 /**
