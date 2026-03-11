@@ -10,7 +10,7 @@ Telegram-бот для автоматической загрузки фото и
 Скрытая функция: Команда /search для поиска и возможность достать файлы с хранилки.
 */
 // Глобальные константы
-const version = "v2.3.5 от 12.01.2026"; // актуальная версия
+const version = "v2.3.6 от 12.01.2026"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -31,16 +31,16 @@ export default {
       return new Response(`
         <!DOCTYPE html>
         <html lang="ru">
-          <head><meta charset="utf-8"><title>Telegram Bot "Storage" by Leshiy</title></head>
-          <body style="font-family:sans-serif; text-align:center; padding-top:100px; background:#f4f4f4;">
-            <div style="display:inline-block; background:white; padding:40px; border-radius:20px; box-shadow:0 10px 30px rgba(0,0,0,0.1);">
-              <h1 style="margin:0;">Telegram Storage Bot "Хранилка" by Leshiy</h1>
-              <p style="color:green; font-weight:bold;">✅ Система работает штатно</p>
-              <hr style="border:0; border-top:1px solid #eee; margin:20px 0;">
-              <a href="https://t.me/leshiy_storage_bot" style="display:inline-block; background:#0088cc; color:white; padding:12px 25px; border-radius:50px; text-decoration:none; font-weight:bold;">Открыть бота в Telegram</a>
-            </div>
-          </body>
-        </html>`, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+        <head><meta charset="utf-8"><title>Хранилка Bot</title></head>
+        <body style="font-family:sans-serif; text-align:center; padding-top:100px; background:#f4f4f4;">
+          <div style="display:inline-block; background:white; padding:40px; border-radius:20px; box-shadow:0 10px 30px rgba(0,0,0,0.1);">
+            <h1 style="margin:0;">🤖 Хранилка Bot</h1>
+            <p style="color:green; font-weight:bold;">✅ Система работает штатно</p>
+            <hr style="border:0; border-top:1px solid #eee; margin:20px 0;">
+            <a href="https://t.me/leshiy_storage_bot" style="display:inline-block; background:#0088cc; color:white; padding:12px 25px; border-radius:50px; text-decoration:none; font-weight:bold;">Открыть бота в Telegram</a>
+          </div>
+        </body>
+      </html>`, { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
 
     // --- 1. ВЕБ-ИНТЕРФЕЙС И МИНИ-ПРИЛОЖЕНИЕ VK ---
@@ -4086,8 +4086,8 @@ const AI_MODELS = {
   TEXT_TO_TEXT_GEMINI: { 
     SERVICE: 'GEMINI', 
     FUNCTION: callGeminiChat, 
-    MODEL: 'gemini-2.5-flash',
-    //MODEL: 'gemini-2.5-flash-lite', 
+    //MODEL: 'gemini-2.5-flash',
+    MODEL: 'gemini-2.5-flash-lite', 
     API_KEY: 'GEMINI_API_KEY', 
     BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
   },
@@ -4095,7 +4095,7 @@ const AI_MODELS = {
   AUDIO_TO_TEXT_GEMINI: { 
     SERVICE: 'GEMINI', 
     FUNCTION: callGeminiSpeechToText,
-    //MODEL: 'gemini-2.5-flash',
+    //'nj dct bpvtytybz&MODEL: 'gemini-2.5-flash',
     MODEL: 'gemini-2.5-flash-lite', 
     API_KEY: 'GEMINI_API_KEY', 
     BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
