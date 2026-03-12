@@ -10,13 +10,7 @@ Telegram-бот для автоматической загрузки фото и
 Скрытая функция: Команда /search для поиска и возможность достать файлы с хранилки.
 */
 // Глобальные константы
-const version = "v2.4.2 от 20.01.2026"; // актуальная версия
-
-// Разделяет "Storage|ID" на понятные составляющие
-const parsePath = (path) => {
-  const parts = String(path || "").split('|');
-  return { name: parts[0], id: parts[1] || parts[0] }; 
-};
+const version = "v2.4.3 от 22.01.2026"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -32,7 +26,7 @@ export default {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Content-Length, Authorization, Accept, Origin, x-vk-user-id, x-file-name, x-file-size",
-      "Access-Control-Expose-Headers": "Content-Length",
+      "Access-Control-Expose-Headers": "Content-Length, Location",
       "Access-Control-Max-Age": "86400",
     };
 
@@ -122,7 +116,7 @@ export default {
         try {
             // Поиск в D1. Ищем по вхождению строки (LIKE) и фильтруем по владельцу (userId)
             const { results } = await env.FILES_DB.prepare(
-                "SELECT fileName, remotePath, timestamp FROM files WHERE userId = ? AND fileName LIKE ? ORDER BY timestamp DESC LIMIT 50"
+                "SELECT fileName, remotePath, timestamp, provider FROM files WHERE userId = ? AND fileName LIKE ? ORDER BY timestamp DESC LIMIT 50"
             ).bind(String(userId), `%${query}%`).all();
     
             return new Response(JSON.stringify({ results }), {
@@ -366,7 +360,9 @@ export default {
         const userId = params.vk_user_id;
         const adminCfg = await env.USER_DB.get("admin:config", { type: "json" }) || { admins: [] };
         const isAdmin = adminCfg.admins.includes(String(userId));
-        const html = renderVKMiniAppHTML(params, userData, isAdmin); 
+        const listUser = await env.USER_DB.list({ prefix: "user:" });
+        const countUser = listUser.keys.length;
+        const html = renderVKMiniAppHTML(params, userData, isAdmin, countUser); 
         
         return new Response(html, {
           headers: {
@@ -626,6 +622,7 @@ function getStartKeyboardVK(userId, hostname, env, inviteData = null) {
   buttons.push([createBtn("🔗 Яндекс.Диск", "auth", { provider: "yandex" })]);
   buttons.push([createBtn("🔗 Google Drive", "auth", { provider: "google" })]);
   buttons.push([createBtn("🔗 Dropbox", "auth", { provider: "dropbox" })]);
+  buttons.push([createBtn("📧 Облако Mail.ru", "auth_mailru")]);
   buttons.push([createBtn("🖥️ Свой WebDAV", "auth_webdav")]);
 
   if (inviteData) {
@@ -1011,6 +1008,68 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     );
   }
 
+  if (text.startsWith("/invites") && isAdmin) {
+    try {
+        const list = await env.USER_DB.list({ prefix: "invite:" });
+        
+        if (list.keys.length === 0) {
+            await sendMessage(chatId, "📭 <b>Список инвайтов пуст.</b>", null, env);
+            return new Response("OK");
+        }
+
+        let msg = `🎫 <b>Список инвайтов (${list.keys.length})</b>\n\n`;
+        const inline_keyboard = [];
+        
+        // Ограничиваем количество вывода за раз (например, последние 15), 
+        // чтобы не упереться в лимит 4096 символов Telegram
+        const maxDisplay = 15;
+        const keysToShow = list.keys.slice(0, maxDisplay);
+
+        for (let i = 0; i < keysToShow.length; i++) {
+            const keyName = keysToShow[i].name;
+            const code = keyName.split(":")[1] || "???";
+            
+            const rawData = await env.USER_DB.get(keyName);
+            let inviteInfo = { provider: "unknown", inviterId: "unknown", timestamp: 0 };
+            
+            if (rawData) {
+                try { inviteInfo = JSON.parse(rawData); } catch(e) {}
+            }
+
+            msg += `${i + 1}. Код: <code>${code}</code>\n`;
+            msg += `🌐 Провайдер: <b>${inviteInfo.provider}</b>\n`;
+            msg += `📂 Папка: <b>${inviteInfo.folderId}</b>\n`;
+            msg += `👤 От кого (ID): <code>${inviteInfo.inviterId}</code>\n`;
+            
+            if (inviteInfo.timestamp) {
+                const date = new Date(inviteInfo.timestamp).toLocaleString('ru-RU', { timeZone: 'Asia/Yekaterinburg' });
+                msg += `📅 ${date}\n`;
+            }
+            msg += `────────────────────\n`;
+
+            // Кнопки удаления делаем в 2 колонки для компактности
+            if (i % 2 === 0) {
+                inline_keyboard.push([{ text: `❌ ${code}`, callback_data: `del_inv:${code}` }]);
+            } else {
+                inline_keyboard[inline_keyboard.length - 1].push({ text: `❌ ${code}`, callback_data: `del_inv:${code}` });
+            }
+        }
+
+        if (list.keys.length > maxDisplay) {
+            msg += `<i>...показаны первые ${maxDisplay} из ${list.keys.length}</i>`;
+        }
+
+        // Кнопка очистки — всегда отдельной строкой внизу
+        inline_keyboard.push([{ text: "🗑️ УДАЛИТЬ ВСЕ ИНВАЙТЫ", callback_data: "del_inv_all" }]);
+
+        await sendMessage(chatId, msg, { inline_keyboard }, env);
+    } catch (e) {
+        console.error("Invites Error:", e);
+        await sendMessage(chatId, "❌ Ошибка при формировании списка инвайтов", null, env);
+    }
+    return new Response("OK");
+  }
+
   if (text.startsWith("/add") && isAdmin) {
     const targetId = text.split(" ")[1];
     if (!targetId) return await sendMessage(chatId, "⚠️ Формат: /add [ID]", null, env);
@@ -1365,11 +1424,31 @@ async function handleVK(body, env, hostname, ctx) {
         return new Response("OK");
       }
 
-      if (command === "auth_webdav") {
-        await env.USER_DB.put(`state:${userId}`, "wait_webdav_url");
-        await sendVKMessage(chatId, "🖥️ Введи данные WebDAV в формате:\nURL|Логин|Пароль\n\nПример:\nhttps://webdav.yandex.ru|myuser|mypass", env);
+      // Внутри switch/case или if-else для команд в handleVK
+      if (command === "auth_mailru") {
+        await env.USER_DB.put(`state:${userId}`, "wait_webdav_url"); // Состояние то же самое
+        const msg = "📧 Настройка Облака Mail.ru\n\n" +
+                    "1. Зайди в почту через браузер.\n" +
+                    "2. Настройки ⮕ Пароли для внешних приложений.\n" +
+                    "3. Создай новый пароль (назови его 'VK Bot').\n\n" +
+                    "🚀 Пришли мне ссылку в формате:\n" +
+                    "https://твоя_почта@mail.ru:пароль@webdav.cloud.mail.ru";
+        await sendVKMessage(chatId, msg, env);
         return new Response("OK");
       }
+
+      if (command === "auth_webdav") {
+        await env.USER_DB.put(`state:${userId}`, "wait_webdav_url");
+        const msg = "🖥️ Настройка WebDAV\n\n" +
+                    "Пришли данные в одном из форматов:\n" +
+                    "1️⃣  ХОСТ|ЛОГИН|ПАРОЛЬ\n" +
+                    "2️⃣  https://логин:пароль@хост\n\n" +
+                    "Пример:\n" +
+                    "https://webdav.yandex.ru|myuser|mypass";
+        await sendVKMessage(chatId, msg, env);
+        return new Response("OK");
+      }
+      
       if (command === "next_folders") {
         const offset = payloadData.off || 0;
         const limit = 5;
@@ -1846,16 +1925,62 @@ async function handleVK(body, env, hostname, ctx) {
         }
 
         if (userState === "wait_webdav_url") {
-            const parts = text.split("|");
-            if (parts.length === 3) {
-                userData = { provider: "webdav", webdav_url: parts[0], webdav_user: parts[1], webdav_pass: parts[2] };
-                await env.USER_DB.put(userKey, JSON.stringify(userData));
-                await sendVKMessage(chatId, "✅ WebDAV подключен!", env);
-                await env.USER_DB.delete(`state:${userId}`);
-            } else {
-                await sendVKMessage(chatId, "❌ Неверный формат. Нужно: URL|Логин|Пароль", env);
-            }
-            return new Response("OK");
+          let rawText = text.trim();
+          let url, user, pass;
+      
+          // 1. Проверяем формат с палочкой URL|Логин|Пароль
+          const parts = rawText.split("|");
+          
+          if (parts.length === 3) {
+              url = parts[0].trim();
+              user = parts[1].trim();
+              pass = parts[2].trim();
+          } else {
+              // 2. Если палочек нет, пробуем парсить как в Telegram (user:pass@host)
+              try {
+                  const protocolMatch = rawText.match(/^(https?:\/\/)/);
+                  if (!protocolMatch) throw new Error("Ссылка должна начинаться с https://");
+                  
+                  const protocol = protocolMatch[1];
+                  let linkWithoutProtocol = rawText.replace(protocol, "");
+      
+                  const lastAtIndex = linkWithoutProtocol.lastIndexOf("@");
+                  if (lastAtIndex === -1) throw new Error("Используй формат URL|Логин|Пароль или https://логин:пароль@сервер");
+      
+                  const authPart = linkWithoutProtocol.substring(0, lastAtIndex);
+                  const hostPart = linkWithoutProtocol.substring(lastAtIndex + 1);
+      
+                  const colonIndex = authPart.indexOf(":");
+                  if (colonIndex === -1) throw new Error("В ссылке не найден пароль (двоеточие после логина)");
+      
+                  user = authPart.substring(0, colonIndex);
+                  pass = authPart.substring(colonIndex + 1);
+                  url = `${protocol}${hostPart}`;
+              } catch (e) {
+                  await sendVKMessage(chatId, `❌ Ошибка формата:\n${e.message}`, env);
+                  return new Response("OK");
+              }
+          }
+      
+          // 3. Сохраняем данные (используем имена полей как в твоем WebDAV блоке)
+          // ПРОВЕРКА: Это Mail.ru или обычный WebDAV?
+          const isMailRu = url.toLowerCase().includes("mail.ru");
+          const providerName = isMailRu ? "WebDAV (Облако Mail.ru)" : "WebDAV";
+
+          userData = { 
+              ...userData, // сохраняем id и username если были
+              provider: "webdav", 
+              webdav_host: url, 
+              webdav_user: user, 
+              webdav_pass: pass,
+              folderId: "Storage" 
+          };
+      
+          await env.USER_DB.put(userKey, JSON.stringify(userData));
+          await env.USER_DB.delete(`state:${userId}`);
+          
+          await sendVKMessage(chatId, `✅ ${providerName} успешно настроен!`, env);
+          return new Response("OK");
         }
 
         if (text.startsWith("/create ")) {
@@ -1897,7 +2022,7 @@ async function handleVK(body, env, hostname, ctx) {
 /**
  * Генерирует HTML-страницу для VK Mini App.
  */
-function renderVKMiniAppHTML(params, userData, isAdmin) {
+function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
   const userId = params.vk_user_id || "UNKNOWN";
   const groupId = params.vk_group_id || "235249123";
   const appId = params.vk_app_id || "54419010";
@@ -1905,7 +2030,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
   
   const isConnected = !!(userData && (userData.access_token || userData.webdav_pass));
   const provider = userData ? userData.provider : null;
-  const currentFolder = userData?.folderId || "Storage";
+  const currentFolder = userData?.folderId || "Root";
 
   let providerName = isConnected ? (provider === 'yandex' ? 'Яндекс Диск' : provider === 'google' ? 'Google Drive' : provider === 'dropbox' ? 'Dropbox' : userData?.webdav_host?.includes('mail.ru') ? 'Облако Mail.ru' : 'WebDAV') : "не настроено";
 
@@ -2020,8 +2145,8 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
     <span class="close-x" onclick="togglePanel('adminPanel')">×</span>
     <div class="msg-header">⚙️ Панель администратора</div>
     <div class="msg-body">
-      <div>✅ <b>Авторизовано:</b> 7</div>
-      <div>🚀 <b>Версия:</b> ${version}</div>
+      <div>✅ Авторизовано: <b>${countUser}</b> пользователей</div>
+      <div>🚀 <b>Версия: </b>${version}</div>
       <div style="margin-top:12px;">Выбери раздел настроек:</div>
       
       <div class="chat-btn" onclick="openAiSettings()">🧠 Настройки ИИ</div>
@@ -2179,6 +2304,8 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
     const userId = "${userId}";
     const groupId = "${groupId}";
     const appId = "${appId}";
+    const currentProvider = "${provider}";
+    const currentFolderId = "${currentFolder}";
     const allAiModels = ${JSON.stringify(AI_MODELS)};
     let foldersCache = null;
     
@@ -2435,7 +2562,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
               var response = await fetch('https://leshiy-storage-bot.leshiyalex.workers.dev/api/search?q=' + encodeURIComponent(query), {
                   headers: { 'x-vk-user-id': currentUid }
               });
-              var data = await response.json(); // data.results - файлы, data.currentFolder - активная папка
+              var data = await response.json();
               
               if (!data.results || data.results.length === 0) {
                   list.innerHTML = '<div style="text-align:center; color:#818c99; margin-top:40px;">Ничего не найдено</div>';
@@ -2444,36 +2571,50 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
   
               var html = '';
               for (var i = 0; i < data.results.length; i++) {
+                // Внутри цикла for в функции doSearch
                 var file = data.results[i];
-            
-                // ПАРСИМ ПУТЬ ИЗ БАЗЫ (Storage|ID)
-                var pathParts = file.remotePath.split('|');
-                var fileFolderName = pathParts[0]; // Название папки из базы
-                var fileFolderId = pathParts[1] || pathParts[0]; // ID папки из базы
-                
-                // СРАВНИВАЕМ С ТЕКУЩЕЙ ПАПКОЙ ПОЛЬЗОВАТЕЛЯ
-                // (Предполагаем, что воркер прислал data.userFolderId)
-                var isAccessible = true;
-                if (file.provider === 'google' && data.userFolderId) {
-                    // Если ID папки в базе не совпадает с текущим ID у юзера - Offline
-                    if (fileFolderId !== data.userFolderId) {
-                        isAccessible = false;
-                    }
-                }
-
-                var statusColor = isAccessible ? '#4bb34b' : '#ff4d4f';
-                var statusText = isAccessible ? '● Online' : '● Offline';
-                var opacity = isAccessible ? '1' : '0.6'; // Слегка гасим недоступные файлы
-
                 var date = new Date(file.timestamp).toLocaleDateString('ru-RU');
-                
-                // Иконки
+                var currentUid = window.userId || userId;
+                var fileFolderId = file.remotePath.split('/')[0];
+                // ВАЖНО: Мы сравниваем провайдера и папку напрямую из объекта файла
+                var isSameProvider = (file.provider === currentProvider);
+                var isSameFolder = (fileFolderId === currentFolderId);
+            
+                var statusText, statusColor, borderStyle, canDownload;
+                var badgeStyle = 'font-size: 10px; padding: 1px 5px; border-radius: 4px; border: 1px solid ';
+
+                if (isSameProvider && isSameFolder) {
+                  // Тот самый диск и та же папка
+                  statusText = '● Доступен';
+                  statusColor = '#4bb34b';
+                  var providerBadge = badgeStyle + statusColor + '; background: ' + statusColor + '15';
+                  var folderBadge = badgeStyle + statusColor + '; background: ' + statusColor + '15';
+                  canDownload = true;
+                } else if (isSameProvider && !isSameFolder) {
+                  // Диск тот же, но папка другая (твои новые файлы попадут сюда, если папка сменилась)
+                  statusText = '● Не доступен (Другая папка)';
+                  statusColor = '#ffc107'; // ЖЕЛТЫЙ
+                  var providerBadge = badgeStyle + statusColor + '; background: ' + statusColor + '15';
+                  var folderBadge = badgeStyle + '#d1d8df' + '; background: ' + '#f0f2f5';
+                  canDownload = true;
+                } else {
+                  // Провайдер не совпадает
+                  statusText = '● Не доступен (Другой диск)';
+                  statusColor = '#99a2ad';
+                  var providerBadge = badgeStyle + '#d1d8df' + '; background: ' + '#f0f2f5';
+                  var folderBadge = badgeStyle + '#d1d8df' + '; background: ' + '#f0f2f5';
+                  canDownload = false;
+                }
+ 
+                // Определяем иконку по расширению
                 var ext = file.fileName.split('.').pop().toLowerCase();
                 var icon = '📄';
-                if (['jpg','jpeg','png','gif'].includes(ext)) icon = '🖼️';
-                if (['mp4','mov','avi'].includes(ext)) icon = '🎥';
-                if (['mp3','wav'].includes(ext)) icon = '🎵';
+                if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) icon = '🖼️';
+                if (['mp4', 'mov', 'avi', 'wmv'].includes(ext)) icon = '🎬';
+                if (['mp3', 'wav'].includes(ext)) icon = '🎵';
+                if (['ogg', 'oga'].includes(ext)) icon = '🎙️';
 
+                // Ссылка на скачивание
                 var downloadUrl = 'https://leshiy-storage-bot.leshiyalex.workers.dev/api/download' +
                                   '?path=' + encodeURIComponent(file.remotePath) +
                                   '&name=' + encodeURIComponent(file.fileName) +
@@ -2487,18 +2628,13 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
                                 '<span class="file-name">' + file.fileName + '</span>' +
                                 '<div style="display: flex; gap: 8px; align-items: center; margin-top: 2px;">' +
                                     '<span class="file-date">' + date + '</span>' +
-                                    '<span style="font-size: 10px; color: #999; background: #f0f2f5; padding: 1px 5px; border-radius: 4px;">' + fileFolderName + '</span>' +
-                                    '<span style="color: ' + statusColor + '; font-size: 10px; font-weight: bold;">' + statusText + '</span>' +
+                                    '<span style="' + providerBadge + '; color: #555;">' + file.provider + '</span>' +
+                                    '<span style="' + folderBadge + '; color: #555;">' + fileFolderId + '</span>' +
+                                    '<span style="color: ' + statusColor + '; font-size: 10px; font-weight: 500;">' + statusText + '</span>' +
                                 '</div>' +
                             '</div>' +
-                            // Кнопка скачать (если Offline - можно сделать серенькой)
-                        '<a href="' + (isAccessible ? downloadUrl : '#') + '" ' + 
-                           (isAccessible ? 'target="_blank"' : '') + 
-                           ' class="download-link" style="background: ' + (isAccessible ? '#4986cc' : '#ebedf0') + '; color: ' + (isAccessible ? '#fff' : '#999') + '; padding: 8px 12px; border-radius: 8px; text-decoration: none; font-size: 12px; font-weight: 500; white-space: nowrap;">' + 
-                           (isAccessible ? '⬇️ Скачать' : '⚠️ Ссылка') + 
-                        '</a>' +
-
                             
+                            '<a href="' + downloadUrl + '" target="_blank" class="download-link" style="background: #f0f7ff; border-radius: 6px; margin-left: 10px;">' + '⬇️ Скачать' + '</a>' +
                         '</div>';
               }
               list.innerHTML = html;
@@ -2833,130 +2969,143 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
           }
       }
     }
-
+    
     // Основная функция обработки (ЕДИНСТВЕННАЯ)
     async function processQueue() {
       try {
-          if (typeof uploadQueue === 'undefined' || !uploadQueue || isUploading) return;
-          var task = uploadQueue.find(t => t.row && t.row.getAttribute('data-status') === 'waiting');
-          if (!task || isUploading) return;
-  
-          isUploading = true;
-          task.row.setAttribute('data-status', 'uploading');
-          var fileNameHTML = ' Файл: <b>' + task.fileName + '</b>';
-  
-          // ШАГ 1: Получаем "билет" на загрузку
-          const res = await fetch('https://leshiy-storage-bot.leshiyalex.workers.dev/api/get-upload-link', {
-              method: 'POST',
-              headers: {
-                  'x-file-name': encodeURIComponent(task.fileName),
-                  'x-file-size': task.file.size.toString(), // ПЕРЕДАЕМ РАЗМЕР
-                  'x-vk-user-id': window.userId || userId
-              }
+        if (typeof uploadQueue === 'undefined' || !uploadQueue || isUploading) return;
+        var task = uploadQueue.find(t => t.row && t.row.getAttribute('data-status') === 'waiting');
+        if (!task || isUploading) return;
+    
+        isUploading = true;
+        task.row.setAttribute('data-status', 'uploading');
+        var fileNameHTML = ' Файл: <b>' + task.fileName + '</b>';
+    
+        if (currentProvider === 'dropbox') {
+          // --- DROPBOX: ИСПОЛЬЗУЕМ /api/upload-buffer ---
+          const arrayBuffer = await task.file.arrayBuffer();
+          const uploadRes = await fetch('/api/upload-buffer', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/octet-stream',
+              'x-file-name': encodeURIComponent(task.fileName),
+              'x-vk-user-id': window.userId || userId
+            },
+            body: arrayBuffer
           });
-          
+    
+          if (!uploadRes.ok) {
+            const errorData = await uploadRes.json().catch(() => ({}));
+            throw new Error(errorData.error || "Ошибка загрузки в Dropbox");
+          }
+    
+          // Успех
+          task.row.setAttribute('data-status', 'done');
+          task.info.innerHTML = '✅ Готово! ' + fileNameHTML;
+          if (task.bar) { task.bar.style.background = '#28a745'; task.bar.style.width = '100%'; }
+          var btn = task.row.querySelector('.cancel-btn');
+          if (btn) btn.style.display = 'none';
+    
+        } else {
+          // --- ВСЕ ОСТАЛЬНЫЕ: как раньше через /api/get-upload-link ---
+          const res = await fetch('/api/get-upload-link', {
+            method: 'POST',
+            headers: {
+              'x-file-name': encodeURIComponent(task.fileName),
+              'x-file-size': task.file.size.toString(),
+              'x-vk-user-id': window.userId || userId
+            }
+          });
           const plan = await res.json();
           if (!plan.upload_url) throw new Error(plan.error || "Нет ссылки");
-  
+    
           // ШАГ 2: Прямая загрузка в облако
           const xhr = new XMLHttpRequest();
           task.xhr = xhr;
           xhr.open(plan.method, plan.upload_url, true);
-  
-          // Указываем тип и размер, чтобы облако не ругалось на пустой файл
-          xhr.setRequestHeader('Content-Type', task.file.type || 'application/octet-stream');
-          // ВНИМАНИЕ: Content-Length браузер ставит сам из task.file, но если облако требует
-          // специфичный заголовок (типа x-amz-content-sha256), воркер должен его выплюнуть в plan.headers
-  
+    
           if (plan.headers) {
-              for (let k in plan.headers) xhr.setRequestHeader(k, plan.headers[k]);
+            for (let k in plan.headers) {
+              xhr.setRequestHeader(k, plan.headers[k]);
+            }
           }
-  
+    
+          if (plan.provider !== 'google') {
+            xhr.setRequestHeader('Content-Type', task.file.type || 'application/octet-stream');
+          }
+    
           xhr.upload.onprogress = function(e) {
             if (e.lengthComputable && task.info) {
-                // Считаем точный процент
-                var pct = (e.loaded / e.total) * 100;
-                
-                // Для полоски оставляем как есть (плавность за счет CSS transition)
-                if (task.bar) task.bar.style.width = pct + '%';
-                
-                // Для текста используем целое число, но обновляем его 
-                // в связке с fileNameHTML, как у тебя в эталоне
-                task.info.innerHTML = '📤 ' + Math.floor(pct) + '%' + fileNameHTML;
+              var pct = (e.loaded / e.total) * 100;
+              if (task.bar) task.bar.style.width = pct + '%';
+              task.info.innerHTML = '📤 ' + Math.floor(pct) + '%' + fileNameHTML;
             }
           };
-  
+    
           xhr.onload = async function() {
             if (xhr.status >= 200 && xhr.status <= 204) {
-                try {
-                    // ОБЯЗАТЕЛЬНО добавляем await и читаем ответ!
-                    const confResponse = await fetch('https://leshiy-storage-bot.leshiyalex.workers.dev/api/confirm-upload', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'x-vk-user-id': window.userId || userId
-                        },
-                        body: JSON.stringify({
-                            fileName: task.fileName,
-                            fileSize: task.file.size
-                        })
-                    });
-                    
-                    // Это заставит браузер дождаться закрытия HTTP-потока
-                    await confResponse.json(); 
-        
-                    task.row.setAttribute('data-status', 'done');
-                    task.info.innerHTML = '✅ Готово! ' + fileNameHTML;
-                    if (task.bar) { task.bar.style.background = '#28a745'; task.bar.style.width = '100%'; }
-
-                    // СКРЫВАЕМ КНОПКУ, чтобы нельзя было случайно отменить готовое
-                    var btn = task.row.querySelector('.cancel-btn');
-                    if (btn) btn.style.display = 'none';
-                } catch (e) {
-                    console.error("Ошибка подтверждения:", e);
-                    task.row.setAttribute('data-status', 'warning');
-                    task.info.innerHTML = '⚠️ Ошибка базы! ' + fileNameHTML;
-                    if (task.bar) { task.bar.style.background = '#ffc107'; task.bar.style.width = '100%'; }
-                    
-                    // МЕНЯЕМ КНОПКУ: Отмена -> Повторить
-                    var btn = task.row.querySelector('.cancel-btn');
-                    if (btn) {
-                        btn.innerHTML = 'Повторить';
-                        btn.style.color = '#2688eb'; // Синий цвет для действия
-                        btn.onclick = function() {
-                            retryConfirm(task); // Вызываем новую функцию дозаписи
-                        };
-                    }
+              try {
+                const confResponse = await fetch('/api/confirm-upload', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'x-vk-user-id': window.userId || userId
+                  },
+                  body: JSON.stringify({
+                    fileName: task.fileName,
+                    fileSize: task.file.size
+                  })
+                });
+                await confResponse.json();
+    
+                task.row.setAttribute('data-status', 'done');
+                task.info.innerHTML = '✅ Готово! ' + fileNameHTML;
+                if (task.bar) { task.bar.style.background = '#28a745'; task.bar.style.width = '100%'; }
+                var btn = task.row.querySelector('.cancel-btn');
+                if (btn) btn.style.display = 'none';
+              } catch (e) {
+                console.error("Ошибка подтверждения:", e);
+                task.row.setAttribute('data-status', 'warning');
+                task.info.innerHTML = '⚠️ Ошибка базы! ' + fileNameHTML;
+                if (task.bar) { task.bar.style.background = '#ffc107'; task.bar.style.width = '100%'; }
+                var btn = task.row.querySelector('.cancel-btn');
+                if (btn) {
+                  btn.innerHTML = 'Повторить';
+                  btn.style.color = '#2688eb';
+                  btn.onclick = function() { retryConfirm(task); };
                 }
+              }
             } else {
-                task.row.setAttribute('data-status', 'error');
-                task.info.innerHTML = '❌ Ошибка облака: ' + xhr.status + fileNameHTML;
-            }
-            finish(); // Теперь finish вызовется только ПОСЛЕ того, как подтверждение реально завершилось
-          };
-  
-          xhr.onerror = function() {
+              alert("Ошибка " + xhr.status + ": " + xhr.responseText);
               task.row.setAttribute('data-status', 'error');
-              task.info.innerHTML = '❌ Ошибка сети. Файл: <b>' + task.fileName + '</b>';
-              finish();
+              task.info.innerHTML = '❌ Ошибка облака: ' + xhr.status + fileNameHTML;
+            }
+            finish();
           };
-  
-          xhr.send(task.file); // Шлем бинарник
-  
+    
+          xhr.onerror = function() {
+            task.row.setAttribute('data-status', 'error');
+            task.info.innerHTML = '❌ Ошибка сети. Файл: <b>' + task.fileName + '</b>';
+            finish();
+          };
+    
+          xhr.send(task.file);
+        }
+    
       } catch (e) {
         console.error("Ошибка в очереди:", e);
         if (task && task.row) {
-            task.row.setAttribute('data-status', 'error');
-            // Сохраняем имя файла в выводе ошибки
-            task.info.innerHTML = '❌ Ошибка: ' + e.message + '. Файл: <b>' + task.fileName + '</b>';
-            if (task.bar) task.bar.style.background = '#ff4d4f';
+          task.row.setAttribute('data-status', 'error');
+          task.info.innerHTML = '❌ Ошибка: ' + e.message + '. Файл: <b>' + task.fileName + '</b>';
+          if (task.bar) task.bar.style.background = '#ff4d4f';
         }
+      } finally {
         finish();
-    }
-  
+      }
+    
       function finish() {
-          isUploading = false;
-          setTimeout(processQueue, 200);
+        isUploading = false;
+        setTimeout(processQueue, 200);
       }
     }
 
@@ -2997,41 +3146,139 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
     }
     
     async function openFolderSelector() {
-      const modal = document.getElementById('folderModal'), listCont = document.getElementById('modalFolderList');
+      const modal = document.getElementById('folderModal');
+      const listCont = document.getElementById('modalFolderList');
       modal.style.display = 'flex';
-      if (foldersCache) renderMyList(foldersCache);
+      
+      // Очищаем или пишем "Загрузка...", чтобы юзер видел активность
+      listCont.innerText = '⏳ Загрузка...';
+  
+      if (window.foldersCache) renderMyList(window.foldersCache);
+      
       try {
         const res = await fetch('/api/list-folders?vk_user_id=' + userId);
         const folders = await res.json();
-        foldersCache = folders;
-        renderMyList(folders);
-      } catch (e) { listCont.innerText = 'Ошибка'; }
+        
+        // Если бэкенд вернул ошибку в формате {error: "..."}
+        if (folders.error) {
+            listCont.innerText = '❌ Ошибка: ' + folders.error;
+            return;
+        }
 
-      function renderMyList(data) {
-        listCont.innerHTML = data.map(f => {
-          const n = (typeof f === 'object') ? f.name : f;
-          return \`<div class="folder-item" onclick="selectFolder('\${n}', '\${n}')">📁 \${n}</div>\`;
-        }).join('');
+        window.foldersCache = folders;
+        renderMyList(folders);
+      } catch (e) { 
+        console.error(e);
+        listCont.innerText = '❌ Ошибка загрузки'; 
       }
+    }
+
+    function renderMyList(data) {
+      // Находим контейнер заново, так как мы вне области видимости openFolderSelector
+      const listCont = document.getElementById('modalFolderList');
+      if (!listCont) return;
+
+      var html = '';
+      // Проверка, что пришел массив
+      if (!Array.isArray(data)) {
+          listCont.innerText = 'Папок не найдено';
+          return;
+      }
+
+      for (var i = 0; i < data.length; i++) {
+          var f = data[i];
+          var name = (typeof f === 'object') ? f.name : f;
+          var id = (typeof f === 'object') ? f.id : f;
+
+          html += '<div class="folder-item" ' +
+                  'data-id="' + id + '" ' +
+                  'data-name="' + name + '" ' +
+                  'onclick="handleFolderClick(this)">' +
+                  '📁 ' + name + '</div>';
+      }
+      listCont.innerHTML = html || 'Папки пусты';
+    }
+
+    function handleFolderClick(el) {
+      var id = el.getAttribute('data-id');
+      var name = el.getAttribute('data-name');
+      selectFolder(id, name);
     }
 
     function closeFolders() { document.getElementById('folderModal').style.display = 'none'; }
 
     async function selectFolder(id, name) {
-      document.querySelector('#curFolderLabel b').innerText = "⏳ " + name;
+      const label = document.querySelector('#curFolderLabel b');
+      if (label) label.innerText = "⏳ " + name;
+      
       closeFolders();
-      await fetch('/api/select-folder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, folderId: name }) });
-      location.reload();
-    }
+  
+      // Определяем, что именно сохранить в KV
+      let folderValue;
+      
+      if (typeof currentProvider !== 'undefined' && currentProvider === 'google') {
+          // Для Google Drive шлем технический ID
+          folderValue = id;
+      } else if (typeof currentProvider !== 'undefined' && currentProvider === 'dropbox') {
+          // Для Dropbox шлем имя без лидирующего слэша
+          folderValue = name.startsWith('/') ? name.substring(1) : name;
+      } else {
+          // Для Яндекса и прочих оставляем имя как есть
+          folderValue = name;
+      }
+  
+      try {
+          await fetch('/api/select-folder', { 
+              method: 'POST', 
+              headers: { 'Content-Type': 'application/json' }, 
+              body: JSON.stringify({ 
+                  userId: userId, 
+                  folderId: folderValue 
+              }) 
+          });
+          
+          location.reload();
+      } catch (e) {
+          console.error("Ошибка смены папки:", e);
+          if (label) label.innerText = name;
+      }
+  }
 
     async function promptCreateFolder() {
       const n = prompt("Название папки:");
       if (!n || !n.trim()) return;
+      
       try {
-        await fetch('/api/create-folder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, name: n.trim() }) });
-        await fetch('/api/select-folder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, folderId: n.trim() }) });
+        // 1. Создаем папку и ЖДЕМ ответ с ID
+        const res = await fetch('/api/create-folder', { 
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json' }, 
+          body: JSON.stringify({ userId, name: n.trim() }) 
+        });
+        
+        const data = await res.json();
+        
+        // 2. Вытаскиваем ID, который вернул Google API
+        // (бэкенд должен вернуть его в поле folderId)
+        const newFolderId = data.folderId; 
+    
+        if (!newFolderId) {
+          alert("Ошибка: Сервер не вернул ID папки");
+          return;
+        }
+    
+        // 3. Сохраняем именно ID в KV
+        await fetch('/api/select-folder', { 
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json' }, 
+          body: JSON.stringify({ userId, folderId: newFolderId }) 
+        });
+    
         location.reload();
-      } catch (e) { location.reload(); }
+      } catch (e) { 
+        console.error("Ошибка при создании:", e);
+        location.reload(); 
+      }
     }
 
     async function openFriendsStorage() {
@@ -3120,7 +3367,9 @@ async function handleVkUpload(request, env, ctx, userId, corsHeaders) {
         uploadOk = await uploadWebDAVStream(streamForCloud, name, userData, env, mimeType, finalSize);
     }
 
-    if (!uploadOk) throw new Error("Cloud upload failed");
+    if (!uploadOk) {
+      throw new Error("Cloud upload failed");
+    }
 
     // --- 5. AI АНАЛИТИКА (В ФОНЕ) ---
     if (ctx?.waitUntil) {
@@ -3157,105 +3406,102 @@ async function handleVkUpload(request, env, ctx, userId, corsHeaders) {
 
 async function handleVkUploadArrayBuffer(request, env, ctx) {
   const corsHeaders = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, x-vk-user-id, x-file-name, x-upload-url",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, x-vk-user-id, x-file-name, x-upload-url",
   };
 
   if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-      const fileName = decodeURIComponent(request.headers.get('x-file-name') || 'file.bin');
-      const vkUserId = request.headers.get('x-vk-user-id');
-      const uploadUrl = decodeURIComponent(request.headers.get('x-upload-url') || '');
-      
-      // --- ЧИСТЫЙ БУФЕР (Пробиваем лимит 40 КБ) ---
-      const fileBuffer = await request.arrayBuffer(); 
-      if (fileBuffer.byteLength === 0) throw new Error("Файл пустой");
+    const fileName = decodeURIComponent(request.headers.get('x-file-name') || 'file.bin');
+    const vkUserId = request.headers.get('x-vk-user-id');
+    const uploadUrl = decodeURIComponent(request.headers.get('x-upload-url') || '');
 
-      const userData = await env.USER_DB.get("user:" + vkUserId, { type: "json" });
-      if (!userData) return new Response("User Error", { status: 403, headers: corsHeaders });
+    const fileBuffer = await request.arrayBuffer();
+    if (fileBuffer.byteLength === 0) throw new Error("Файл пустой");
 
-      // --- 1. ОПРЕДЕЛЕНИЕ ТИПА И AI-КАТЕГОРИИ ---
-      let dbFileType = "document";
-      let mimeType = "application/octet-stream";
-      let sType = ""; // Тип для AI
-      const ext = (fileName.split('.').pop() || "").toLowerCase();
+    const userData = await env.USER_DB.get("user:" + vkUserId, { type: "json" });
+    if (!userData) return new Response("User Error", { status: 403, headers: corsHeaders });
 
-      if (["jpg", "jpeg", "png", "webp", "gif"].includes(ext)) {
-          dbFileType = "photo";
-          mimeType = ext === "png" ? "image/png" : "image/jpeg";
-          sType = "IMAGE_TO_TEXT";
-      } else if (["mp3", "wav", "ogg", "m4a"].includes(ext)) {
-          dbFileType = "audio";
-          mimeType = "audio/mpeg";
-          sType = "AUDIO_TO_TEXT";
-      } else if (["mp4", "mov", "avi", "mkv"].includes(ext)) {
-          dbFileType = "video";
-          mimeType = "video/mp4";
-          sType = "VIDEO_TO_ANALYSIS";
-      } else if (["pdf", "docx", "txt"].includes(ext)) {
-          dbFileType = "document";
-          // Доп. проверка: если это картинка внутри документа
-          if (["jpg", "jpeg", "png"].includes(ext)) sType = "IMAGE_TO_TEXT";
-      }
+    let dbFileType = "document";
+    let mimeType = "application/octet-stream";
+    let sType = "";
+    const ext = (fileName.split('.').pop() || "").toLowerCase();
 
-      // --- 2. ПРОКСИ НА ВК (в фоне) ---
-      if (uploadUrl) {
-          ctx.waitUntil((async () => {
-              try {
-                  const vkFd = new FormData();
-                  vkFd.append('photo', new Blob([fileBuffer], { type: mimeType }), fileName);
-                  await fetch(uploadUrl, { method: 'POST', body: vkFd });
-              } catch (e) { console.error("VK Sync Error:", e); }
-          })());
-      }
+    if (["jpg", "jpeg", "png", "webp", "gif"].includes(ext)) {
+      dbFileType = "photo";
+      mimeType = ext === "png" ? "image/png" : "image/jpeg";
+      sType = "IMAGE_TO_TEXT";
+    } else if (["mp3", "wav", "ogg", "m4a"].includes(ext)) {
+      dbFileType = "audio";
+      mimeType = "audio/mpeg";
+      sType = "AUDIO_TO_TEXT";
+    } else if (["mp4", "mov", "avi", "mkv"].includes(ext)) {
+      dbFileType = "video";
+      mimeType = "video/mp4";
+      sType = "VIDEO_TO_ANALYSIS";
+    } else if (["pdf", "docx", "txt"].includes(ext)) {
+      dbFileType = "document";
+      if (["jpg", "jpeg", "png"].includes(ext)) sType = "IMAGE_TO_TEXT";
+    }
 
-      // --- 3. ЗАГРУЗКА В ОБЛАКО (WebDAV, Yandex, Google, Dropbox) ---
-      let uploadOk = false;
-      const { provider, access_token, folderId } = userData;
-      const folder = folderId || "";
+    // Прокси на ВК (в фоне)
+    if (uploadUrl) {
+      ctx.waitUntil((async () => {
+        try {
+          const vkFd = new FormData();
+          vkFd.append('photo', new Blob([fileBuffer], { type: mimeType }), fileName);
+          await fetch(uploadUrl, { method: 'POST', body: vkFd });
+        } catch (e) { console.error("VK Sync Error:", e); }
+      })());
+    }
 
-      if (provider === "yandex") {
-          uploadOk = await uploadToYandexFromArrayBuffer(fileBuffer, fileName, access_token, folder);
-      } else if (provider === "google") {
-          uploadOk = await uploadToGoogleFromArrayBuffer(fileBuffer, fileName, access_token, folder || "root");
-      } else if (provider === "dropbox") {
-          uploadOk = await uploadToDropboxFromArrayBuffer(fileBuffer, fileName, access_token, folder);
-      } else if (provider === "webdav") {
-          uploadOk = await uploadWebDAVFromArrayBuffer(fileBuffer, fileName, userData, env);
-      }
+    // Загрузка в облако
+    let uploadOk = false;
+    const { provider, access_token, folderId } = userData;
+    const folder = folderId || "";
 
-      if (!uploadOk) throw new Error("Cloud upload failed");
+    if (provider === "yandex") {
+      uploadOk = await uploadToYandexFromArrayBuffer(fileBuffer, fileName, access_token, folder);
+    } else if (provider === "google") {
+      uploadOk = await uploadToGoogleFromArrayBuffer(fileBuffer, fileName, access_token, folder || "root");
+    } else if (provider === "dropbox") {
+      uploadOk = await uploadToDropboxFromArrayBuffer(fileBuffer, fileName, access_token, folder);
+    } else if (provider === "webdav") {
+      uploadOk = await uploadWebDAVFromArrayBuffer(fileBuffer, fileName, userData, env);
+    }
 
-      // --- 4. ЗАПИСЬ В БАЗУ D1 ---
-      const fileId = "app_" + Date.now();
-      await env.FILES_DB.prepare(
-          "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
-      ).bind(String(vkUserId), fileName, fileId, dbFileType, provider, folder, Date.now()).run();
+    if (!uploadOk) throw new Error("Cloud upload failed");
 
-      // --- 5. AI АНАЛИТИКА (В ФОНЕ) ---
-      if (sType && ctx?.waitUntil) {
-          ctx.waitUntil((async () => {
-              try {
-                  const cfg = await loadActiveConfig(sType, env);
-                  if (cfg?.FUNCTION) {
-                      const description = await cfg.FUNCTION(cfg, fileBuffer, env, mimeType);
-                      if (description) {
-                          await env.FILES_DB.prepare("UPDATE files SET ai_description = ? WHERE userId = ? AND fileName = ?")
-                              .bind(description, String(vkUserId), fileName).run();
-                      }
-                  }
-              } catch (e) { console.error("AI BG Error:", e); }
-          })());
-      }
+    // Запись в D1
+    const fileId = "app_" + Date.now();
+    await env.FILES_DB.prepare(
+      "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).bind(String(vkUserId), fileName, fileId, dbFileType, provider, folder, Date.now()).run();
 
-      return new Response(JSON.stringify({ success: true, fileId }), { 
-          headers: { ...corsHeaders, "Content-Type": "application/json" } 
-      });
+    // AI аналитика (в фоне)
+    if (sType && ctx?.waitUntil) {
+      ctx.waitUntil((async () => {
+        try {
+          const cfg = await loadActiveConfig(sType, env);
+          if (cfg?.FUNCTION) {
+            const description = await cfg.FUNCTION(cfg, fileBuffer, env, mimeType);
+            if (description) {
+              await env.FILES_DB.prepare("UPDATE files SET ai_description = ? WHERE userId = ? AND fileName = ?")
+                .bind(description, String(vkUserId), fileName).run();
+            }
+          }
+        } catch (e) { console.error("AI BG Error:", e); }
+      })());
+    }
+
+    return new Response(JSON.stringify({ success: true, fileId }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
 
   } catch (e) {
-      return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
   }
 }
 
@@ -3289,23 +3535,49 @@ async function handleGetUploadLink(request, env) {
       
       // --- GOOGLE DRIVE ---
       if (provider === "google") {
-          const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable', {
-              method: 'POST',
-              headers: {
-                  'Authorization': `Bearer ${access_token}`,
-                  'X-Upload-Content-Type': 'application/octet-stream',
-                  'Content-Type': 'application/json; charset=UTF-8'
-              },
-              body: JSON.stringify({ name: fileName, parents: folder ? [folder] : [] })
-          });
-          return new Response(JSON.stringify({ upload_url: res.headers.get('Location'), method: "PUT", provider: "google" }), { headers: corsHeaders });
+        const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${access_token}`,
+                'X-Upload-Content-Type': 'application/octet-stream',
+                'X-Upload-Content-Length': fileSize,
+                'Content-Type': 'application/json; charset=UTF-8',
+                // ДОБАВЛЯЕМ ORIGIN, чтобы Google знал, кто будет загружать
+                'Origin': 'https://leshiy-storage-bot.leshiyalex.workers.dev' 
+            },
+            body: JSON.stringify({ 
+                name: fileName, 
+                parents: folder ? [folder] : [] 
+            })
+        });
+
+        const uploadUrl = res.headers.get('Location');
+
+        // КРИТИЧЕСКИЕ ЗАГОЛОВКИ ДЛЯ БРАУЗЕРА
+        const responseHeaders = {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*", // Разрешаем фронту читать ответ
+            "Access-Control-Allow-Methods": "POST, OPTIONS, PUT",
+            "Access-Control-Expose-Headers": "Location" // Чтобы фронт увидел ссылку
+        };
+
+        if (!uploadUrl) {
+            return new Response(JSON.stringify({ error: "Google session failed" }), { status: 500, headers: responseHeaders });
+        }
+
+        return new Response(JSON.stringify({ 
+            upload_url: uploadUrl, 
+            method: "PUT", 
+            provider: "google" 
+        }), { status: 200, headers: responseHeaders });
       }
 
       // --- DROPBOX ---
       if (provider === "dropbox") {
           const dbxUrl = 'https://content.dropboxapi.com/2/files/upload';
+          const fullPath = ('/' + folder + '/' + fileName).replace(/\/+/g, '/');
           const args = JSON.stringify({ 
-              path: (folder.startsWith('/') ? folder : '/' + folder) + '/' + fileName, 
+              path: fullPath, 
               mode: 'overwrite' 
           });
           // Для Dropbox фронту нужно будет добавить эти заголовки в XHR
@@ -3315,7 +3587,6 @@ async function handleGetUploadLink(request, env) {
               headers: { 
                   "Authorization": `Bearer ${access_token}`, 
                   "Dropbox-API-Arg": args, 
-                  "Content-Type": "application/octet-stream" 
               } 
           }), { headers: corsHeaders });
       }
@@ -3384,12 +3655,22 @@ async function handleDownload(path, fileName, userId, env) {
 
       // 3. ОБРАБОТКА 5 ПРОВАЙДЕРОВ
       if (provider === 'google') {
-          // GOOGLE (path = fileId)
-          const googleFile = parsePath(fullPath); // fullPath теперь "Storage|ID"
-          cloudResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${googleFile.id}?alt=media`, {
-              headers: { 'Authorization': `Bearer ${userData.access_token}` }
-          });
-
+        // В path у нас ID папки (например 1CbEI7PT...)
+        const folderId = path; 
+        // Сначала ищем ID файла по имени внутри этой папки
+        const searchUrl = `https://www.googleapis.com/drive/v3/files?q='${folderId}'+in+parents+and+name='${encodeURIComponent(fileName)}'+and+explicitlyTrashed=false&fields=files(id)`;
+        const searchRes = await fetch(searchUrl, {
+            headers: { 'Authorization': `Bearer ${userData.access_token}` }
+        });
+        const searchData = await searchRes.json();
+        if (!searchRes.ok || !searchData.files || searchData.files.length === 0) {
+            throw new Error(`Google Drive: Файл "${fileName}" не найден в папке ${folderId}`);
+        }
+        const realFileId = searchData.files[0].id;
+        // Теперь качаем по настоящему ID файла
+        cloudResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${realFileId}?alt=media`, {
+            headers: { 'Authorization': `Bearer ${userData.access_token}` }
+        });
       } else if (provider === 'yandex' && userData.access_token) {
           // YANDEX (OAuth API) - Нужен префикс disk:/
           const yaPath = fullPath.startsWith('disk:/') ? fullPath : 'disk:/' + fullPath;
@@ -4122,6 +4403,30 @@ async function handleCallbackQuery(query, env, ctx) {
 
     await sendMessage(chatId, allList, kb, env);
     return new Response("OK");
+  }
+
+  if (data.startsWith("del_inv:")) {
+    const code = data.split(":")[1];
+    await env.USER_DB.delete(`invite:${code}`);
+    
+    // Уведомляем Telegram, что кнопка нажата, и правим сообщение
+    await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/answerCallbackQuery`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callback_query_id: data.id, text: `Инвайт ${code} удален` })
+    });
+    
+    await sendMessage(chatId, `✅ Инвайт <code>${code}</code> успешно удален.`, null, env);
+    return new Response("OK");
+  }
+
+  if (data === "del_inv_all") {
+      const list = await env.USER_DB.list({ prefix: "invite:" });
+      for (const key of list.keys) {
+          await env.USER_DB.delete(key.name);
+      }
+      await sendMessage(chatId, "🗑️ Все инвайты были очищены.", null, env);
+      return new Response("OK");
   }
 
   if (data === "search_retry") {
@@ -5161,11 +5466,6 @@ async function uploadToGoogleStream(stream, name, token, folder, type, fileSize)
   // Если нужно больше 5МБ, нужен Resumable, но для начала стабилизируем это
   
   const folderId = (folder === "root" || !folder) ? "" : folder;
-  const parentFolder = parsePath(folder); // folder теперь "Storage|ID"
-  const metadata = {
-      name: name,
-      parents: [parentFolder.id] // Google получит чистый ID
-  };
   const url = `https://www.googleapis.com/upload/drive/v3/files?uploadType=media&ignoreDefaultVisibility=true`;
   
   // В простом режиме метаданные (имя) передать сложнее одним запросом через стрим, 
@@ -5449,7 +5749,7 @@ async function handleDropboxCallback(request, env) {
 }
 
 async function uploadToDropboxFromArrayBuffer(arrayBuffer, fileName, accessToken, folderPath = "") {
-  const path = `/${folderPath}/${fileName}`.replace(/\/+/g, '/');
+  const path = (folderPath ? `/${folderPath}/${fileName}` : `/${fileName}`).replace(/\/+/g, '/');
   const arg = { path, mode: "add", autorename: true, mute: false };
   const res = await fetch("https://content.dropboxapi.com/2/files/upload", {
     method: "POST",
@@ -5460,24 +5760,28 @@ async function uploadToDropboxFromArrayBuffer(arrayBuffer, fileName, accessToken
     },
     body: arrayBuffer
   });
-  return res.ok;
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Dropbox API error: ${res.status} ${text}`);
+  }
+  return true;
 }
 
 
 async function uploadToDropboxStream(stream, name, token, folder, fileSize) {
   const path = (folder ? `/${folder}/${name}` : `/${name}`).replace(/\/+/g, '/');
+  const arg = JSON.stringify({ path, mode: "overwrite" });
+
   const res = await fetch('https://content.dropboxapi.com/2/files/upload', {
-      method: 'POST',
-      headers: {
-          'Authorization': `Bearer ${token}`,
-          'Dropbox-API-Arg': JSON.stringify({ path: path, mode: "overwrite" }),
-          'Content-Type': 'application/octet-stream'
-      },
-      body: stream,
-      
-      // @ts-ignore
-      duplex: 'half'
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Dropbox-API-Arg': arg,
+      'Content-Type': 'application/octet-stream'
+    },
+    body: stream
   });
+
   return res.ok;
 }
 
@@ -5507,7 +5811,7 @@ async function listDropboxFolders(token) {
     const folders = (data.entries || [])
       .filter(item => item[".tag"] === "folder")
       .map(item => ({ 
-        id: item.path_display, 
+        id: item.path_display.replace(/^\/+/, ''), // Убирает лидирующий /
         name: item.name 
       }));
 
@@ -5532,8 +5836,12 @@ async function createDropboxFolder(folderName, token) {
     });
     
     const data = await res.json();
-    // Если папка уже есть, Dropbox вернет ошибку, проверим это
-    return res.status === 200 || data?.error_summary?.includes("path_already_exists");
+    if (res.status === 200 || data?.error_summary?.includes("path_already_exists")) {
+      // Возвращаем folderName без слэша, чтобы фронт записал его в KV
+      return folderName.replace(/^\/+/, '');
+    }
+    
+    return false;
   } catch (e) {
     return false;
   }
