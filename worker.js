@@ -1,16 +1,20 @@
-/* 🗄 Telegram Storage Bot "Хранилка" by Leshiy
-Telegram-бот для автоматической загрузки фото и видео в облачное хранилище с реферальной системой доступа. 
+/* 🗄 Приложение Storage Bot "Хранилка" by Leshiy
+Одновременно работает как Telegram-бот, vk-чат-бот, и vkMiniApp-приложение с функцией аплоад/доунлоад с реферальной системой доступа.
+Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака.
+Это продвинутый SaaS-инструмент работающий круглосуточно 24/7 для личного использования или сообщества по обмену файлами с друзьями и родственниками. 
+Автор: Огорельцев Александр Валерьевич
 
-✨ Основные функции: Автоматическая загрузка фото и видео на облачные платформы (Google, Яндекс.Диск, Облако Mail.Ru WebDAV и др.) 
-прямо через телеграмм. Возможность предоставления доступа к Вашему хранилищу друзьям и близким просто отправив им реферальную ссылку.
-Универсальность: Поддержка облачного WebDAV (Google, Яндекс.Диск, Облако Mail.Ru и др.).
-Умное именование: Сохраняет исходные имена для файлов без сжатия и генерирует имена по дате/времени для сжатых фото/видео.
-Поддержка WEBM: Возможность сохранять видеофайлы в современных форматах без потери качества.
+✨ Основные функции: Автоматическая загрузка фото и видео на облачные платформы (Яндекс Диск, Google Drive, Dropbox, Облако Mail.Ru WebDAV и др.) 
+прямо через телеграмм или вконтакте. Возможность предоставления доступа к Вашему хранилищу друзьям и близким просто отправив им реферальную ссылку.
+Универсальность: Поддержка облачных провайдеров с авторизацией OAuth (Яндекс Диск, Google Drive, Dropbox) и WebDAV (Облако Mail.Ru, Yandex WebDAV и др.).
+Умное именование: Сохраняет исходные имена для файлов без сжатия и генерирует имена по дате/времени для сжатых фото/видео/голосовых.
+Также есть функция поиска по Хранилке и возможность достать файлы с Вашего облака, в телеграмм напрямую в чат, а в вк через ссылку "скачать".
+Интеграция ИИ: В сопровождение прикручен умный искуственный интеллект Gemini AI (через Google AI Studio API), который может подсказать любой вопрос.
+Поддержка WEBM: Возможность сохранять видеофайлы в современных форматах без потери качества и размера.
 Диагностика: Команда /debug для проверки статуса подключения к хранилищу в реальном времени.
-Скрытая функция: Команда /search для поиска и возможность достать файлы с хранилки.
 */
 // Глобальные константы
-const version = "v2.4.8 от 28.01.2026"; // актуальная версия
+const version = "v2.5.0 от 29.01.2026"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -303,6 +307,63 @@ export default {
         }
       }
 
+      if (url.pathname === "/api/create-invite") {
+        const uId = url.searchParams.get("userId");
+        const corsHeaders = {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        };
+      
+        try {
+          // 1. Получаем основной объект пользователя из KV
+          const userDataRaw = await env.USER_DB.get("user:" + uId);
+          if (!userDataRaw) {
+            return new Response(JSON.stringify({ error: "Пользователь не найден. Подключите диск." }), { status: 400, headers: corsHeaders });
+          }
+      
+          const userData = JSON.parse(userDataRaw);
+      
+          // 2. Берем данные прямо из объекта (теперь "Документы" не потеряются)
+          const provider = userData.provider || "yandex";
+          const folderId = userData.folderId || "STORAGE";
+          
+          // Генерируем код инвайта
+          const inviteCode = Math.random().toString(36).substring(2, 12);
+      
+          // 3. Формируем объект инвайта по твоему стандарту
+          const inviteData = {
+            inviterId: parseInt(uId),
+            provider: provider,
+            token: inviteCode, 
+            folderId: folderId,
+            timestamp: Date.now()
+          };
+      
+          // Сохраняем в KV
+          await env.USER_DB.put("invite:" + inviteCode, JSON.stringify(inviteData));
+      
+          return new Response(JSON.stringify({ inviteCode: inviteCode }), { headers: corsHeaders });
+        } catch (e) {
+          return new Response(JSON.stringify({ error: "Ошибка: " + e.message }), { status: 500, headers: corsHeaders });
+        }
+      }
+
+      if (url.pathname === "/api/get-invite-info") {
+        const code = url.searchParams.get("code");
+        const corsHeaders = {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        };
+      
+        const inviteDataRaw = await env.USER_DB.get("invite:" + code);
+        if (!inviteDataRaw) {
+          return new Response(JSON.stringify({ error: "not_found" }), { status: 404, headers: corsHeaders });
+        }
+      
+        // Возвращаем данные инвайта (там есть inviterId, имя владельца и т.д.)
+        return new Response(inviteDataRaw, { headers: corsHeaders });
+      }
+
       if (url.pathname === "/api/get-friend-storage") {
         const uId = url.searchParams.get("vk_user_id");
         // Ищем в KV связь, которую мы создали при переходе по ссылке
@@ -315,18 +376,32 @@ export default {
 
       if (url.pathname === "/api/connect-friend") {
         const uId = url.searchParams.get("vk_user_id");
-        const fId = url.searchParams.get("friend_id");
+        let fId = url.searchParams.get("friend_id") || ""; // Добавляем пустую строку как fallback
         
         const headers = { 
           "Content-Type": "application/json", 
           "Access-Control-Allow-Origin": "*" 
         };
       
-        // УБРАЛИ ЗАЩИТУ (убрали && uId !== fId)
-        if (uId && fId) { 
-          await env.USER_DB.put("friend_of:" + uId, fId);
-          return new Response(JSON.stringify({ success: true }), { headers });
+        if (uId && fId) {
+          // Если fId — это буквы (код инвайта), превращаем его в ID владельца
+          if (isNaN(Number(fId))) {
+            const inviteDataRaw = await env.USER_DB.get("invite:" + fId);
+            if (inviteDataRaw) {
+              const inviteData = JSON.parse(inviteDataRaw);
+              // Принудительно приводим к строке, чтобы TS не ругался
+              fId = String(inviteData.inviterId);
+            } else {
+              return new Response(JSON.stringify({ success: false, error: "Invite not found" }), { headers, status: 404 });
+            }
+          }
+      
+          // Записываем в KV. Здесь и ключ, и значение должны быть строками.
+          await env.USER_DB.put("friend_of:" + String(uId), String(fId));
+          
+          return new Response(JSON.stringify({ success: true, connectedTo: fId }), { headers });
         }
+        
         return new Response(JSON.stringify({ success: false }), { headers, status: 400 });
       }
       
@@ -494,7 +569,7 @@ export default {
             });
           }
         }
-
+        
         if (url.pathname === "/api/setup-webdav") {
           const userId = String(body.userId);
       
@@ -802,7 +877,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
       statusText = `✅ <b>${userData.provider}</b> подключен${folderInfo}${sharedInfo}`;
     }
 
-    let welcome = `👋 <b>Привет! Я твоя личная хранилка.</b>\n\n` +
+    let welcome = `👋 <b>Привет! Я твоя личная Хранилка.</b>\n\n` +
                   `📁 Просто пришли мне фото или видео, и я закину их на сервер.\n\n` +
                   `⚙️ Статус: ${statusText}\n\n` +
                   `📖 <b>Команды:</b>\n` +
@@ -1629,7 +1704,7 @@ async function handleVK(body, env, hostname, ctx) {
         }
 
         // 3. Возвращаем классическое приветствие с командами
-        let welcome = `👋 Привет! Я твоя личная хранилка.\n`;
+        let welcome = `👋 Привет! Я твоя личная Хранилка.\n`;
         welcome += `📁 Просто пришли мне фото или видео, и я закину их на сервер.\n`;
         welcome += `⚙️ Статус: ${statusText}\n`;
         welcome += `📖 Команды:\n`;
@@ -2161,7 +2236,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
     </div>
 
     <div id="ui-header-block" class="tg-message">
-      <div><br>👋 <b>Привет! Я твоя личная хранилка.</b></div>
+      <div><br>👋 <b>Привет! Я твоя личная Хранилка.</b></div>
       <div style="margin-top:8px;">📁 Просто пришли мне фото или видео, и я закину их на сервер.</div>
       <div class="status-group">
       <div>⚙️ Статус: ${isConnected ? `✅ <span style="color:#4bb34b; font-weight:bold;">Подключен ${providerName}</span>` : 'Не настроено'}</div>
@@ -2212,6 +2287,16 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
       <div>📂 <b>Папка:</b> ${isConnected ? `${currentFolder}` : '-'}</div>
       <div>👤 <b>Твой ID:</b> ${userId}</div>
       <div>👑 <b>Админ:</b> ${isAdmin ? 'Да' : 'Нет'}</div>
+    </div>
+  </div>
+
+  <div id="sharePanel" style="display:none; position:fixed; top: 32%; left: 50%; transform: translate(-50%, -50%); width:90%; max-width:400px; background:#fff; border:2px solid #0077ff; border-radius:12px; z-index:1000; padding:15px; box-shadow:0 10px 25px rgba(0,0,0,0.2); font-family:sans-serif;">
+    <h3 style="margin:0 0 10px 0; font-size:16px; color:#333;">Предпросмотр инвайта</h3>
+    <div id="shareContent" style="font-size:13px; color:#666; margin-bottom:15px; line-height:1.4;">
+        </div>
+    <div style="display:flex; gap:10px;">
+        <button onclick="confirmAndShare()" style="flex:1; background:#0077ff; color:#fff; border:none; padding:10px; border-radius:8px; cursor:pointer;">Отправить</button>
+        <button onclick="document.getElementById('sharePanel').style.display='none'" style="flex:1; background:#eee; color:#333; border:none; padding:10px; border-radius:8px; cursor:pointer;">Отмена</button>
     </div>
   </div>
 
@@ -2427,6 +2512,58 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
       });
     })();
 
+    // Функция смахивания окна влево или вправо для мобильных
+    function makeSwipable(panel, onRemove, useRotation = true) {
+      let startX = 0;
+      let currentX = 0;
+      const threshold = 100;
+    
+      // 1. Запоминаем базовое состояние из CSS (например, матрицу центровки -50% -50%)
+      const style = window.getComputedStyle(panel);
+      const initialTransform = style.transform !== 'none' ? style.transform : '';
+    
+      panel.addEventListener('touchstart', function(e) {
+        startX = e.touches[0].clientX;
+        panel.style.transition = 'none';
+      }, {passive: true});
+    
+      panel.addEventListener('touchmove', function(e) {
+        currentX = e.touches[0].clientX - startX;
+        if (Math.abs(currentX) > 5) {
+          // Собираем строку трансформации через обычные кавычки
+          var rotation = useRotation ? ' rotate(' + (currentX / 20) + 'deg)' : '';
+          
+          // Наслаиваем смещение поверх базы
+          panel.style.transform = initialTransform + ' translateX(' + currentX + 'px)' + rotation;
+          panel.style.opacity = 1 - (Math.abs(currentX) / 350);
+        }
+      }, {passive: true});
+    
+      panel.addEventListener('touchend', function() {
+        panel.style.transition = 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.1)';
+        
+        if (Math.abs(currentX) > threshold) {
+          // Улетает далеко в сторону
+          var direction = currentX > 0 ? 1000 : -1000;
+          panel.style.transform = initialTransform + ' translateX(' + direction + 'px)';
+          panel.style.opacity = '0';
+          
+          setTimeout(function() {
+            panel.style.display = 'none';
+            // ОЧЕНЬ ВАЖНО: сбрасываем в исходный CSS-вид для следующего открытия
+            panel.style.transform = initialTransform; 
+            panel.style.opacity = '1';
+            if (onRemove) onRemove();
+          }, 400);
+        } else {
+          // Пружинит обратно в центр
+          panel.style.transform = initialTransform;
+          panel.style.opacity = '1';
+        }
+        currentX = 0;
+      });
+    }
+
     function renderHeader(data) {
       if (!data) return;
       const isConn = !!data.isConnected;
@@ -2434,7 +2571,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
       const folder = data.currentFolder || 'Не выбрано';
       const name = data.userName || "Пользователь";
       document.getElementById('ui-header-block').innerHTML = 
-          '<div><br>👋 <b>Привет, ' + name + '! Я твоя личная хранилка.</b></div>' +
+          '<div><br>👋 <b>Привет, ' + name + '! Я твоя личная Хранилка.</b></div>' +
           '<div style="margin-top:8px;">📁 Просто пришли мне фото или видео, и я закину их на сервер.</div>' +
           '<div class="status-group" style="border-left-color: ' + (isConn ? '#4bb34b' : '#eb4242') + '">' +
           '<div>⚙️ Статус: ' + (isConn ? '✅ <span style="color:#4bb34b; font-weight:bold;">Подключен ' + pName + '</span>' : 'Не настроено') + '</div>' +
@@ -2483,7 +2620,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
       html += '<button class="btn-s" onclick="showCustomWD()">';
       html += '<img src="' + UI_CDN + '/network-drive.png"> Свой FTP/SFTP/WebDAV</button>';
       // Друг
-      html += '<button class="btn-s" onclick="openFriendsStorage()">🤝 Подключить Хранилку по ссылке</button>';
+      html += '<button class="btn-s" onclick="openFriendsStorage()">🤝 Подключить Хранилку друга</button>';
       // Чат
       html += '<button class="btn-s" style="margin-top: 12px; background: #2688eb; color: #fff; border: none;" onclick="goToChat()">💬 Открыть чат Хранилку</button>';
       container.innerHTML = html;
@@ -2685,10 +2822,26 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
 
     function togglePanel(id) {
       const el = document.getElementById(id);
-      if(!el) return;
+      if (!el) return;
+    
       const isVisible = el.style.display === 'block';
-      el.style.display = isVisible ? 'none' : 'block';
-      if(!isVisible) el.scrollIntoView({behavior: 'smooth'});
+    
+      if (!isVisible) {
+        // 1. Сначала принудительно возвращаем её "домой"
+        // Если это дебаг или админ, сбрасываем transform в исходное состояние
+        el.style.opacity = '1';
+        // 2. Делаем видимой
+        el.style.display = 'block';
+        // 3. Инициализируем свайп (без поворота для дебага)
+        if (!el.dataset.swipable) {
+          makeSwipable(el, null, false);
+          el.dataset.swipable = "true";
+        }
+        // 4. Теперь скролл сработает корректно, так как панель уже в центре
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else {
+        el.style.display = 'none';
+      }
     }
 
     function goToChat() {
@@ -3416,10 +3569,133 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
     }
     setTimeout(updateQuota, 800);
 
-    function shareApp() {
-      vkBridge.send("VKWebAppShare", { "link": 'https://vk.com/app' + appId + '#ref=' + userId });
-    }
+    // Функция шаринга (вызывается из меню по кнопке /share)
+    async function shareApp() {
+      const panel = document.getElementById("sharePanel");
+      const content = document.getElementById("shareContent");
+      // СБРОС СОСТОЯНИЯ ПОСЛЕ СВАЙПА
+      panel.style.display = "block";
+      panel.style.opacity = "1";
+      // Возвращаем панель в центр (учитывай свои стили top/left)
+      panel.style.transform = "translate(-50%, -50%)"; // Если у тебя top: 50%
+      content.innerHTML = "<span class='loader'>⏳ Генерация инвайт-кода...</span>";
+
+      try {
+        const response = await fetch('/api/create-invite?userId=' + userId);
+        const data = await response.json();
     
+        if (data && data.inviteCode) {
+          // Сохраняем ссылку в глобальную переменную (без ключевых слов let/var если она уже есть выше)
+          window.pendingInviteLink = 'https://vk.com/app' + appId + '#ref=' + data.inviteCode;
+          // Словарь имен провайдеров
+          const providerNames = {
+              'yandex': 'Яндекс Диск',
+              'google': 'Google Drive',
+              'mailru': 'Облако Mail.ru',
+              'dropbox': 'Dropbox',
+              'webdav': 'WebDAV'
+          };
+          
+          // Берем данные для предпросмотра
+          const pName = currentProvider || "Google Drive";
+          const fName = currentFolder || "Root";
+          // Получаем красивое имя или оставляем как есть, если в списке нет
+          const pDisplay = providerNames[pName] || pName;
+
+          // Наполняем твой блок shareContent
+          // Используем обычные двойные кавычки внутри, чтобы не конфликтовать с твоими бэктиксами
+          const inviteUrl = 'https://vk.com/app' + appId + '#ref=' + data.inviteCode;
+          content.innerHTML =
+            "<div style='text-align:left; font-size:13px; color:#333;'>" +
+              "<span>👋 <b>Что происходит?</b> Вы формируете приглашение на доступ в свою Хранилку. Ваш друг сможет загружать файлы в выбранную Вами в данный момент папку.</span><br><br>" +
+              
+              "<b>Куда даем доступ:</b><br>" +
+              "☁️ <b>Провайдер:</b> " + pDisplay + "<br>" +
+              "📁 <b>Папка:</b> " + fName + "<br>" +
+              "🎟️ <b>Токен:</b> " + data.inviteCode + "<br><br>" +
+              "🔗 <b>Ваша ссылка (клик для копирования):</b><br>" +
+              "<code onclick='copyToClipboard(this)' style='cursor:pointer; color:#0077ff; display:block; background:#f0f7ff; padding:5px; border-radius:4px; margin-top:5px; word-break:break-all;'>" + inviteUrl + "</code>" +
+              "<small style='color: #888;'>Эта ссылка будет на кнопке <b>Открыть</b> в сообщении.</small><br><br>" +
+
+              "<div style='background: #fff9e6; border: 1px solid #ffe58f; padding: 10px; border-radius: 8px;'>" +
+                  "📝 <b>Текст сообщения (клик для копирования):</b><br>" +
+                  "<span onclick='copyToClipboard(this)' style='cursor:pointer; color:#555; display:block; margin-top:5px; font-style:italic;'>" +
+                    "Я предоставил тебе доступ к своей Хранилке. Провайдер: " + pName + ". Папка: " + fName + ". Жми Открыть и подключайся!" + 
+                  "</span>" +
+              "</div><br>" +
+              "<b>Что дальше?</b><br>" +
+              "1️⃣ Нажмите кнопку <b>Отправить</b> ниже.<br>" +
+              "2️⃣ Выберите друга в открывшемся списке ВК.<br>" +
+              "3️⃣ Если вы на ПК — вставьте скопированный текст в поле сообщения, а на мобильном телефоне он вставится автоматически." +
+            "</div>";
+            // Показываем твою панель
+          document.getElementById("sharePanel").style.display = "block";
+          const sharePanel = document.getElementById("sharePanel");
+          makeSwipable(sharePanel);
+        }
+      } catch (error) {
+        console.error("Ошибка при подготовке шаринга:", error);
+      }
+    }
+
+    function copyToClipboard(element) {
+      const text = element.innerText;
+      
+      // Создаем временный элемент
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      
+      // Прячем его за пределами экрана
+      textArea.style.position = "fixed";
+      textArea.style.left = "-9999px";
+      textArea.style.top = "0";
+      document.body.appendChild(textArea);
+      
+      // Выделяем и копируем
+      textArea.focus();
+      textArea.select();
+      
+      try {
+          const successful = document.execCommand('copy');
+          if (successful) {
+              // Визуальный эффект
+              const oldColor = element.style.color;
+              const oldText = element.innerHTML;
+              element.style.color = "#28a745";
+              element.innerText = "✅ Скопировано!";
+              
+              setTimeout(function() {
+                  element.style.color = oldColor;
+                  element.innerHTML = oldText;
+              }, 1500);
+          }
+      } catch (err) {
+          console.error('Даже старый метод не сработал:', err);
+      }
+  
+      document.body.removeChild(textArea);
+    }
+
+    // Функция подтверждения
+    function confirmAndShare() {
+      const pName = currentProvider || "Google Drive";
+      const fName = currentFolder || "Root";
+      
+      // Формируем текст сообщения БЕЗ обратных слэшей в коде
+      // Используем String.fromCharCode(10) для переноса строки
+      const nl = String.fromCharCode(10);
+      const shareText = "Я предоставил тебе доступ к своей Хранилке. Провайдер: " + pName + ". Папка: " + fName + ". Жми Открыть и подключайся!";
+    
+      // Вызываем мост (используем 'text' по документации)
+      vkBridge.send("VKWebAppShare", { 
+        "link": window.pendingInviteLink,
+        "text": shareText 
+      });
+    
+      // Закрываем твою панель
+      document.getElementById("sharePanel").style.display = "none";
+    }
+
     async function openFolderSelector() {
       const modal = document.getElementById('folderModal');
       const listCont = document.getElementById('modalFolderList');
@@ -3594,17 +3870,37 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
           return;
         }
 
+        // --- БЛОК ПРОВЕРКИ ИНВАЙТА ---
+        let finalFriendId = referrerId;
+        if (!isNumeric) {
+          const inviteRes = await fetch('/api/get-invite-info?code=' + referrerId);
+          if (inviteRes.ok) {
+            const inviteInfo = await inviteRes.json();
+            finalFriendId = String(inviteInfo.inviterId);
+          }
+        }
+        //const isYourselfInvite = finalFriendId === String(userId);
+        //if (isYourselfInvite) return; 
+        // ----------------------------
+
         // Запрашиваем данные только если прошли фильтры
         const [myStatusResponse, friendStatusResponse] = await Promise.all([
           fetch('?action=get-status&userId=' + userId),
-          fetch('?action=get-status&userId=' + referrerId)
+          fetch('?action=get-status&userId=' + finalFriendId)
         ]);
         
         const myData = await myStatusResponse.json();
         const friendData = await friendStatusResponse.json();
         
+        // ГЛАВНОЕ ИЗМЕНЕНИЕ: Сравниваем через String, чтобы типы данных не мешали.
+        // Если myData.friendId совпадает с тем, что в ссылке — баннер НЕ РИСУЕМ.
+        if (myData.friendId && String(myData.friendId) === String(finalFriendId)) {
+          console.log("Связь уже установлена в базе, баннер скрыт.");
+          return;
+        }
+
         // Показываем баннер, только если в базе записан ДРУГОЙ ID или пусто
-        if (myData.friendId !== referrerId) {
+        if (myData.friendId !== finalFriendId) {
           renderInviteBanner(referrerId, friendData.userName, friendData.userPhoto);
         }
       } catch (error) {
@@ -3642,45 +3938,6 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
       
       zone.appendChild(panel);
     
-      // --- ЛОГИКА СВАЙПА ---
-      let startX = 0;
-      let currentX = 0;
-      const threshold = 100; // Расстояние в пикселях для удаления
-    
-      panel.addEventListener('touchstart', (e) => {
-        startX = e.touches[0].clientX;
-        panel.style.transition = 'none'; // Отключаем анимацию пока тянем
-      }, {passive: true});
-    
-      panel.addEventListener('touchmove', (e) => {
-        currentX = e.touches[0].clientX - startX;
-        // Разрешаем тянуть только в стороны
-        if (Math.abs(currentX) > 10) {
-          panel.style.transform = 'translateX(' + currentX + 'px) rotate(' + (currentX / 20) + 'deg)';
-          panel.style.opacity = 1 - (Math.abs(currentX) / 300);
-        }
-      }, {passive: true});
-    
-      panel.addEventListener('touchend', () => {
-        panel.style.transition = 'transform 0.3s ease-out, opacity 0.3s ease-out';
-        
-        if (Math.abs(currentX) > threshold) {
-          // Улетает влево или вправо
-          const direction = currentX > 0 ? 500 : -500;
-          panel.style.transform = 'translateX(' + direction + 'px)';
-          panel.style.opacity = '0';
-          setTimeout(() => {
-            panel.remove();
-            sessionStorage.setItem('hideInviterBanner', 'true');
-          }, 300);
-        } else {
-          // Возвращается на место
-          panel.style.transform = 'translateX(0px) rotate(0deg)';
-          panel.style.opacity = '1';
-        }
-        currentX = 0;
-      });
-    
       // Кнопки по клику (для ПК и обычного нажатия)
       document.getElementById('close-inviter-banner').onclick = () => {
         panel.style.opacity = '0';
@@ -3688,15 +3945,27 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
       };
       
       document.getElementById('confirm-ref-button').onclick = () => confirmFriendConnection(friendId);
+      const inviterPanel = document.getElementById('inviter-panel');
+      makeSwipable(inviterPanel, () => {
+        sessionStorage.setItem('hideInviterBanner', 'true');
+      });
     }
 
     // Функция записи связи в базу
     async function confirmFriendConnection(friendId) {
+      const btn = document.getElementById('confirm-ref-button');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '⌛ Подключаем...';
+        btn.style.opacity = '0.7';
+      }
       try {
         const response = await fetch('/api/connect-friend?vk_user_id=' + userId + '&friend_id=' + friendId);
         const result = await response.json();
         
         if (result.success) {
+          // МГНОВЕННО прячем баннер в сессии
+          sessionStorage.setItem('hideInviterBanner', 'true');
           const panel = document.getElementById('inviter-panel');
           if (panel) {
             panel.innerHTML = '<b style="color:#1a5c1a;font-weight:bold;">✅ Хранилка друга успешно подключена!</b>';
