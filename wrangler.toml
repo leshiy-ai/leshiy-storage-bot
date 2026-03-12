@@ -6,7 +6,7 @@ compatibility_date = "2024-03-12"
 # Переменные окружения (заглушки)
 # Секреты нужно настраивать в панели Cloudflare, а не здесь
 [vars]
-ADMIN_ID = "235663624, 5300581414"
+ADMIN_ID = "235663624"
 BOT_USERNAME = "leshiy_testbot"
 VK_GROUP_ID = "228491873"
 VK_APP_ID = "54419010"
