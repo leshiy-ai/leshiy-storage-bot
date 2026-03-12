@@ -10,7 +10,7 @@ Telegram-бот для автоматической загрузки фото и
 Скрытая функция: Команда /search для поиска и возможность достать файлы с хранилки.
 */
 // Глобальные константы
-const version = "v2.4.3 от 22.01.2026"; // актуальная версия
+const version = "v2.4.4 от 22.01.2026"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -367,7 +367,7 @@ export default {
         return new Response(html, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
-            "Content-Security-Policy": "frame-ancestors 'self' https://vk.com https://*.vk.com; script-src 'self' 'unsafe-inline' https://unpkg.com; img-src * data: blob:; connect-src *; style-src 'self' 'unsafe-inline';",
+            "Content-Security-Policy": "frame-ancestors https://vk.com https://*.vk.com; script-src https://leshiy-storage-bot.leshiyalex.workers.dev https://unpkg.com 'unsafe-inline'; img-src * data: blob:; connect-src *; style-src 'unsafe-inline';",
             "Access-Control-Allow-Origin": "*",
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Pragma": "no-cache",
@@ -2146,7 +2146,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
     <div class="msg-header">⚙️ Панель администратора</div>
     <div class="msg-body">
       <div>✅ Авторизовано: <b>${countUser}</b> пользователей</div>
-      <div>🚀 <b>Версия: </b>${version}</div>
+      <div>🚀 <b>Версия:</b> ${version}</div>
       <div style="margin-top:12px;">Выбери раздел настроек:</div>
       
       <div class="chat-btn" onclick="openAiSettings()">🧠 Настройки ИИ</div>
@@ -2281,35 +2281,34 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
   </div>
 
   <div class="footer">Версия: ${version} | ID: ${userId}</div>
-
   <script>
     // Сначала инициализируем Bridge
-    vkBridge.send("VKWebAppInit");
+      vkBridge.send("VKWebAppInit");
+    // Очищаем awaiting_auth, если пользователь уже подключён
+    if (${isConnected}) {
+      localStorage.removeItem('awaiting_auth');
+    }
+    window.addEventListener("focus", function() {
+      if (localStorage.getItem('awaiting_auth') === 'true') {
+        localStorage.removeItem('awaiting_auth');
+        setTimeout(() => uiReload(), 1500);
+      }
+    });
+    
     // Определяем окружение
     function getLaunchParam(name) {
       const params = new URLSearchParams(window.location.search);
       return params.get(name);
     }
-    // Проверяем метку при каждом фокусе на окно
-    window.addEventListener("focus", function() {
-      if (localStorage.getItem('awaiting_auth') === 'true') {
-        localStorage.removeItem('awaiting_auth'); // Сразу удаляем, чтобы не рефрешить вечно
-        // Даем 1.5 секунды бэкенду записать токены и делаем рефреш
-        setTimeout(() => {
-          uiReload(); 
-        }, 1500);
-      }
-    });
-
-    const userId = "${userId}";
-    const groupId = "${groupId}";
-    const appId = "${appId}";
-    const currentProvider = "${provider}";
-    const currentFolderId = "${currentFolder}";
+    
+    const userId = "${userId}" || "UNCKNOWN";
+    const groupId = "${groupId}" || "235249123";
+    const appId = "${appId}" || "54419010";
+    const currentProvider = "${provider}" || "-";
+    const currentFolderId = "${currentFolder}" || "Root";
     const allAiModels = ${JSON.stringify(AI_MODELS)};
     let foldersCache = null;
     
-
     // Функция обновления стягиванием на мобилке
     (function() {
       let startY = 0;
@@ -2334,6 +2333,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
         const diff = currentY - startY;
     
         if (diff > 0 && window.scrollY === 0) {
+          e.preventDefault();
           // Плавное затухание движения (резиновый эффект)
           const move = Math.pow(diff, 0.8); 
           container.style.transform = 'translateY(' + move + 'px)';
@@ -2344,7 +2344,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
             ptrText.innerText = "Потяните для обновления";
           }
         }
-      }, { passive: true });
+      }, { passive: false });
     
       window.addEventListener('touchend', function() {
         if (!isPulling) return;
@@ -2362,8 +2362,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
           ptrLoader.style.display = "block";
     
           // Вызываем обновление
-          document.getElementById('reloadIcon').classList.add('loading');
-          location.reload();
+          uiReload();
     
           // Возвращаем всё назад
           setTimeout(function() {
@@ -2469,9 +2468,6 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
     }
     
     function openLink(path) {
-      if (window.vkBridge) {
-        vkBridge.send("VKWebAppInit");
-      }
       const url = "https://leshiy-storage-bot.leshiyalex.workers.dev" + path + "?state=" + userId;
       
       // 1. Ставим метку для рефреша (LocalStorage работает везде)
@@ -2767,6 +2763,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
     async function disconnect() {
       if(confirm("Отключить хранилище?")) {
         await fetch('/api/disconnect', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({userId}) });
+        localStorage.setItem('awaiting_auth', 'true'); 
         location.reload();
       }
     }
@@ -3257,14 +3254,18 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
         });
         
         const data = await res.json();
-        
-        // 2. Вытаскиваем ID, который вернул Google API
-        // (бэкенд должен вернуть его в поле folderId)
-        const newFolderId = data.folderId; 
-    
-        if (!newFolderId) {
-          alert("Ошибка: Сервер не вернул ID папки");
-          return;
+        let newFolderId;
+
+        // 3. УСЛОВИЯ ПО ПРОВАЙДЕРАМ
+        if (currentProvider === 'google') {
+          // Для гугла строго ID из ответа бэкенда
+          newFolderId = data.folderId; 
+        } else if (currentProvider === 'dropbox') {
+          // Для дропбокса путь должен начинаться со слэша
+          newFolderId = folderName.startsWith('/') ? folderName : '/' + folderName;
+        } else {
+          // Для Яндекс, WebDAV, Mail.ru используем просто имя
+          newFolderId = folderName;
         }
     
         // 3. Сохраняем именно ID в KV
