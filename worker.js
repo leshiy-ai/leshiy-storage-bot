@@ -10,7 +10,7 @@ Telegram-бот для автоматической загрузки фото и
 Скрытая функция: Команда /search для поиска и возможность достать файлы с хранилки.
 */
 // Глобальные константы
-const version = "v2.4.4 от 22.01.2026"; // актуальная версия
+const version = "v2.4.5 от 25.01.2026"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -21,6 +21,8 @@ export default {
     const hostname = url.hostname;
     const state = url.searchParams.get("state"); // Это наш userId
     
+    console.log("📥 Запрос:", request.method, request.url);
+
     // --- ОБРАБОТКА CORS (OPTIONS) ---
     const corsHeaders = {
       "Access-Control-Allow-Origin": "*",
@@ -172,37 +174,6 @@ export default {
           .filter(k => k.startsWith(type))
           .map(k => ({ id: k, name: AI_MODELS[k].MODEL }));
         return new Response(JSON.stringify({ current, models }), { headers: { "Content-Type": "application/json" } });
-      }
-
-      if (url.pathname === "/api/vk/get-upload-server") {
-        const corsHeaders = {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type",
-        };
-      
-        if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-      
-        try {
-          const vkUserId = url.searchParams.get("vk_user_id");
-          const userData = await env.USER_DB.get(`user:${vkUserId}`, { type: "json" });
-      
-          if (!userData) {
-            return new Response(JSON.stringify({ error: "Сначала выберите диск в боте!" }), { status: 403, headers: corsHeaders });
-          }
-      
-          // Вызываем метод именно для сообщений, как ты и написал
-          const vkRes = await fetch(`https://api.vk.com/method/photos.getMessagesUploadServer?v=5.199&access_token=${env.VK_GROUP_TOKEN}&peer_id=${vkUserId}`);
-          const vkData = await vkRes.json();
-      
-          if (vkData.error) throw new Error(vkData.error.error_msg);
-      
-          return new Response(JSON.stringify({ upload_url: vkData.response.upload_url }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" }
-          });
-        } catch (e) {
-          return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
-        }
       }
 
       if (url.pathname === "/api/get-quota") {
@@ -2214,7 +2185,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
       </div>
     </div>
     </div>
-
+    ${isConnected ? `
     <div class="upload-container" id="dropZone" style="margin: 10px; padding: 15px; border: 2px dashed #3f8ae0; border-radius: 12px; background: #ebf2fa; text-align: center; transition: all 0.2s;">
     <input type="file" id="vkFileInput" style="display: none;" onchange="uploadFileFromVK(this)" multiple>
     <button class="btn-s" onclick="document.getElementById('vkFileInput').click()" id="uploadBtn" style="background: #2688eb; color: #fff; border: none; width: 100%; font-weight: 500; cursor: pointer;">
@@ -2230,7 +2201,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
         </div>
     </div>
   </div>
-
+  ` : ''}
   <div id="authButtons">
     <button class="btn-s ${provider === 'yandex' ? 'active' : ''}" onclick="openAuthLink('/auth/yandex')">
       <img src="${cdn}/YandexDisk.png"> Яндекс Диск ${provider === 'yandex' ? '<span class="check-mark">✅</span>' : ''}
@@ -2258,6 +2229,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
     <input type="text" id="wdHost" placeholder="Сервер (WebDAV URL)" oninput="parseUrl(this.value)">
     <input type="text" id="wdUser" placeholder="Логин (Email)">
     <input type="password" id="wdPass" placeholder="Пароль приложения">
+    <input type="text" id="wdFolder" placeholder="Папка для сохранения">
     <button id="saveBtn" class="chat-btn" style="width:100%; border:none;" onclick="saveWebDAV()">📥 Подключиться</button>
   </div>
 
@@ -2409,7 +2381,8 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
         </div>
         <div style="font-size:11px; margin-bottom:12px; word-break:break-all; color:#2688eb;">https://ваша-почта@mail.ru:пароль_для_внешнего_приложения@webdav.cloud.mail.ru</div>
       \`;
-      document.getElementById('wdHost').value = "webdav.cloud.mail.ru";
+      document.getElementById('wdHost').value = "https://webdav.cloud.mail.ru";
+      document.getElementById('wdFolder').value = "Storage";
       togglePanel('wdForm');
     }
 
@@ -2497,14 +2470,16 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
           if(u.username) document.getElementById('wdUser').value = decodeURIComponent(u.username);
           if(u.password) document.getElementById('wdPass').value = decodeURIComponent(u.password);
           document.getElementById('wdHost').value = u.hostname;
+          document.getElementById('wdFolder').value = "Storage";
         }
       } catch(e) {}
     }
 
     function setupMailRu() {
-      document.getElementById('mrHost').value = "webdav.cloud.mail.ru";
-      document.getElementById('mrForm').style.display = 'block';
-      document.getElementById('mrForm').scrollIntoView({behavior: 'smooth'});
+      document.getElementById('wdHost').value = "https://webdav.cloud.mail.ru";
+      document.getElementById('wdFolder').value = "Storage";
+      document.getElementById('wdForm').style.display = 'block';
+      document.getElementById('wdForm').scrollIntoView({behavior: 'smooth'});
       f.style.display = f.style.display === 'block' ? 'none' : 'block';
     }
 
@@ -2515,15 +2490,35 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
 
     async function saveWebDAV() {
       const b = document.getElementById('saveBtn');
-      const h = document.getElementById('wdHost').value, u = document.getElementById('wdUser').value, p = document.getElementById('wdPass').value;
-      if(!h || !u || !p) return alert("Заполните все поля");
+      let h = document.getElementById('wdHost').value.trim();
+      if (!h.startsWith('http://') && !h.startsWith('https://')) {
+        h = 'https://' + h;
+      }
+      const u = document.getElementById('wdUser').value; 
+      const p = document.getElementById('wdPass').value;
+      const f = document.getElementById('wdFolder').value;
+      if(!h || !u || !p || !f) return alert("Заполните все поля");
       b.disabled = true; b.innerText = "💾 Сохраняю...";
       try {
-        const res = await fetch('/api/setup-webdav', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ userId, host: h, user: u, pass: p, folderId: "Storage" }) });
+        const res = await fetch('/api/setup-webdav', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ userId, host: h, user: u, pass: p, folderId: f })
+        });
         if(res.ok) {
-          localStorage.setItem('awaiting_auth', 'true'); 
-        } else { alert("Ошибка"); b.disabled = false; b.innerText = "🔌 Подключиться"; }
-      } catch(e) { alert("Ошибка сети"); b.disabled = false; b.innerText = "🔌 Подключиться"; }
+          localStorage.setItem('awaiting_auth', 'true');
+          // 🔥 ОБЯЗАТЕЛЬНО перезагрузить страницу!
+          location.reload();
+        } else {
+          alert("Ошибка сервера");
+          b.disabled = false;
+          b.innerText = "🔌 Подключиться";
+        }
+      } catch(e) {
+        alert("Ошибка сети");
+        b.disabled = false;
+        b.innerText = "🔌 Подключиться";
+      }
     }
 
     let searchDebounce;
@@ -2816,7 +2811,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
           row.setAttribute('data-status', 'waiting');
           row.style.cssText = 'margin-top:10px; padding:10px; background:#fff; border-radius:8px; border:1px solid #dce1e6; text-align:left; position:relative;';
   
-          // ТВОЙ СТАБИЛЬНЫЙ ВАРЯНТ (без onclick внутри строки)
+          // ТВОЙ СТАБИЛЬНЫЙ ВАРИАНТ (без onclick внутри строки)
           row.innerHTML = 
             '<div class="info" style="font-size:12px; display:flex; justify-content:space-between;">' +
                 '<span>⌛ В очереди: <b>' + file.name + '</b></span>' +
@@ -2978,17 +2973,17 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
         task.row.setAttribute('data-status', 'uploading');
         var fileNameHTML = ' Файл: <b>' + task.fileName + '</b>';
     
-        if (currentProvider === 'dropbox') {
-          // --- DROPBOX: ИСПОЛЬЗУЕМ /api/upload-buffer ---
-          const arrayBuffer = await task.file.arrayBuffer();
-          const uploadRes = await fetch('/api/upload-buffer', {
+        if (currentProvider === 'dropbox-body') {
+          // DROPBOX эндпоинт /api/upload-from-vk
+          const uploadRes = await fetch('/api/upload-from-vk', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/octet-stream',
               'x-file-name': encodeURIComponent(task.fileName),
-              'x-vk-user-id': window.userId || userId
+              'x-file-size': task.file.size.toString(),
+              'x-vk-user-id': userId
             },
-            body: arrayBuffer
+            body: task.file
           });
     
           if (!uploadRes.ok) {
@@ -3002,7 +2997,30 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
           if (task.bar) { task.bar.style.background = '#28a745'; task.bar.style.width = '100%'; }
           var btn = task.row.querySelector('.cancel-btn');
           if (btn) btn.style.display = 'none';
-    
+          
+        } else if (currentProvider === 'webdav-buffer') {
+          // --- WEBDAV: ИСПОЛЬЗУЕМ /api/upload-buffer ---
+          const arrayBuffer = await task.file.arrayBuffer();
+          const uploadRes = await fetch('/api/upload-buffer', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/octet-stream',
+              'x-file-name': encodeURIComponent(task.fileName),
+              'x-vk-user-id': window.userId || userId
+            },
+            body: arrayBuffer
+          });
+        
+          if (!uploadRes.ok) {
+            const errorData = await uploadRes.json().catch(() => ({}));
+            throw new Error(errorData.error || "Ошибка загрузки в WebDAV");
+          }
+        
+          task.row.setAttribute('data-status', 'done');
+          task.info.innerHTML = '✅ Готово! ' + fileNameHTML;
+          if (task.bar) { task.bar.style.background = '#28a745'; task.bar.style.width = '100%'; }
+          var btn = task.row.querySelector('.cancel-btn');
+          if (btn) btn.style.display = 'none';
         } else {
           // --- ВСЕ ОСТАЛЬНЫЕ: как раньше через /api/get-upload-link ---
           const res = await fetch('/api/get-upload-link', {
@@ -3026,11 +3044,17 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
               xhr.setRequestHeader(k, plan.headers[k]);
             }
           }
-    
-          if (plan.provider !== 'google') {
+
+          if (plan.provider == 'google') {
+            // Не ставим заголовки для гугла
+          } else if (plan.provider == 'yandex') {
             xhr.setRequestHeader('Content-Type', task.file.type || 'application/octet-stream');
+          } else if (plan.provider == 'dropbox') {
+            xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+          } else {
+            xhr.setRequestHeader('Content-Type', 'application/octet-stream');
           }
-    
+
           xhr.upload.onprogress = function(e) {
             if (e.lengthComputable && task.info) {
               var pct = (e.loaded / e.total) * 100;
@@ -3301,71 +3325,65 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
 
 async function handleVkUpload(request, env, ctx, userId, corsHeaders) {
   try {
-    // 1. Читаем форму ОДИН РАЗ
-    const formData = await request.formData();
-    const file = formData.get("file"); // Это наш Blob/File
-    const uploadUrl = formData.get("upload_url");
-    const name = formData.get("filename");
-
-    // --- ВОТ ОНО, ПРОБИТИЕ ПОРОГА ---
-    // Превращаем файл в чистый поток, как в твоем примере с fetch
-    const finalStream = file.stream(); 
-    const finalSize = file.size;
-
-    // ВАЖНО: Клонируем поток для ВК, чтобы не закрыть основной
-    const [streamForCloud, streamForVK] = finalStream.tee();
-
+    const name = decodeURIComponent(request.headers.get('x-file-name') || 'file.bin');
+    const uploadUrl = request.headers.get('x-upload-url') || null;
     const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
     if (!userData) throw new Error("Пользователь не авторизован");
 
-    // --- 1. ОПРЕДЕЛЕНИЕ ТИПА (ТВОЙ БЛОК БЕЗ ИЗМЕНЕНИЙ) ---
-    let mimeType = file.type || "application/octet-stream";
+    // Получаем поток напрямую — БЕЗ formData!
+    const fileStream = request.body;
+    if (!fileStream) throw new Error("No file stream");
+
+    // Клонируем поток для облака и VK
+    const [streamForCloud, streamForVK] = fileStream.tee();
+
+    // Определяем размер потока (придётся читать один раз)
+    const finalSize = Number(request.headers.get('content-length')) || 0;
+
+    // --- 1. ОПРЕДЕЛЕНИЕ ТИПА ---
+    let mimeType = "application/octet-stream";
     let dbFileType = "document";
     const ext = (name.split('.').pop() || "").toLowerCase();
-    
+
     if (["jpg", "jpeg", "png", "webp", "gif"].includes(ext)) {
-        dbFileType = "photo";
-        mimeType = ext === "png" ? "image/png" : "image/jpeg";
+      dbFileType = "photo";
+      mimeType = ext === "png" ? "image/png" : "image/jpeg";
     } else if (["mp3", "wav", "ogg", "m4a"].includes(ext)) {
-        dbFileType = "audio";
-        mimeType = "audio/mpeg";
+      dbFileType = "audio";
+      mimeType = "audio/mpeg";
     } else if (["mp4", "mov", "avi", "mkv"].includes(ext)) {
-        dbFileType = "video";
-        mimeType = "video/mp4";
+      dbFileType = "video";
+      mimeType = "video/mp4";
     }
 
-    // --- 2. ПРОКСИ НА ВК (делаем как в чате - в фоне) ---
-    ctx.waitUntil((async () => {
-      try {
-          const vkFd = new FormData();
-          // Превращаем половинку потока в Blob для ВК
+    // --- 2. ПРОКСИ НА ВК (в фоне) ---
+    if (uploadUrl) {
+      ctx.waitUntil((async () => {
+        try {
           const vkBlob = await new Response(streamForVK).blob();
+          const vkFd = new FormData();
           vkFd.append('photo', vkBlob, name);
           await fetch(uploadUrl, { method: 'POST', body: vkFd });
-      } catch (e) { console.error("VK Error:", e); }
-    })());
+        } catch (e) { console.error("VK Error:", e); }
+      })());
+    }
 
     // --- 3. ЗАПИСЬ В БАЗУ D1 ---
     const fileId = String(Date.now());
     await env.FILES_DB.prepare(
-        "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
     ).bind(String(userId), name, fileId, dbFileType, userData.provider, userData.folderId || "Root", Date.now()).run();
 
-    // --- 4. ЗАГРУЗКА В ОБЛАКО (Прямой проброс потока) ---
-    // Главное изменение: берем stream напрямую. 
-    // Если Яндекс/Google поддерживают стриминг, Cloudflare не будет копить файл в памяти.
+    // --- 4. ЗАГРУЗКА В ОБЛАКО ---
     let uploadOk = false;
-
-    // ВНИМАНИЕ: Для пробития 40кб используем именно file.stream() 
-    // и убедись, что твои функции uploadTo...Stream не делают await body.arrayBuffer() внутри!
     if (userData.provider === "google") {
-        uploadOk = await uploadToGoogleStream(streamForCloud, name, userData.access_token, userData.folderId, mimeType, finalSize);
+      uploadOk = await uploadToGoogleStream(streamForCloud, name, userData.access_token, userData.folderId, mimeType, finalSize);
     } else if (userData.provider === "yandex") {
-        uploadOk = await uploadToYandexStream(streamForCloud, name, userData.access_token, userData.folderId, mimeType, finalSize);
+      uploadOk = await uploadToYandexStream(streamForCloud, name, userData.access_token, userData.folderId, mimeType, finalSize);
     } else if (userData.provider === "dropbox") {
-        uploadOk = await uploadToDropboxStream(streamForCloud, name, userData.access_token, userData.folderId, finalSize);
+      uploadOk = await uploadToDropboxStream(streamForCloud, name, userData.access_token, userData.folderId, finalSize);
     } else if (userData.provider === "webdav") {
-        uploadOk = await uploadWebDAVStream(streamForCloud, name, userData, env, mimeType, finalSize);
+      uploadOk = await uploadWebDAVStream(streamForCloud, name, userData, env, mimeType, finalSize);
     }
 
     if (!uploadOk) {
@@ -3373,30 +3391,8 @@ async function handleVkUpload(request, env, ctx, userId, corsHeaders) {
     }
 
     // --- 5. AI АНАЛИТИКА (В ФОНЕ) ---
-    if (ctx?.waitUntil) {
-        // Клонируем данные для AI, чтобы основной запрос завершился
-        const aiData = await file.arrayBuffer(); 
-        ctx.waitUntil((async () => {
-            try {
-                let sType = "";
-                if (dbFileType === "photo") sType = "IMAGE_TO_TEXT";
-                else if (dbFileType === "audio") sType = "AUDIO_TO_TEXT";
-                else if (dbFileType === "video") sType = "VIDEO_TO_ANALYSIS";
-                else if (dbFileType === "document" && ["jpg","jpeg","png"].includes(ext)) sType = "IMAGE_TO_TEXT";
-
-                if (sType) {
-                    const cfg = await loadActiveConfig(sType, env);
-                    if (cfg?.FUNCTION) {
-                        const description = await cfg.FUNCTION(cfg, aiData, env, mimeType);
-                        if (description) {
-                            await env.FILES_DB.prepare("UPDATE files SET ai_description = ? WHERE userId = ? AND fileName = ?")
-                                .bind(description, String(userId), name).run();
-                        }
-                    }
-                }
-            } catch (e) { console.error("AI BG Error:", e); }
-        })());
-    }
+    // ❌ УДАЛЕНО: const aiData = await file.arrayBuffer(); — это ломало всё
+    // ✅ Временно отключено, чтобы не вызывать arrayBuffer()
 
     return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
 
@@ -3519,6 +3515,7 @@ async function handleGetUploadLink(request, env) {
       const userData = await env.USER_DB.get("user:" + vkUserId, { type: "json" });
       const fileName = decodeURIComponent(request.headers.get('x-file-name'));
       const fileSize = request.headers.get('x-file-size'); // Вот он!
+      //const mimeType = request.headers.get('x-file-type') || 'application/octet-stream';
       if (!userData) return new Response("User Error", { status: 403, headers: corsHeaders });
 
       const { provider, access_token, folderId } = userData;
@@ -3577,10 +3574,16 @@ async function handleGetUploadLink(request, env) {
       if (provider === "dropbox") {
           const dbxUrl = 'https://content.dropboxapi.com/2/files/upload';
           const fullPath = ('/' + folder + '/' + fileName).replace(/\/+/g, '/');
-          const args = JSON.stringify({ 
-              path: fullPath, 
-              mode: 'overwrite' 
-          });
+
+          // Создаём объект и сериализуем его в JSON с экранированием Unicode
+          const argObj = { path: fullPath, mode: "overwrite" };
+          let args = JSON.stringify(argObj);
+
+          // Экранируем все не-ASCII символы как \uXXXX
+          args = args.replace(/[\u0080-\uFFFF]/g, c => 
+            '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4)
+          );
+
           // Для Dropbox фронту нужно будет добавить эти заголовки в XHR
           return new Response(JSON.stringify({ 
               upload_url: dbxUrl, 
@@ -3594,17 +3597,25 @@ async function handleGetUploadLink(request, env) {
 
       // --- WEBDAV ---
       if (provider === "webdav") {
-          const baseUrl = userData.webdav_url.endsWith('/') ? userData.webdav_url : userData.webdav_url + '/';
-          const fullUrl = baseUrl + (folder ? folder + '/' : '') + fileName;
-          const auth = btoa(`${userData.login}:${userData.password}`);
-          return new Response(JSON.stringify({ 
-              upload_url: fullUrl, 
-              method: "PUT", 
-              headers: { "Authorization": `Basic ${auth}` } 
-          }), { headers: corsHeaders });
+        // 1. Берем хост. У Mail.ru это webdav.cloud.mail.ru
+        let host = userData.webdav_host || "https://webdav.cloud.mail.ru";
+        if (!host.startsWith('https')) host = 'https://' + host;
+        const baseUrl = host.endsWith('/') ? host : host + '/';
+        const uploadUrl = baseUrl + (folder ? folder + '/' : '') + fileName;
+        // 4. Авторизация. Используем webdav_user и webdav_pass из твоего KV
+        const auth = btoa(`${userData.webdav_user}:${userData.webdav_pass}`);
+        return new Response(JSON.stringify({ 
+            upload_url: uploadUrl, 
+            method: "PUT", 
+            headers: { 
+                "Authorization": `Basic ${auth}`,
+                "Content-Type": "application/octet-stream",
+                "Accept": "*/*"
+            } 
+        }), { headers: corsHeaders });
       }
 
-      throw new Error("Provider not supported");
+      throw new Error("Неизвестный провайдер");
   } catch (e) {
       return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
   }
@@ -5607,40 +5618,45 @@ async function createMailruFolder(folderName, accessToken, env) {
 // Работа с WebDAV
 
 async function uploadWebDAVFromArrayBuffer(arrayBuffer, fileName, userData, env) {
-  let fullPath;
-  let headers = { "Content-Type": "application/octet-stream" };
+  let baseUrl = (userData.webdav_host || "https://webdav.cloud.mail.ru").trim();
+  if (!baseUrl.startsWith('http')) baseUrl = 'https://' + baseUrl;
+  baseUrl = baseUrl.replace(/\/+$/, '');
 
-  if (userData.provider === "webdav") {
-    // Для Mail.ru используем host, user, pass
-    fullPath = `${userData.host}/${userData.folderId ? userData.folderId + '/' : ''}${encodeURIComponent(fileName)}`;
-    headers["Authorization"] = `Basic ${btoa(userData.user + ":" + userData.pass)}`;
-  } else {
-    // Для остальных WebDAV используем сохранённый URL
-    let baseUrl = userData.webdav_url;
-    if (!baseUrl.endsWith("/")) baseUrl += "/";
-    fullPath = `${baseUrl}${userData.folderId ? userData.folderId + "/" : ""}${encodeURIComponent(fileName)}`;
-  }
+  const folder = userData.folderId || "";
+  const path = folder ? `${folder}/${fileName}` : fileName;
+  const url = `${baseUrl}/${path}`;
 
-  const res = await fetch(fullPath, {
-    method: "PUT",
-    headers: headers,
+  const auth = btoa(`${userData.webdav_user}:${userData.webdav_pass}`);
+
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Basic ${auth}`,
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(arrayBuffer.byteLength)
+    },
     body: arrayBuffer
   });
-  return res.status === 201 || res.status === 204;
+
+  return res.ok;
 }
 
 
 async function uploadWebDAVStream(stream, name, userData, env, type, fileSize) {
     // Подходит и для Mail.ru, и для своего WebDAV
     const baseUrl = userData.webdav_url || userData.webdav_host || "";
-    const url = `${baseUrl}/${name}`.replace(/\/+/g, '/').replace(':/', '://');
+    // Берём папку
+    const folder = userData.folderId || "";
+    // Формируем путь: если есть папка — добавляем её
+    const path = folder ? `${folder}/${name}` : name;
+    const url = `${baseUrl}/${path}`;
     const auth = btoa(`${userData.webdav_user}:${userData.webdav_pass}`);
     
     const res = await fetch(url, {
         method: 'PUT',
         headers: { 
             'Authorization': `Basic ${auth}`, 
-            'Content-Type': type 
+            'Content-Type': type
         },
         body: stream,
         
@@ -5749,7 +5765,7 @@ async function handleDropboxCallback(request, env) {
   return new Response("Error", { status: 400 });
 }
 
-async function uploadToDropboxFromArrayBuffer(arrayBuffer, fileName, accessToken, folderPath = "") {
+async function uploadToDropboxFromArrayBuffer(arrayBuffer, fileName, accessToken, folderPath) {
   const path = (folderPath ? `/${folderPath}/${fileName}` : `/${fileName}`).replace(/\/+/g, '/');
   const arg = { path, mode: "add", autorename: true, mute: false };
   const res = await fetch("https://content.dropboxapi.com/2/files/upload", {
