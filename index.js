@@ -35,37 +35,36 @@ module.exports.handler = async (event, context) => {
 
     const request = new Request(fullUrl, { ...requestOptions });
 
-        const env = {
-            USER_DB: USER_DB_ADAPTER, // Используем готовый адаптер
-            FILES_DB: FILES_DB_ADAPTER,
-            TypedValues: TypedValues, // Переменная из db_adapter
-            runQuery: runQuery,       // Функция из db_adapter
-            filesDriver: filesDriver, // Драйвер из db_adapter
-            // Остальные переменные (токены)
-          APP_DOMAIN: process.env.APP_DOMAIN,
-          BOTHUB_API_KEY: process.env.BOTHUB_API_KEY,
-          BOT_USERNAME: process.env.BOT_USERNAME,
-          CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID,
-          CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN,
-          DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
-          DROPBOX_CLIENT_ID: process.env.DROPBOX_CLIENT_ID,
-          DROPBOX_CLIENT_SECRET: process.env.DROPBOX_CLIENT_SECRET,
-          GEMINI_API_KEY: process.env.GEMINI_API_KEY,
-          GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
-          GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
-          MAILRU_CLIENT_ID: process.env.MAILRU_CLIENT_ID,
-          MAILRU_CLIENT_PRIVATE: process.env.MAILRU_CLIENT_PRIVATE,
-          MAILRU_CLIENT_SECRET: process.env.MAILRU_CLIENT_SECRET,
-          TELEGRAM_TOKEN: process.env.TELEGRAM_TOKEN,
-          VK_APP_ID: process.env.VK_APP_ID,
-          VK_GROUP_ID: process.env.VK_GROUP_ID,
-          VK_GROUP_TOKEN: process.env.VK_GROUP_TOKEN,
-          VK_SECURE_KEY: process.env.VK_SECURE_KEY,
-          YANDEX_CLIENT_ID: process.env.YANDEX_CLIENT_ID,
-          YANDEX_CLIENT_SECRET: process.env.YANDEX_CLIENT_SECRET
+    const env = {
+      USER_DB: USER_DB_ADAPTER, // Используем готовый адаптер
+      FILES_DB: FILES_DB_ADAPTER,
+      TypedValues: TypedValues, // Переменная из db_adapter
+      runQuery: runQuery,       // Функция из db_adapter
+      filesDriver: filesDriver, // Драйвер из db_adapter
+      // Остальные переменные (токены)
+        APP_DOMAIN: process.env.APP_DOMAIN,
+        BOTHUB_API_KEY: process.env.BOTHUB_API_KEY,
+        BOT_USERNAME: process.env.BOT_USERNAME,
+        CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID,
+        CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN,
+        DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
+        DROPBOX_CLIENT_ID: process.env.DROPBOX_CLIENT_ID,
+        DROPBOX_CLIENT_SECRET: process.env.DROPBOX_CLIENT_SECRET,
+        GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+        GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+        GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
+        MAILRU_CLIENT_ID: process.env.MAILRU_CLIENT_ID,
+        MAILRU_CLIENT_PRIVATE: process.env.MAILRU_CLIENT_PRIVATE,
+        MAILRU_CLIENT_SECRET: process.env.MAILRU_CLIENT_SECRET,
+        TELEGRAM_TOKEN: process.env.TELEGRAM_TOKEN,
+        VK_APP_ID: process.env.VK_APP_ID,
+        VK_GROUP_ID: process.env.VK_GROUP_ID,
+        VK_GROUP_TOKEN: process.env.VK_GROUP_TOKEN,
+        VK_SECURE_KEY: process.env.VK_SECURE_KEY,
+        YANDEX_CLIENT_ID: process.env.YANDEX_CLIENT_ID,
+        YANDEX_CLIENT_SECRET: process.env.YANDEX_CLIENT_SECRET
       };
-
-
+      
       const ctx = { waitUntil: (promise) => promise };
 
       // ЗАПУСК ВОРКЕРА

@@ -14,7 +14,7 @@
 Диагностика: Команда /debug для проверки статуса подключения к хранилищу в реальном времени.
 */
 // Глобальные константы
-const version = "v3.0.3 от 02.02.2026"; // актуальная версия
+const version = "v3.0.4 от 04.02.2026"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -1619,6 +1619,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
         });
       } catch (e) {}
       await sendMessage(chatId, `? <b>${selectedProto.toUpperCase()} успешно настроен!</b>\nСервер: <code>${host}</code>\nПапка: <code>${folder}</code>`, null, env);
+      await showFolderSelector(chatId, userData, env);
       // Если это WebDAV, пробуем создать папку
       if (selectedProto === 'webdav') {
           await createWebDavFolder(folder, userData);
@@ -6493,7 +6494,7 @@ async function showFolderSelector(chatId, userData, env) {
         folders = await listMailRuFolders(userData.access_token);
         break;
       case 'webdav':
-        folders = await listWebDavFolders(userData.userId);
+        folders = await listWebDavFolders(userData);
         break;
       case 'sftp':
       case 'ftp':
@@ -6504,19 +6505,22 @@ async function showFolderSelector(chatId, userData, env) {
         await logDebug(`?? Неизвестный провайдер: ${provider}`, env);
     }
 
-    let buttons = [];
-
     // Собираем кнопки
-    // f.id для Гугла будет ID, для остальных — путь или имя
-    folders.forEach(f => {
-      buttons.push([{ 
-        text: `?? ${f.name}`, 
-        callback_data: `set_folder:${chatId}:${f.id}` 
-      }]);
-    });
+    const safeFolders = Array.isArray(folders) ? folders : [];
+    const buttons = safeFolders.map(f => {
+      if (!f || !f.name) return null;
 
-    // Кнопка создания (универсальная)
-    buttons.push([{ text: "? Создать 'Storage'", callback_data: `create_folder:${chatId}:Storage` }]);
+      // Для Google берем ID, для остальных (WebDAV, Yandex, etc.) только name
+      const folderValue = (userData.provider === 'google') ? (f.id || f.name) : f.name;
+
+      return [{ 
+        text: `?? ${f.name}`, 
+        callback_data: `set_folder:${chatId}:${folderValue}` 
+      }];
+    }).filter(Boolean);
+
+    // Кнопка для ручного ввода (теперь одна для всех провайдеров)
+    buttons.unshift([{ text: "? Создать папку", callback_data: `manual_folder:${chatId}:prompt` }]); 
 
     const text = buttons.length > 1 
       ? `?? <b>Папки на ${provider}:</b>\nВыбери ту, которую бот будет использовать.` 
@@ -7896,6 +7900,99 @@ async function callGeminiVideoVision(config, videoBuffer, env, mimeType) {
   return textResult.trim();
 }
 
+/**
+ * Вызывает модель YandexGPT через Yandex Cloud API.
+ */
+async function callYandexGPTChat(prompt, config, env, userMessageText) {
+  const API_KEY = env[config.API_KEY]; 
+  const FOLDER_ID = env.YANDEX_FOLDER_ID; // Нужно добавить в env
+  const MODEL_TYPE = config.MODEL; // 'yandexgpt-lite'
+  
+  if (!API_KEY || !FOLDER_ID) {
+    throw new Error("Настройки Yandex Cloud (API_KEY или FOLDER_ID) отсутствуют.");
+  }
+
+  const systemInstructionText = `
+    ?? ТЫ — ИИ-ассистент "Алиса" в боте "Хранилка" от Leshiy.
+    Твоя задача — помогать с загрузкой файлов в облака и просто общаться. 
+    Отвечай на русском языке, будь вежливой и краткой.
+  `;
+
+  const body = {
+    modelUri: `gpt://${FOLDER_ID}/${MODEL_TYPE}/latest`,
+    completionOptions: {
+      stream: false,
+      temperature: 0.6,
+      maxTokens: 2000
+    },
+    messages: [
+      { role: "system", text: systemInstructionText },
+      { role: "user", text: prompt }
+    ]
+  };
+
+  const response = await fetch(config.BASE_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Api-Key ${API_KEY}`,
+      'x-folder-id': FOLDER_ID
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`YandexGPT Error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  const textResult = data.result?.alternatives?.[0]?.message?.text;
+
+  if (!textResult) {
+    throw new Error("YandexGPT не вернул текстовый ответ.");
+  }
+
+  return textResult.trim();
+}
+
+/**
+ * Транскрибирует аудио через Yandex SpeechKit
+ */
+async function callYandexSpeechKit(config, audioBuffer, env) {
+  const API_KEY = env[config.API_KEY]; 
+  const FOLDER_ID = env.YANDEX_FOLDER_ID;
+
+  if (!API_KEY || !FOLDER_ID) {
+    throw new Error("STT_ERROR: Ключи Yandex не найдены.");
+  }
+
+  // Настраиваем параметры распознавания
+  const params = new URLSearchParams({
+    topic: 'general',
+    folderId: FOLDER_ID,
+    lang: 'ru-RU'
+  });
+
+  const response = await fetch(`${config.BASE_URL}?${params.toString()}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Api-Key ${API_KEY}`,
+      'Content-Type': 'application/octet-stream'
+    },
+    body: audioBuffer
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(`Yandex STT API Error: ${data.error_message || response.statusText}`);
+  }
+
+  // Яндекс возвращает { result: "Текст сообщения" }
+  return data.result;
+}
+
 // ? *** Workers AI Chat API (для текстового общения с историей) ***
 async function callWorkersAIChat(systemPrompt, config, env, userPrompt) {
   // Получаем учетные данные из окружения (process.env в Яндекс.Облаке)
@@ -8556,11 +8653,31 @@ const AI_MODELS = {
     MODEL: 'gemini-2.5-flash-lite', 
     API_KEY: 'GEMINI_API_KEY', 
     BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
-},
+  },
+
+  // --- СЕРВИСЫ YANDEX (ПЛАТНО) ---
+
+  // --- YANDEX CLOUD (АЛИСА) ---
+  TEXT_TO_TEXT_YANDEX: { 
+    SERVICE: 'YANDEX', 
+    FUNCTION: callYandexGPTChat, 
+    MODEL: 'yandexgpt-lite',
+    //MODEL: 'yandexgpt', 
+    API_KEY: 'YANDEX_API_KEY', 
+    BASE_URL: 'https://llm.api.cloud.yandex.net/foundationModels/v1/completion'
+  },
+  // --- YANDEX SPEECHKIT (STT) ---
+  AUDIO_TO_TEXT_YANDEX: { 
+      SERVICE: 'YANDEX', 
+      FUNCTION: callYandexSpeechKit, 
+      MODEL: 'general', 
+      API_KEY: 'YANDEX_API_KEY', 
+      BASE_URL: 'https://stt.api.cloud.yandex.net/speech/v1/stt:recognize'
+  },
 
   // --- BOTHUB (ПЛАТНЫЕ, ТЕСТОВЫЕ) ---
 
-  // --- BOTHUB TEXT --- (БЕСПЛАТНО)
+  // --- BOTHUB TEXT ---
   TEXT_TO_TEXT_BOTHUB: { 
     SERVICE: 'BOTHUB', 
     FUNCTION: callBotHubTextChat, 
@@ -8570,7 +8687,7 @@ const AI_MODELS = {
     API_KEY: 'BOTHUB_API_KEY', 
     //BASE_URL: 'https://bothub.chat/api/v2/openai/v1/chat/completions'
     BASE_URL: 'https://bothub.chat/api/v2/openai/v1'
-},
+  },
   // --- BOTHUB WHISPER-1 --- (ПЛАТНО)
   AUDIO_TO_TEXT_BOTHUB: { 
     SERVICE: 'BOTHUB', 
@@ -8617,13 +8734,13 @@ const AI_MODELS = {
     BASE_URL: 'https://bothub.chat/api/v2/openai/v1'
   },
   /* --- DEEPSEEK --- (ПЛАТНО $0.028 минимум)
-    TEXT_TO_TEXT_DEEPSEEK: { 
-        SERVICE: 'DEEPSEEK', 
-        FUNCTION: callDeepSeekChat, 
-        MODEL: 'deepseek-chat', 
-        API_KEY: 'DEEPSEEK_API_KEY', 
-        BASE_URL: 'https://api.deepseek.com/v1'
-    },  */  
+  TEXT_TO_TEXT_DEEPSEEK: { 
+      SERVICE: 'DEEPSEEK', 
+      FUNCTION: callDeepSeekChat, 
+      MODEL: 'deepseek-chat', 
+      API_KEY: 'DEEPSEEK_API_KEY', 
+      BASE_URL: 'https://api.deepseek.com/v1'
+  },  */  
 };
 // --- КАРТА СЕРВИСОВ ДЛЯ АДМИН-МЕНЮ ---
 const SERVICE_TYPE_MAP = {
