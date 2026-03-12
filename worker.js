@@ -10,7 +10,7 @@ Telegram-бот для автоматической загрузки фото и
 Скрытая функция: Команда /search для поиска и возможность достать файлы с хранилки.
 */
 // Глобальные константы
-const version = "v2.3.7 от 12.01.2026"; // актуальная версия
+const version = "v2.3.8 от 15.01.2026"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -19,41 +19,217 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const hostname = url.hostname;
-    
-    // --- Single Read & Safety ---
+    const state = url.searchParams.get("state"); // Это наш userId
+
+    // ЧИТАЕМ request ТУТ
     let body = null;
     if (request.method === "POST") {
-      try {
-        body = await request.json();
-        console.log("REQUEST POST:", url.pathname, JSON.stringify(body).substring(0, 200));
-      } catch (e) {
-        // Если пришел не-JSON запрос, например, от другого вебхука, игнорируем его
-        return new Response('OK'); 
-      }
-    } else {
-       console.log("REQUEST:", request.method, url.pathname);
-    }
+      try { body = await request.json();
+      } catch (e) { body = {};}}
 
-    // 1. ВЕБ-ИНТЕРФЕЙС
-    if (request.method === "GET" && url.pathname === "/") {
-      return new Response(`
-        <!DOCTYPE html>
-        <html lang="ru">
-        <head><meta charset="utf-8"><title>Хранилка Bot</title></head>
-        <body style="font-family:sans-serif; text-align:center; padding-top:100px; background:#f4f4f4;">
-          <div style="display:inline-block; background:white; padding:40px; border-radius:20px; box-shadow:0 10px 30px rgba(0,0,0,0.1);">
-            <h1 style="margin:0;">🤖 Хранилка Bot</h1>
-            <p style="color:green; font-weight:bold;">✅ Система работает штатно</p>
-            <hr style="border:0; border-top:1px solid #eee; margin:20px 0;">
-            <a href="https://t.me/leshiy_storage_bot" style="display:inline-block; background:#0088cc; color:white; padding:12px 25px; border-radius:50px; text-decoration:none; font-weight:bold;">Открыть бота в Telegram</a>
-          </div>
-        </body>
-      </html>`, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    // --- ОБРАБОТКА CORS (OPTIONS) ---
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
+          "Access-Control-Max-Age": "86400",
+        }
+      });
     }
 
     // --- 1. ВЕБ-ИНТЕРФЕЙС И МИНИ-ПРИЛОЖЕНИЕ VK ---
     if (request.method === "GET") {
-      // Обычный веб-интерфейс
+      // 1. Яндекс Диск
+      if (url.pathname === "/auth/yandex") {
+        const target = `https://oauth.yandex.ru/authorize?response_type=code&client_id=${env.YANDEX_CLIENT_ID}&state=${state}`;
+        return renderRedirectPage(target, "Яндекс Диску");
+      }
+
+      // 2. Google Drive
+      if (url.pathname === "/auth/google") {
+        const redirectUri = encodeURIComponent(`https://${hostname}/auth/google/callback`);
+        const target = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${env.GOOGLE_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&scope=https://www.googleapis.com/auth/drive.file&state=${state}&access_type=offline&prompt=consent`;
+        return renderRedirectPage(target, "Google Drive");
+      }
+
+      // 3. Dropbox
+      if (url.pathname === "/auth/dropbox") {
+        const redirectUri = encodeURIComponent(`https://${hostname}/auth/dropbox/callback`);
+        const target = `https://www.dropbox.com/oauth2/authorize?client_id=${env.DROPBOX_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&state=${state}`;
+        return renderRedirectPage(target, "Dropbox");
+      }
+
+      if (url.pathname === "/api/get-status") {
+        const vkUserId = url.searchParams.get("vk_user_id");
+        const kvData = await env.USER_DB.get(`user:${vkUserId}`);
+        const user = kvData ? JSON.parse(kvData) : {};
+        
+        const isConnected = !!(user.access_token || user.webdav_pass);
+        let providerName = "Не настроено";
+        if (user.provider === 'yandex') providerName = "Яндекс Диск";
+        if (user.provider === 'google') providerName = "Google Drive";
+        if (user.provider === 'webdav') providerName = user.webdav_host?.includes('mail.ru') ? "Mail.ru" : "WebDAV";
+      
+        return new Response(JSON.stringify({
+          isConnected,
+          provider: user.provider,
+          providerName: providerName
+        }), {
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+        });
+      }
+
+      // --- АДМИНСКИЕ ЭНДПОИНТЫ ---
+      const vkUserId = url.searchParams.get("vk_user_id");
+      const adminCfg = await env.USER_DB.get("admin:config", { type: "json" });
+      const isAdmin = adminCfg?.admins?.includes(String(vkUserId));
+
+      if (url.pathname === "/api/admin/get-ai-settings" && isAdmin) {
+        let services = {};
+        for (const [type, info] of Object.entries(SERVICE_TYPE_MAP)) {
+          const modelKey = await env.USER_DB.get(info.kvKey) || Object.keys(AI_MODEL_MENU_CONFIG[type]?.models || {})[0];
+          const modelName = AI_MODEL_MENU_CONFIG[type]?.models[modelKey] || "Неизвестно";
+          services[type] = {
+            name: info.name,
+            currentModelName: modelName
+          };
+        }
+        return new Response(JSON.stringify({ services }), { headers: { "Content-Type": "application/json" } });
+      }
+
+      if (url.pathname === "/api/admin/list-models" && isAdmin) {
+        const type = url.searchParams.get("type");
+        const kvKey = SERVICE_TYPE_MAP[type].kvKey;
+        const current = await env.USER_DB.get(kvKey) || "default";
+        // Собираем список моделей для этого типа
+        const models = Object.keys(AI_MODELS)
+          .filter(k => k.startsWith(type))
+          .map(k => ({ id: k, name: AI_MODELS[k].MODEL }));
+        return new Response(JSON.stringify({ current, models }), { headers: { "Content-Type": "application/json" } });
+      }
+
+      if (url.pathname === "/api/get-quota") {
+        const vkUserId = url.searchParams.get("vk_user_id");
+        const kvData = await env.USER_DB.get(`user:${vkUserId}`);
+        
+        // Стандартные заголовки прямо здесь, чтобы не зависеть от внешних переменных
+        const headers = { 
+          "Content-Type": "application/json", 
+          "Access-Control-Allow-Origin": "*" 
+        };
+      
+        if (!kvData) return new Response(JSON.stringify({ used: 0, total: 0 }), { headers });
+        
+        const user = JSON.parse(kvData);
+        let quota = { used: 0, total: 0 };
+      
+        try {
+          if (user.provider === 'yandex' && user.access_token) {
+            const res = await fetch("https://cloud-api.yandex.net/v1/disk/", {
+              headers: { "Authorization": "OAuth " + user.access_token }
+            });
+            const data = await res.json();
+            quota = { used: data.used_space || 0, total: data.total_space || 0 };
+          } 
+          else if (user.provider === 'google' && user.access_token) {
+            const res = await fetch("https://www.googleapis.com/drive/v3/about?fields=storageQuota", {
+              headers: { "Authorization": "Bearer " + user.access_token }
+            });
+            const data = await res.json();
+            if (data.storageQuota) {
+              quota = { used: parseInt(data.storageQuota.usage), total: parseInt(data.storageQuota.limit) };
+            }
+          }
+          else if (user.provider === 'dropbox' && user.access_token) {
+            const res = await fetch("https://api.dropboxapi.com/2/users/get_space_usage", {
+              method: "POST",
+              headers: { "Authorization": "Bearer " + user.access_token }
+            });
+            const data = await res.json();
+            if (data.allocation) {
+              quota = { used: data.used, total: data.allocation.allocated };
+            }
+          }
+          else if (user.provider === 'webdav' && user.webdav_host) {
+            const res = await fetch(user.webdav_host, {
+              method: 'PROPFIND',
+              headers: {
+                'Authorization': 'Basic ' + btoa(user.webdav_user + ":" + user.webdav_pass),
+                'Depth': '0'
+              }
+            });
+            const xml = await res.text();
+            const uMatch = xml.match(/quota-used-bytes>(\d+)</);
+            const aMatch = xml.match(/quota-available-bytes>(\d+)</);
+            const u = uMatch ? parseInt(uMatch[1]) : 0;
+            const a = aMatch ? parseInt(aMatch[1]) : 0;
+            quota = { used: u, total: u + a };
+          }
+      
+          return new Response(JSON.stringify(quota), { headers });
+        } catch (e) {
+          // В случае ошибки возвращаем "нули", чтобы фронт не падал
+          return new Response(JSON.stringify({ used: 0, total: 0, err: e.message }), { headers });
+        }
+      }
+
+      if (url.pathname === "/api/get-friend-storage") {
+        const uId = url.searchParams.get("vk_user_id");
+        // Ищем в KV связь, которую мы создали при переходе по ссылке
+        const friendId = await env.USER_DB.get("friend_of:" + uId);
+        
+        return new Response(JSON.stringify({ friendId: friendId || null }), { 
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } 
+        });
+      }
+
+      if (url.pathname === "/api/connect-friend") {
+        const uId = url.searchParams.get("vk_user_id");
+        const fId = url.searchParams.get("friend_id");
+        
+        const headers = { 
+          "Content-Type": "application/json", 
+          "Access-Control-Allow-Origin": "*" 
+        };
+      
+        if (uId && fId && uId !== fId) {
+          // Сохраняем: кто (uId) подключился к кому (fId)
+          await env.USER_DB.put("friend_of:" + uId, fId);
+          return new Response(JSON.stringify({ success: true }), { headers });
+        }
+        return new Response(JSON.stringify({ success: false }), { headers, status: 400 });
+      }
+      
+      if (url.pathname === "/api/list-folders") {
+        const vkUserId = url.searchParams.get("vk_user_id");
+        const kvData = await env.USER_DB.get(`user:${vkUserId}`);
+        if (!kvData) return new Response("User not found", { status: 404 });
+      
+        const user = JSON.parse(kvData);
+        let folders = [];
+      
+        try {
+          if (user.provider === 'yandex') {
+            folders = await listYandexFolders(user.access_token);
+          } else if (user.provider === 'google') {
+            folders = await listGoogleFolders(user.access_token);
+          } else if (user.provider === 'dropbox') {
+            folders = await listDropboxFolders(user.access_token);  
+          } else if (user.provider === 'webdav') {
+            folders = await listWebDavFolders(user);
+          }
+          
+          return new Response(JSON.stringify(folders), {
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+          });
+        } catch (e) {
+          return new Response(JSON.stringify({ error: e.message }), { status: 500 });
+        }
+      }
+
+      // Обработка корня — обычный сайт
       if (url.pathname === "/") {
         return new Response(`
     <!DOCTYPE html>
@@ -69,43 +245,46 @@ export default {
     </body>
     </html>`, { headers: { "Content-Type": "text/html; charset=utf-8" } });
       }
-      // --- ОБРАБОТКА VK MINI APP И СТРАНИЦЫ АВТОРИЗАЦИИ ---
+
+      // --- ОБРАБОТКА VK MINI APP ---
       if (url.pathname === "/vk" || url.pathname.startsWith("/app")) {
         const params = Object.fromEntries(url.searchParams);
-        const html = renderVKMiniAppHTML(params);
+        const vkUserId = params.vk_user_id;
+        
+        let userData = null;
+        try {
+            if (vkUserId) {
+              const kvData = await env.USER_DB.get(`user:${vkUserId}`);
+              if (kvData) {
+                  userData = JSON.parse(kvData);
+              }
+            }
+        } catch (e) {
+            console.error("DB Error in MiniApp:", e);
+        }
+        const userId = params.vk_user_id;
+        const adminCfg = await env.USER_DB.get("admin:config", { type: "json" }) || { admins: [] };
+        const isAdmin = adminCfg.admins.includes(String(userId));
+        const html = renderVKMiniAppHTML(params, userData, isAdmin); 
+        
         return new Response(html, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
-            "Content-Security-Policy": "frame-ancestors 'self' https://vk.com https://*.vk.com;",
-            "Access-Control-Allow-Origin": "*"
+            "Content-Security-Policy": "frame-ancestors 'self' https://vk.com https://*.vk.com; script-src 'self' 'unsafe-inline' https://unpkg.com; img-src * data: blob:; connect-src *; style-src 'self' 'unsafe-inline';",
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
           }
         });
       }
     }
 
-    // 2. ОБРАБОТКА CALLBACKS (Auth)
+    // --- 2. CALLBACKS авторизации ---
     if (url.pathname === "/auth/yandex/callback") return await handleYandexCallback(request, env);
     if (url.pathname === "/auth/google/callback") return await handleGoogleCallback(request, env);
     if (url.pathname === "/auth/mailru/callback") return await handleMailruCallback(request, env);
     if (url.pathname === "/auth/dropbox/callback") return await handleDropboxCallback(request, env);
-  
-  // Ответ для Mail.ru, чтобы он нашел файл receiver.html
-  if (url.pathname.endsWith("receiver.html")) {
-    const receiverHtml = `<html>
-  <body>
-  <script src="//connect.mail.ru/js/loader.js"></script>
-  <script>
-  mailru.loader.require('receiver', function(){
-    mailru.receiver.init();
-  })
-  </script>
-  </body>
-  </html>`;
-    
-    return new Response(receiverHtml, {
-      headers: { "Content-Type": "text/html; charset=utf-8" }
-    });
-  }
 
     // Mail.ru receiver
     if (url.pathname.endsWith("receiver.html")) {
@@ -113,100 +292,162 @@ export default {
       return new Response(receiverHtml, { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
 
-        // --- 3. ВЕБХУКИ (POST запросы) ---
-        if (request.method === "POST") {
+    // --- 3. ВЕБХУКИ (POST запросы) ---
+    if (request.method === "POST") {
+      try { // --- ДОБАВЛЯЕМ СЮДА (API Mini App) ---
+        
+        // --- ВЫБОР ПАПКИ (Backend) ---
+        if (url.pathname === "/api/select-folder") {
           try {
-            const url = new URL(request.url);
-            const body = await request.json(); // ← Читаем ОДИН РАЗ
-    
-            if (url.pathname === "/vk") {
-              // Передаём уже распаршенное тело
-              return await handleVK(body, env, hostname, ctx);
-            } else {
-              // Telegram
-              if (body.callback_query) {
-                await handleCallbackQuery(body.callback_query, env, ctx);
-                return new Response("OK");
-              }
-              if (body.message || body.edited_message) {
-                return await handleTelegramUpdate({ ...body }, env, hostname, ctx);
-              }
+            const { userId, folderId } = body;
+            const kvKey = `user:${userId}`;
+            const kvData = await env.USER_DB.get(kvKey);
+            
+            if (!kvData) {
+              return new Response(JSON.stringify({ error: "User not found" }), { 
+                status: 404, 
+                headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } 
+              });
             }
+            
+            let user = JSON.parse(kvData);
+            user.folderId = folderId; // Сохраняем имя или ID папки
+            
+            await env.USER_DB.put(kvKey, JSON.stringify(user));
+            
+            return new Response(JSON.stringify({ success: true }), { 
+              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } 
+            });
           } catch (e) {
-            console.error("Критическая ошибка:", e);
+            return new Response(JSON.stringify({ error: e.message }), { 
+              status: 500, 
+              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } 
+            });
           }
-          return new Response("OK", { status: 200 });
         }
-    // Все остальное — 404
+
+        // --- СОЗДАНИЕ ПАПКИ (Backend) ---
+        if (url.pathname === "/api/create-folder") {
+          try {
+            const { userId, name } = body;
+            const kvKey = `user:${userId}`;
+            const kvData = await env.USER_DB.get(kvKey);
+            if (!kvData) return new Response(JSON.stringify({error: "User not found"}), { status: 404, headers: {"Access-Control-Allow-Origin": "*"} });
+            
+            let user = JSON.parse(kvData);
+            let newId = name;
+
+            // ВЫЗОВ ВСЕХ ФУНКЦИЙ БЕЗ ПОТЕРЬ:
+            if (user.provider === 'yandex') {
+              await createYandexFolder(name, user.access_token);
+            } else if (user.provider === 'google') {
+              // Google возвращает ID, сохраняем его
+              newId = await createGoogleFolder(name, user.access_token);
+            } else if (user.provider === 'webdav') {
+              // ПРАВИЛЬНЫЙ порядок: имя, потом юзер
+              await createWebDavFolder(name, user);
+            } else if (user.provider === 'dropbox') {
+              await createDropboxFolder(name, user.access_token);
+            }
+
+            // Автоматически выбираем созданную папку
+            user.folderId = newId;
+            await env.USER_DB.put(kvKey, JSON.stringify(user));
+            
+            return new Response(JSON.stringify({ success: true }), { 
+              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } 
+            });
+          } catch (e) {
+            return new Response(JSON.stringify({ error: e.message }), { 
+              status: 500, 
+              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } 
+            });
+          }
+        }
+
+        if (url.pathname === "/api/setup-webdav") {
+          const userId = String(body.userId);
+      
+          // 1. Сначала получаем текущие данные пользователя из KV
+          const kvData = await env.USER_DB.get(`user:${userId}`);
+          let userObj = kvData ? JSON.parse(kvData) : { userId: userId };
+      
+          // 2. Обновляем поля WebDAV (как это делает команда /setup_webdav)
+          userObj.provider = 'webdav';
+          userObj.webdav_host = body.host; 
+          userObj.webdav_user = body.user;
+          userObj.webdav_pass = body.pass;
+          userObj.timestamp = Date.now();
+      
+          // 3. Сохраняем обратно в KV
+          await env.USER_DB.put(`user:${userId}`, JSON.stringify(userObj));
+      
+          return new Response(JSON.stringify({ success: true }), {
+              headers: { 
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*" 
+              }
+          });
+        }
+        if (url.pathname === "/api/disconnect") {
+          const { userId } = body;
+          // Просто удаляем данные из KV
+          await env.USER_DB.delete(`user:${userId}`);
+          return new Response(JSON.stringify({ success: true }), {
+              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+          });
+        }
+
+        // Ендпойнты POST-запросов админа
+        const vkUserId = url.searchParams.get("vk_user_id");
+        const adminCfg = await env.USER_DB.get("admin:config", { type: "json" });
+        const isAdmin = adminCfg?.admins?.includes(String(vkUserId));
+
+        if (url.pathname === "/api/admin/set-model" && isAdmin && request.method === "POST") {
+          try {
+            const { type, model } = body;
+            // 1. Проверяем, что такая модель вообще существует в глобальном объекте AI_MODELS
+            if (!AI_MODELS[model]) {
+              return new Response(JSON.stringify({ success: false, error: "Модель не найдена в справочнике" }), { status: 400 });
+            }
+            // 2. Получаем kvKey для этого типа сервиса из SERVICE_TYPE_MAP
+            const serviceInfo = SERVICE_TYPE_MAP[type];
+            if (!serviceInfo) {
+              return new Response(JSON.stringify({ success: false, error: "Неверный тип сервиса" }), { status: 400 });
+            }
+            // 3. Сохраняем ключ модели в KV (точно так же, как делает функция в чате)
+            await env.USER_DB.put(serviceInfo.kvKey, model);
+            return new Response(JSON.stringify({ 
+              success: true, 
+              service: serviceInfo.name, 
+              model: AI_MODELS[model].MODEL 
+            }), { headers: { "Content-Type": "application/json" } });
+          } catch (e) {
+            return new Response(JSON.stringify({ success: false, error: e.message }), { status: 500 });
+          }
+        }
+
+        // VK API → POST /vk
+        if (url.pathname === "/vk") {
+          return await handleVK(body, env, hostname, ctx);
+        }
+
+        // Telegram
+        if (body.callback_query) {
+          await handleCallbackQuery(body.callback_query, env, ctx);
+          return new Response("OK");
+        }
+        if (body.message || body.edited_message) {
+          return await handleTelegramUpdate({ ...body }, env, hostname, ctx);
+        }
+      } catch (e) {
+        console.error("Ошибка:", e);
+      }
+      return new Response("OK");
+    }
+
     return new Response("Not Found", { status: 404 });
   }
-}
-
-/**
- * Рендерит базовую HTML-страницу для VK Mini App.
- */
-function renderVKMiniAppHTML(params) {
-  const userId = params.vk_user_id || "UNKNOWN";
-  const groupId = params.vk_group_id || "235249123";
-  const ref = params.vk_ref || "";
-  let refLink = "";
-  if (ref && ref.startsWith("ref_")) {
-    refLink = `https://vk.com/write-${groupId}?ref=${ref}`;
-  }
-  return `
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, user-scalable=no, viewport-fit=cover">
-  <title>Хранилка by Leshiy</title>
-  
-  <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
-  <style>
-    body { font-family: -apple-system, system-ui, "Helvetica Neue", Roboto, sans-serif; text-align: center; padding: 40px 20px; background: #f0f2f5; margin: 0; color: #000; }
-    .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-    h1 { color: #4986cc; margin: 0 0 20px 0; font-size: 24px; }
-    p { margin: 12px 0; line-height: 1.5; }
-    .button {
-      display: inline-block;
-      background: #4986cc;
-      color: white;
-      padding: 14px 28px;
-      border-radius: 10px;
-      text-decoration: none;
-      font-weight: 600;
-      margin: 10px 0;
-    }
-    .info { margin-top: 25px; font-size: 14px; color: #818c99; }
-    code { background: #ebedef; padding: 2px 6px; border-radius: 4px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>🗄 Хранилка by Leshiy</h1>
-    <p>Привет! Я твой личный помощник по загрузке файлов.</p>
-    
-    <a href="#" id="openChat" class="button">🤝 Открыть чат с ботом</a>
-    
-    ${refLink ? `<p>Твой инвайт: <a href="${refLink}">активировать</a></p>` : ''}
-    
-    <div class="info">
-      <p><strong>Как это работает?</strong></p>
-      <p>1. Нажми кнопку выше<br>
-         2. В чате нажми "Начать"<br>
-         3. Следуй инструкциям для подключения<br>
-         4. Отправляй фото/видео и они улетят в облако!</p>
-      <p>Твой ID: <code>${userId}</code></p>
-    </div>
-  </div>
-  <script>
-    vkBridge.send("VKWebAppInit").catch(console.error);
-    document.getElementById('openChat').addEventListener('click', function(e) {
-      window.top.location.href = "https://vk.com/write-${groupId}";
-    });
-  </script>
-</body>
-</html>`;
 }
 
 /**
@@ -886,7 +1127,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
       await sendMessage(chatId, "✅ <b>WebDAV успешно настроен!</b>\nПровайдер: <code>webdav</code>\nПапка: <code>Storage</code>", null, env);
 
       // Пробуем создать папку (твоя функция)
-      await createWebDAVFolder("Storage", userData);
+      await createWebDavFolder("Storage", userData);
 
       return new Response("OK");
     } catch (e) {
@@ -973,8 +1214,8 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
  */
 async function handleVK(body, env, hostname, ctx) {
   let chatId = null;
+  const VK_APP_ID = env.VK_APP_ID
   const VK_GROUP_ID = env.VK_GROUP_ID
-
   try {
     // --- 1. Подтверждение сервера ---
     if (body.type === "confirmation") {
@@ -995,7 +1236,7 @@ async function handleVK(body, env, hostname, ctx) {
       let userData = await env.USER_DB.get(userKey, { type: "json" });
       const adminCfg = await env.USER_DB.get("admin:config", { type: "json" });
       const isAdmin = adminCfg?.admins?.includes(String(userId));
-
+      
       // Определяем команду из текста или payload
       let command = text.toLowerCase();
       let payloadData = null;
@@ -1023,7 +1264,56 @@ async function handleVK(body, env, hostname, ctx) {
         await sendVKMessage(chatId, "🖥️ Введи данные WebDAV в формате:\nURL|Логин|Пароль\n\nПример:\nhttps://webdav.yandex.ru|myuser|mypass", env);
         return new Response("OK");
       }
-
+      if (command === "next_folders") {
+        const offset = payloadData.off || 0;
+        const limit = 5;
+        
+        let folders = [];
+        // Повторяем запрос списка (как в Телеге при коллбэках)
+        if (userData.provider === "google") folders = await listGoogleFolders(userData.access_token);
+        else if (userData.provider === "yandex") folders = await listYandexFolders(userData.access_token);
+        else if (userData.provider === "dropbox") folders = await listDropboxFolders(userData.access_token);
+        else if (userData.provider === "webdav") folders = await listWebDavFolders(userData);
+      
+        const sliced = folders.slice(offset, offset + limit);
+        
+        if (sliced.length > 0) {
+          const buttons = sliced.map(f => ([{
+            action: { 
+              type: "text", 
+              label: f.name.substring(0, 35), 
+              payload: JSON.stringify({ cmd: "select_folder", name: f.name, id: userData.provider === "google" ? f.id : f.name }) 
+            },
+            color: "primary"
+          }]));
+      
+          if (folders.length > offset + limit) {
+            buttons.push([{
+              action: { 
+                type: "text", 
+                label: "➡️ Загрузить еще", 
+                payload: JSON.stringify({ cmd: "next_folders", off: offset + limit }) 
+              },
+              color: "default"
+            }]);
+          }
+          await sendVKMessageWithKeyboard(chatId, `📂 Еще папки (${offset + 1}-${offset + sliced.length}):`, env, { inline: true, buttons });
+        }
+        return new Response("OK");
+      }
+      if (command === "select_folder") {
+        userData.folderId = payloadData.name;
+        if (userData.provider === "google") userData.folderId = payloadData.id;
+        await env.USER_DB.put(userKey, JSON.stringify(userData));
+        await sendVKMessage(chatId, `✅ Выбрана папка: ${payloadData.name}`, env);
+        return new Response("OK");
+      }
+      // Нажали кнопку "Создать новую папку"
+      if (command === "start_create") {
+        await env.USER_DB.put(`state:${userId}`, "wait_create_folder");
+        await sendVKMessage(chatId, "📝 Напиши название для новой папки:", env);
+        return new Response("OK");
+      }
       if (command === "ask_ref") {
         const token = Math.random().toString(36).substring(2, 10);
         const inviteInfo = { 
@@ -1160,7 +1450,7 @@ async function handleVK(body, env, hostname, ctx) {
       }
 
       // --- КОМАНДА /AI_SETTINGS (ЗЕРКАЛО ТЕЛЕГРАМА) ---
-      if (command === "/ai_settings" && isAdmin) {
+      if (command === ("/ai_settings" || message.ref === '/ai_settings') && isAdmin) {
         const type = payloadData?.type;
 
         if (!type) {
@@ -1217,14 +1507,18 @@ async function handleVK(body, env, hostname, ctx) {
 
       // --- КОМАНДА /DEBUG ---
       if (command === "/debug") {
-        const hasToken = !!(userData?.access_token || userData?.webdav_pass || userData?.shared_from);
+        // Запрашиваем актуальное состояние прямо из KV перед выводом
+        const actualData = await env.USER_DB.get(userKey, { type: "json" });
+        const hasToken = !!(actualData?.access_token || actualData?.webdav_pass || actualData?.shared_from);
+        
         let debugInfo = `🔧 DEBUG INFO\n`;
         debugInfo += `📦 Версия: ${version}\n`;
         debugInfo += `🔗 Статус: ${hasToken ? "✅ Соединение активно" : "❌ Не подключен"}\n`;
-        debugInfo += `🔌 Провайдер: ${userData?.provider || '—'}\n`;
-        debugInfo += `📁 Папка: ${userData?.folderId || 'Root'}\n`;
+        debugInfo += `🔌 Провайдер: ${actualData?.provider || '—'}\n`;
+        debugInfo += `📁 Папка: ${actualData?.folderId || 'Root'}\n`;
         debugInfo += `👤 Твой ID: ${userId}\n`;
         debugInfo += `👑 Админ: ${isAdmin ? "Да" : "Нет"}`;
+        
         await sendVKMessage(chatId, debugInfo, env);
         return new Response("OK");
       }
@@ -1252,37 +1546,62 @@ async function handleVK(body, env, hostname, ctx) {
       // --- КОМАНДА /FOLDER ---
       if (command === "/folder") {
         if (!userData?.access_token && !userData?.webdav_pass) {
-          await sendVKMessage(chatId, "❌ Сначала подключи облако.", env);
+          await sendVKMessage(chatId, "⚠️ Сначала подключи облако.", env);
           return new Response("OK");
         }
+
         await sendVKMessage(chatId, "📂 Получаю список папок...", env);
         let folders = [];
         try {
           if (userData.provider === "google") folders = await listGoogleFolders(userData.access_token);
           else if (userData.provider === "yandex") folders = await listYandexFolders(userData.access_token);
           else if (userData.provider === "dropbox") folders = await listDropboxFolders(userData.access_token);
+          else if (userData.provider === "webdav") folders = await listWebDavFolders(userData); // ВОТ ОН
         } catch (e) {
           await sendVKMessage(chatId, `❌ Ошибка: ${e.message}`, env);
           return new Response("OK");
         }
+
         if (folders.length > 0) {
-          const buttons = folders.slice(0, 10).map(f => ([{
-            action: { type: "text", label: f.name.substring(0, 40), payload: JSON.stringify({ cmd: "select_folder", name: f.name, id: f.id }) },
+          const offset = 0;
+          const limit = 4;
+          const sliced = folders.slice(offset, offset + limit);
+
+          const buttons = sliced.map(f => ([{
+            action: { 
+              type: "text", 
+              label: f.name.substring(0, 35), 
+              payload: JSON.stringify({ 
+                cmd: "select_folder", 
+                name: f.name,
+                // Логика ID как в Телеге: Google - ID, остальные - Имя (включая WebDAV и Dropbox)
+                id: userData.provider === "google" ? f.id : f.name 
+              }) 
+            },
             color: "primary"
           }]));
-          await sendVKMessageWithKeyboard(chatId, "📂 Выбери папку из списка:", env, { inline: true, buttons });
+          // КНОПКА СОЗДАНИЯ ПАПКИ
+          buttons.unshift([{
+            action: { type: "text", label: "🗂 Создать новую папку", payload: JSON.stringify({ cmd: "start_create" }) },
+            color: "positive"
+          }]);
+          // Кнопка пагинации
+          if (folders.length > limit) {
+            buttons.push([{
+              action: { 
+                type: "text", 
+                label: "➡️ Загрузить еще", 
+                payload: JSON.stringify({ cmd: "next_folders", off: limit }) 
+              },
+              color: "default"
+            }]);
+          }
+          await sendVKMessageWithKeyboard(chatId, `🔌 Облако: ${userData.provider}. 📂 Всего папок: ${folders.length}. Выбери из (1-${sliced.length})`, env, { inline: true, buttons });
         } else {
-          await sendVKMessage(chatId, "📁 Папок нет. Отправь: `/create Имя`", env);
-          await env.USER_DB.put(`state:${userId}`, "wait_create_folder");
+          // Если папок нет
+          const createBtn = [[{ action: { type: "text", label: "🗂 Создать новую папку", payload: JSON.stringify({ cmd: "start_create" }) }, color: "positive" }]];
+          await sendVKMessageWithKeyboard(chatId, "📁 Папок не найдено. Хочешь создать?", env, { inline: true, buttons: createBtn });
         }
-        return new Response("OK");
-      }
-
-      if (command === "select_folder") {
-        userData.folderId = payloadData.name;
-        if (userData.provider === "google") userData.folderId = payloadData.id;
-        await env.USER_DB.put(userKey, JSON.stringify(userData));
-        await sendVKMessage(chatId, `✅ Выбрана папка: ${payloadData.name}`, env);
         return new Response("OK");
       }
 
@@ -1310,28 +1629,49 @@ async function handleVK(body, env, hostname, ctx) {
       }
 
       // --- ОБРАБОТКА ВЛОЖЕНИЙ (МУЛЬТИЗАГРУЗКА) ---
-      if (message.attachments && message.attachments.length > 0) {
-        if (!(isAdmin || (userData && (userData.access_token || userData.webdav_pass || userData.shared_from)))) {
-          await sendVKMessage(chatId, "🚫 Хранилище не подключено!", env);
-          return new Response("OK");
-        }
 
-        await sendVKMessage(chatId, `⏳ Начинаю загрузку в облако: ${message.attachments.length} (шт.)`, env);
+      // 1. Собираем ВСЕ вложения из всех возможных мест сообщения
+      let allAttaches = [];
+      if (message.attachments) allAttaches.push(...message.attachments);
+      if (message.fwd_messages) {
+          message.fwd_messages.forEach(m => { if (m.attachments) allAttaches.push(...m.attachments); });
+      }
+      if (message.reply_message && message.reply_message.attachments) {
+          allAttaches.push(...message.reply_message.attachments);
+      }
 
+      // 2. Если нашли хоть что-то
+      // --- ОБРАБОТКА ВЛОЖЕНИЙ (ПРЯМАЯ ПОСЛЕДОВАТЕЛЬНАЯ) ---
+      if (allAttaches.length > 0) {
+        // 1. Сразу отвечаем пользователю
+        await sendVKMessage(chatId, `⏳ Начинаю загрузку в облако: ${allAttaches.length} (шт.)`, env);
+
+        // 2. Всю работу уводим в waitUntil, чтобы основной запрос к ВК завершился быстро
         ctx.waitUntil((async () => {
-          for (const attach of message.attachments) {
-            // Каждый файл обрабатывается по очереди, не забивая память и не вылетая
-            await processOneAttachment(attach, userData, userId, chatId, env);
-            await new Promise(r => setTimeout(r, 100));
+          for (const attach of allAttaches) {
+            try {
+              // Выполняем загрузку стримом
+              const success = await processOneAttachmentStream(attach, userData, userId, chatId, env);
+              if (!success) {
+                  console.error("Не удалось загрузить один из файлов");
+              }
+              // Даем воркеру "продышаться" между файлами
+              await new Promise(r => setTimeout(r, 200)); 
+            } catch (e) {
+                console.error("Ошибка в цикле загрузки:", e);
+            }
+          }
+          if (allAttaches.length > 1) {
+              await sendVKMessage(chatId, `🏁 Все файлы загружены.`, env).catch(() => {});
           }
         })());
-
+        // Моментально отвечаем ВК "OK", чтобы он не слал повторы
         return new Response("OK");
       }
 
       // --- ЛОГИКА СОСТОЯНИЙ (FOLDER / SEARCH / CREATE) ---
       const userState = await env.USER_DB.get(`state:${userId}`);
-      if (userState && !text.startsWith("/")) {
+      if (userState && !text.startsWith("/") && !payloadData) {
         if (userState === "wait_folder_choice") {
           const folders = await env.USER_DB.get(`temp_folders:${userId}`, { type: "json" });
           const num = parseInt(text);
@@ -1344,7 +1684,44 @@ async function handleVK(body, env, hostname, ctx) {
             return new Response("OK");
           }
         }
-        
+        // НОВЫЙ БЛОК: Создание папки
+        if (userState === "wait_create_folder") {
+          const folderName = text.trim();
+          let resultId = null;
+
+          try {
+            if (userData.provider === "yandex") {
+              const ok = await createYandexFolder(folderName, userData.access_token);
+              if (ok) resultId = folderName; 
+            } 
+            else if (userData.provider === "google") {
+              resultId = await createGoogleFolder(folderName, userData.access_token);
+            } 
+            else if (userData.provider === "webdav") {
+              const ok = await createWebDavFolder(folderName, userData);
+              if (ok) resultId = folderName;
+            }
+            else if (userData.provider === "dropbox") {
+              const ok = await createDropboxFolder(folderName, userData.access_token);
+              if (ok) resultId = folderName;
+            }
+
+            if (resultId) {
+              // Сразу сохраняем созданную папку как активную
+              userData.folderId = resultId;
+              await env.USER_DB.put(userKey, JSON.stringify(userData));
+              await sendVKMessage(chatId, `✅ Папка "${folderName}" создана и выбрана для загрузки.`, env);
+            } else {
+              await sendVKMessage(chatId, "❌ Ошибка при создании папки. Возможно, имя недопустимо или она уже есть.", env);
+            }
+          } catch (e) {
+            await sendVKMessage(chatId, `❌ Ошибка: ${e.message}`, env);
+          }
+
+          // Чистим стейт в любом случае
+          await env.USER_DB.delete(`state:${userId}`);
+          return new Response("OK");
+        }
         if (userState === "waiting_for_search") {
           await env.USER_DB.delete(`state:${userId}`);
           await sendVKMessage(chatId, `⏳ Ищу "${text}"...`, env);
@@ -1409,6 +1786,742 @@ async function handleVK(body, env, hostname, ctx) {
     if (chatId) await sendVKMessage(chatId, `❌ Критическая ошибка: ${e.message}`, env);
   }
   return new Response("OK");
+}
+
+/**
+ * Генерирует HTML-страницу для VK Mini App.
+ */
+function renderVKMiniAppHTML(params, userData, isAdmin) {
+  const userId = params.vk_user_id || "UNKNOWN";
+  const groupId = params.vk_group_id || "235249123";
+  const appId = params.vk_app_id || "54419010";
+  const cdn = "https://images.leshiyalex.workers.dev";
+  
+  const isConnected = !!(userData && (userData.access_token || userData.webdav_pass));
+  const provider = userData ? userData.provider : null;
+  const currentFolder = userData?.folderId || "Storage";
+
+  let providerName = isConnected ? (provider === 'yandex' ? 'Яндекс Диск' : provider === 'google' ? 'Google Drive' : provider === 'dropbox' ? 'Dropbox' : userData?.webdav_host?.includes('mail.ru') ? 'Облако Mail.ru' : 'WebDAV') : "не настроено";
+
+  return `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, user-scalable=no, viewport-fit=cover">
+  <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; background: #ebedf0; margin: 0; padding: 12px; color: #000; -webkit-tap-highlight-color: transparent; }
+    .tg-message { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); margin-bottom: 12px; position: relative; z-index: 1; }
+    .status-group { border-left: 4px solid ${isConnected ? '#4bb34b' : '#eb4242'}; background: #f5f7f8; border-radius: 0 8px 8px 0; padding: 12px 16px; margin: 12px 0; font-size: 15px; }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+    .refresh-btn { position: absolute; top: 12px; right: 12px; font-size: 20px; cursor: pointer; padding: 10px; z-index: 10; }
+    .refresh-btn.loading { animation: spin 1s linear infinite; }
+    .msg-bubble { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); margin-bottom: 12px; display: none; position: relative; border-left: 4px solid #2688eb; }
+    .msg-header { font-weight: bold; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; color: #2688eb; }
+    .msg-body { font-size: 14px; line-height: 1.5; color: #2c2d2e; }
+    .msg-body div { margin-bottom: 4px; }
+    .chat-btn { background: #5181b8; color: white; border-radius: 8px; padding: 10px; text-align: center; font-weight: 500; margin-top: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .chat-btn-secondary { background: #f0f2f5; color: #2688eb; border-radius: 8px; padding: 10px; text-align: center; font-weight: 500; margin-top: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .blue-link { color: #2688eb; cursor: pointer; text-decoration: none; font-weight: 600; display: inline-block; padding: 2px 0; }
+    .btn-s { background: #ffffff; border: 1px solid #dce1e6; border-radius: 10px; padding: 12px; margin-top: 8px; width: 100%; box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 15px; font-weight: 600; color: #2688eb; cursor: pointer; position: relative; z-index: 5; }
+    .btn-s:active { background: #f2f3f5; }
+    .btn-s img { width: 22px; height: 22px; pointer-events: none; }
+    .btn-s.active { border: 2.5px solid #2688eb; background: #f0f7ff; }
+    .hidden-panel { display: none; background: #fff; padding: 16px; border-radius: 12px; margin-bottom: 12px; border: 1px solid #dce1e6; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .hidden-panel pre { font-size: 10px; background: #f0f2f5; padding: 8px; overflow-x: auto; white-space: pre-wrap; border-radius: 6px; }
+    .check-mark { color: #4bb34b; font-weight: bold; pointer-events: none; }
+    .wd-form { display: none; background: #fff; padding: 16px; border-radius: 12px; margin-top: 10px; border: 1px solid #dce1e6; }
+    .mr-form { display: none; background: #fff; padding: 16px; border-radius: 12px; margin-top: 10px; border: 1px solid #dce1e6; }
+    input { width: 100%; padding: 12px; border: 1px solid #dce1e6; border-radius: 8px; margin-bottom: 8px; box-sizing: border-box; font-size: 15px; }
+    .quota-card { background: white; border-radius: 12px; padding: 16px; margin-top: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+    .progress-bg { background: #f0f2f5; height: 8px; border-radius: 4px; overflow: hidden; margin: 10px 0; }
+    .progress-fill { background: #0077ff; width: 0%; height: 100%; transition: width 1s ease; }
+    .footer { text-align: center; color: #818c99; font-size: 11px; margin-top: 25px; padding-bottom: 20px; }
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: flex-end; }
+    .modal { background: white; width: 100%; border-radius: 15px 15px 0 0; padding: 20px; box-sizing: border-box; max-height: 80vh; overflow-y: auto; }
+    .folder-item { padding: 16px; border-bottom: 1px solid #f0f2f5; font-weight: 500; color: #2688eb; cursor: pointer; }
+    .wd-form, .debug-window { display: none; background: #fff; padding: 16px; border-radius: 12px; margin-top: 10px; border: 1px solid #dce1e6; }
+    .debug-window pre { font-size: 10px; background: #f0f2f5; padding: 8px; overflow-x: auto; white-space: pre-wrap; }
+    .close-x { position: absolute; top: 8px; right: 12px; color: #adb5bd; font-size: 20px; cursor: pointer; }
+    #pull-to-refresh { position: fixed; top: -50px; left: 0; right: 0; height: 50px; display: flex; align-items: center; justify-content: center; transition: transform 0.2s; z-index: 9999; background: #ebedf0; color: #2688eb; font-weight: bold; }
+    .pull-indicator { border: 2px solid #f3f3f3; border-top: 2px solid #2688eb; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; margin-right: 10px; display: none; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    @keyframes ptr-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    body { overscroll-behavior-y: contain; } /* Важно: отключает системный рефреш браузера */
+  </style>
+</head>
+<body>
+  <div id="pull-to-refresh" style="position:fixed; top:0; left:0; width:100%; height:80px; display:flex; flex-direction:column; align-items:center; justify-content:center; background:#ebedf0; z-index:1;">
+    <div id="ptr-loader" class="loader"></div>
+    <span id="ptr-text" style="font-size:13px; color:#888;">Потяните для обновления</span>
+  </div>
+  <div id="app-container" style="position:relative; background:white; z-index:2; min-height:100vh; transition: transform 0.2s cubic-bezier(0,0,0.2,1); will-change: transform;">
+  <div class="tg-message">
+    <div class="refresh-btn" id="reloadIcon" onclick="uiReload()">🔄</div>
+    <div>👋 <b>Привет! Я твоя личная хранилка.</b></div>
+    <div style="margin-top:8px;">📁 Просто пришли мне фото или видео, и я закину их на сервер.</div>
+    <div class="status-group">
+      <div>⚙️ Статус: ${isConnected ? `✅ <span style="color:#4bb34b; font-weight:bold;">Подключен ${providerName}</span>` : 'Не настроено'}</div>
+      <div id="curFolderLabel">📂 Папка: ${isConnected ? `<b>${currentFolder}</b>` : 'Не выбрана'}</div>
+    </div>
+
+    <div id="adminPanel" class="msg-bubble" style="border-left-color: #4bb34b;">
+    <span class="close-x" onclick="togglePanel('adminPanel')">×</span>
+    <div class="msg-header">⚙️ Панель администратора</div>
+    <div class="msg-body">
+      <div>✅ <b>Авторизовано:</b> 7</div>
+      <div>🚀 <b>Версия:</b> ${version}</div>
+      <div style="margin-top:12px;">Выбери раздел настроек:</div>
+      
+      <div class="chat-btn" onclick="openAiSettings()">🧠 Настройки ИИ</div>
+      <div class="chat-btn-secondary" onclick="togglePanel('debugPanel')">📊 Статистика</div>
+    </div>
+    </div>
+
+    <div id="aiSettingsPanel" class="msg-bubble" style="border-left-color: #5181b8; display: none;">
+  <span class="close-x" onclick="togglePanel('aiSettingsPanel')">×</span>
+  <div class="msg-header">🧠 Настройки моделей</div>
+  <div class="msg-body">
+    <div id="modelsPanel" style="margin-top: 16px; display: none;"></div>
+    <div id="aiCurrentStatus" style="font-size: 13px; background: #1a1a1a; color: #fff; padding: 10px; border-radius: 8px; margin-bottom: 12px; font-family: monospace;">
+      📊 <b>Текущие модели:</b><br>
+      ⏳ Загрузка конфигурации...
+    </div>
+    </div>
+    <div style="margin-bottom:10px;">---<br>Выберите сервис:</div>
+    
+    <div class="chat-btn-secondary" id="TEXT_TO_TEXT" onclick="loadModels(this)">📝 Текст → Текст</div>
+    <div class="chat-btn-secondary" id="IMAGE_TO_TEXT" onclick="loadModels(this)">🖼️ Картинка → Текст</div>
+    <div class="chat-btn-secondary" id="AUDIO_TO_TEXT" onclick="loadModels(this)">🎙️ Аудио → Текст</div>
+    <div class="chat-btn-secondary" id="VIDEO_TO_TEXT" onclick="loadModels(this)">🎥 Видео → Текст</div>
+    <div class="chat-btn-secondary" id="DOCUMENT_TO_TEXT" onclick="loadModels(this)">📄 Документ → Текст</div>
+    <div class="chat-btn-secondary" id="VIDEO_TO_ANALYSIS" onclick="loadModels(this)">🎞️ Видео → Анализ</div>
+    
+    <div id="modelsList" style="margin-top: 16px; display: none;"></div>
+  </div>
+  </div>
+
+    <div id="debugPanel" class="msg-bubble">
+      <span class="close-x" onclick="togglePanel('debugPanel')">×</span>
+      <div class="msg-header">🛠 DEBUG INFO</div>
+      <div class="msg-body">
+        <div>📦 <b>Версия:</b> ${version}</div>
+        <div>🔗 <b>Статус:</b> ${isConnected ? '✅ Соединение активно' : '❌ Не подключено'}</div>
+        <div>🔌 <b>Провайдер:</b> ${isConnected ? `${provider}` : '-'}</div>
+        <div>📂 <b>Папка:</b> ${isConnected ? `${currentFolder}` : '-'}</div>
+        <div>👤 <b>Твой ID:</b> ${userId}</div>
+        <div>👑 <b>Админ:</b> ${isAdmin ? 'Да' : 'Нет'}</div>
+      </div>
+    </div>
+
+    <div style="margin-top: 15px;">
+      📖 <b>Команды:</b><br>
+      ${isAdmin ? `<span class="blue-link" onclick="togglePanel('adminPanel')" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>` : ''}
+      ${isConnected ? `<span class="blue-link" onclick="openFolderSelector()">/folder</span> — 📂 Выбрать папку для загрузки<br>` : ''}
+      ${isConnected ? `<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>` : ''}
+      ${isConnected ? `<span class="blue-link" onclick="goToChat()">/search</span> — 🔎 Поиск файлов по хранилке<br>` : ''}
+      <span class="blue-link" onclick="togglePanel('debugPanel')">/debug</span> — 🛠️ Техническая информация<br>
+      ${isConnected ? `<span class="blue-link" onclick="disconnect()" style="color:#ff3347;">/disconnect</span> — 🔌 Отключить диск<br>` : ''}
+    </div>
+
+  <div id="authButtons">
+    <button class="btn-s ${provider === 'yandex' ? 'active' : ''}" onclick="openAuthLink('/auth/yandex')">
+      <img src="${cdn}/YandexDisk.png"> Яндекс Диск ${provider === 'yandex' ? '<span class="check-mark">✅</span>' : ''}
+    </button>
+    <button class="btn-s ${provider === 'google' ? 'active' : ''}" onclick="openAuthLink('/auth/google')">
+      <img src="${cdn}/GoogleDrive.png"> Google Drive ${provider === 'google' ? '<span class="check-mark">✅</span>' : ''}
+    </button>
+    <button class="btn-s ${provider === 'dropbox' ? 'active' : ''}" onclick="openAuthLink('/auth/dropbox')">
+      <img src="${cdn}/Dropbox.png"> Dropbox ${provider === 'dropbox' ? '<span class="check-mark">✅</span>' : ''}
+    </button>
+    <button class="btn-s ${provider === 'webdav' && userData?.webdav_host?.includes('mail.ru') ? 'active' : ''}" onclick="showMailRu()">
+      <img src="${cdn}/CloudMailRu.png"> Облако Mail.ru ${userData?.webdav_host?.includes('mail.ru') ? '<span class="check-mark">✅</span>' : ''}
+    </button>
+    <button class="btn-s" onclick="showCustomWD()">
+      <img src="${cdn}/network-drive.png"> Свой FTP/SFTP/WebDAV
+    </button>
+    <button class="btn-s" onclick="openFriendsStorage()">🤝 Подключить Хранилку друга</button>
+    <button class="btn-s" style="margin-top: 12px; background: #2688eb; color: #fff; border: none;" onclick="goToChat()">💬 Открыть чат Хранилку</button>
+  </div>
+
+  <div id="wdForm" class="msg-bubble" style="border-left-color: #adb5bd;">
+    <span class="close-x" onclick="togglePanel('wdForm')">×</span>
+    <div id="wdContent">
+       </div>
+    <input type="text" id="wdHost" placeholder="Сервер (WebDAV URL)" oninput="parseUrl(this.value)">
+    <input type="text" id="wdUser" placeholder="Логин (Email)">
+    <input type="password" id="wdPass" placeholder="Пароль приложения">
+    <button id="saveBtn" class="chat-btn" style="width:100%; border:none;" onclick="saveWebDAV()">📥 Подключиться</button>
+  </div>
+
+  ${isConnected ? `
+    <div class="quota-card">
+      <div style="font-size:14px; margin-bottom:4px; opacity:0.8;">☁️ Свободное место</div>
+      <div class="progress-bg"><div id="quotaBar" class="progress-fill"></div></div>
+      <div id="quotaText" style="font-size:11px; color: #818c99;">Загрузка данных...</div>
+    </div>
+  ` : ''}
+
+  <div id="folderModal" class="modal-overlay" onclick="closeFolders()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+        <b>Выбор папки</b>
+        <span onclick="closeFolders()" style="cursor:pointer; font-size:28px; padding: 0 10px;">&times;</span>
+      </div>
+      <div class="btn-s" onclick="promptCreateFolder()">➕ Создать новую папку</div>
+      <div id="modalFolderList" style="margin-top:10px;">⏳ Загрузка...</div>
+    </div>
+  </div>
+
+  <div class="footer">Версия: ${version} | ID: ${userId}</div>
+
+  <script>
+    // 1. В самом начале скрипта Mini App
+    const urlParams = new URLSearchParams(window.location.search);
+    const platform = urlParams.get('vk_platform');
+
+    // Определяем окружение
+    const isMobileWeb = platform === 'mobile_web' || platform === 'mvk_external';
+    const isNativeApp = ['mobile_android', 'mobile_iphone', 'mobile_ipad'].includes(platform);
+    vkBridge.send("VKWebAppInit");
+
+    // Проверяем метку при каждом фокусе на окно
+    window.addEventListener("focus", function() {
+      if (localStorage.getItem('awaiting_auth') === 'true') {
+        localStorage.removeItem('awaiting_auth'); // Сразу удаляем, чтобы не рефрешить вечно
+        
+        // Даем 1.5 секунды бэкенду записать токены и делаем рефреш
+        setTimeout(() => {
+          uiReload(); 
+        }, 1500);
+      }
+    });
+    // Рефреш на мобильном, когда фокус вернётся на Mini App
+    document.addEventListener("visibilitychange", function() {
+      if (document.visibilityState === 'visible') {
+        localStorage.removeItem('awaiting_auth'); // Сразу удаляем, чтобы не рефрешить вечно
+        // Даем 1.5 секунды бэкенду записать токены и делаем рефреш
+        setTimeout(() => {
+          uiReload(); 
+        }, 1500);
+      }
+    });
+    const userId = "${userId}";
+    const groupId = "${groupId}";
+    const appId = "${appId}";
+    const allAiModels = ${JSON.stringify(AI_MODELS)};
+    let foldersCache = null;
+
+    // Функция обновления стягиванием на мобилке
+    (function() {
+      let startY = 0;
+      const container = document.getElementById('app-container');
+      const ptrText = document.getElementById('ptr-text');
+      const ptrLoader = document.getElementById('ptr-loader');
+      let isPulling = false;
+    
+      window.addEventListener('touchstart', function(e) {
+        // Начинаем только если мы в самом верху страницы
+        if (window.scrollY === 0) {
+          startY = e.touches[0].pageY;
+          isPulling = true;
+          container.style.transition = 'none'; // Убираем анимацию во время движения пальца
+        }
+      }, { passive: true });
+    
+      window.addEventListener('touchmove', function(e) {
+        if (!isPulling) return;
+        
+        const currentY = e.touches[0].pageY;
+        const diff = currentY - startY;
+    
+        if (diff > 0 && window.scrollY === 0) {
+          // Плавное затухание движения (резиновый эффект)
+          const move = Math.pow(diff, 0.8); 
+          container.style.transform = 'translateY(' + move + 'px)';
+          
+          if (move > 60) {
+            ptrText.innerText = "Отпустите для обновления";
+          } else {
+            ptrText.innerText = "Потяните для обновления";
+          }
+        }
+      }, { passive: true });
+    
+      window.addEventListener('touchend', function() {
+        if (!isPulling) return;
+        isPulling = false;
+        
+        container.style.transition = 'transform 0.3s cubic-bezier(0,0,0.2,1)';
+    
+        const matrix = window.getComputedStyle(container).transform;
+        const translateY = matrix !== 'none' ? parseFloat(matrix.split(',')[5]) : 0;
+    
+        if (translateY > 60) {
+          // Фиксируем экран в полуоткрытом состоянии
+          container.style.transform = 'translateY(60px)';
+          ptrText.innerText = "Обновление...";
+          ptrLoader.style.display = "block";
+    
+          // Вызываем обновление
+          if (typeof uiReload === "function") {
+            uiReload();
+          }
+    
+          // Возвращаем всё назад
+          setTimeout(function() {
+            container.style.transform = 'translateY(0)';
+            setTimeout(() => { ptrLoader.style.display = "none"; }, 300);
+          }, 1000);
+        } else {
+          container.style.transform = 'translateY(0)';
+        }
+      });
+    })();
+
+    function uiReload() {
+      document.getElementById('reloadIcon').classList.add('loading');
+      location.reload();
+    }
+
+    function showCustomWD() {
+      document.getElementById('wdContent').innerHTML = \`
+        <div class="msg-header">📁 Подключение своего сервера</div>
+        <div class="wd-info-box">
+          <b>Поддерживаются следующие протоколы:</b><br>
+          ✅ WebDAV (рекомендуется) — работает в Cloudflare Workers<br><br>
+          🔗 <b>Формат для WebDAV:</b><br>
+          https://user:pass@ваш-сервер.ru<br><br>
+          ❌ FTP / SFTP — НЕ работают в Cloudflare Workers<br>
+          📘 Используйте <a href="https://github.com/leshiy-ai/leshiy-storage-bot" target="_blank">Python-версию бота</a> для FTP/SFTP (на Render/VPS).<br>
+          Это полноценный продукт для личного хостинга.<br><br>
+          Укажи ссылку в формате:
+        </div>
+        <div style="font-size:11px; margin-bottom:12px; word-break:break-all; color:#2688eb;">https://ваша@почта:пароль_для_внешнего_приложения@webdav.yandex.ru</div>
+      \`;
+      togglePanel('wdForm');
+    }
+
+    function showMailRu() {
+      document.getElementById('wdContent').innerHTML = \`
+        <div class="msg-header">📧 Облако Mail.ru через WebDAV</div>
+        <div class="wd-info-box">
+          1. Перейди в Настройки → «Пароли для внешних приложений»<br>
+          2. Создай пароль для WebDAV<br>
+          3. Укажи ссылку в формате ниже:
+        </div>
+        <div style="font-size:11px; margin-bottom:12px; word-break:break-all; color:#2688eb;">https://ваша-почта@mail.ru:пароль_для_внешнего_приложения@webdav.cloud.mail.ru</div>
+      \`;
+      document.getElementById('wdHost').value = "webdav.cloud.mail.ru";
+      togglePanel('wdForm');
+    }
+
+    function togglePanel(id) {
+      const el = document.getElementById(id);
+      if(!el) return;
+      const isVisible = el.style.display === 'block';
+      el.style.display = isVisible ? 'none' : 'block';
+      if(!isVisible) el.scrollIntoView({behavior: 'smooth'});
+    }
+
+    async function checkReferral() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const hashParams = new URLSearchParams((window.location.hash || '').replace('#', '?'));
+      const refId = urlParams.get('ref') || hashParams.get('ref');
+      if (refId && refId !== userId) {
+        try { fetch('/api/connect-friend?vk_user_id=' + userId + '&friend_id=' + refId); } catch(e) {}
+      }
+    }
+    checkReferral();
+
+    function goToChat() {
+      vkBridge.send("VKWebAppOpenExternalLink", { "url": "https://vk.com/write-" + groupId })
+        .catch(() => { window.open("https://vk.com/write-" + groupId, "_blank"); });
+    }
+
+    function openAuthLink(path) {
+      // 1. Сначала инициализируем Bridge, если он есть
+      if (window.vkBridge) {
+        vkBridge.send("VKWebAppInit");
+      }
+
+      // 2. Вычисляем userId прямо здесь (безопасно)
+      const params = new URLSearchParams(window.location.search);
+      const currentUid = params.get('vk_user_id') || (typeof userId !== 'undefined' ? userId : '');
+      const platform = params.get('vk_platform') || '';
+
+      // 3. Формируем ссылку
+      const url = "https://leshiy-storage-bot.leshiyalex.workers.dev" + path + "?state=" + currentUid + "&t=" + Date.now();
+      
+      // 4. Метка для рефреша
+      localStorage.setItem('awaiting_auth', 'true');
+
+      // 5. ЛОГИКА ОТКРЫТИЯ
+      
+      // А. Если мы в нативном мобильном приложении ВК
+      const isNative = ['mobile_android', 'mobile_iphone', 'mobile_ipad'].includes(platform);
+      const bridgeExists = (typeof vkBridge !== 'undefined' && vkBridge.send);
+
+      if (isNative && bridgeExists) {
+        vkBridge.send("VKWebAppOpenExternalLink", { "url": url })
+          .catch(() => { window.location.href = url; });
+      } 
+      // Б. Если это мобильный браузер (m.vk.com) - самый проблемный случай
+      else if (platform === 'mobile_web' || platform === 'mvk_external') {
+        // Используем replace, чтобы не плодить историю и проскочить away.php
+        window.location.replace(url);
+      } 
+      // В. Все остальные случаи (ПК, Телеграм, или если платформа не определилась)
+      else {
+        // На ПК НИКОГДА не используй location.href для авторизации, 
+        // иначе Яндекс/Google не откроются во фрейме.
+        // Обязательно "_blank" в кавычках!
+        const win = window.open(url, "_blank");
+        
+        // Если браузер заблокировал поп-ап, тогда (и только тогда) пробуем href
+        if (!win || win.closed || typeof win.closed === 'undefined') {
+          window.location.href = url;
+        }
+      }
+    }
+    
+    function openLink(path) {
+      if (window.vkBridge) {
+        vkBridge.send("VKWebAppInit");
+      }
+      const url = "https://leshiy-storage-bot.leshiyalex.workers.dev" + path + "?state=" + userId;
+      
+      // 1. Ставим метку для рефреша (LocalStorage работает везде)
+      localStorage.setItem('awaiting_auth', 'true');
+      
+      // 2. Определяем среду
+      const isVkEnv = window.location.search.includes('vk_app_id') || window.name.includes('fXD');
+      const bridgeExists = (typeof vkBridge !== 'undefined' && vkBridge.send);
+    
+      if (isVkEnv && bridgeExists) {
+        // Сценарий: Мы в ВК и Bridge живой
+        vkBridge.send("VKWebAppOpenExternalLink", { "url": url })
+          .catch(() => { 
+            // Если на ПК Bridge "проглотил" вызов, но не открыл окно
+            window.open(url, "_blank"); 
+          });
+      } else {
+        // Сценарий: Мы открыты просто во вкладке или Bridge не загрузился
+        // Используем window.open для новой вкладки или location.href для текущей
+        window.location.href = url;
+      }
+    }
+    
+    function parseUrl(v) {
+      try {
+        if (v.includes('://')) {
+          const u = new URL(v);
+          if(u.username) document.getElementById('wdUser').value = decodeURIComponent(u.username);
+          if(u.password) document.getElementById('wdPass').value = decodeURIComponent(u.password);
+          document.getElementById('wdHost').value = u.hostname;
+        }
+      } catch(e) {}
+    }
+
+    function setupMailRu() {
+      document.getElementById('mrHost').value = "webdav.cloud.mail.ru";
+      document.getElementById('mrForm').style.display = 'block';
+      document.getElementById('mrForm').scrollIntoView({behavior: 'smooth'});
+      f.style.display = f.style.display === 'block' ? 'none' : 'block';
+    }
+
+    function toggleWD() {
+      const f = document.getElementById('wdForm');
+      f.style.display = f.style.display === 'block' ? 'none' : 'block';
+    }
+
+    async function saveWebDAV() {
+      const b = document.getElementById('saveBtn');
+      const h = document.getElementById('wdHost').value, u = document.getElementById('wdUser').value, p = document.getElementById('wdPass').value;
+      if(!h || !u || !p) return alert("Заполните все поля");
+      b.disabled = true; b.innerText = "💾 Сохраняю...";
+      try {
+        const res = await fetch('/api/setup-webdav', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ userId, host: h, user: u, pass: p, folderId: "Storage" }) });
+        if(res.ok) localStorage.setItem('awaiting_auth', 'true'); else { alert("Ошибка"); b.disabled = false; b.innerText = "🔌 Подключиться"; }
+      } catch(e) { alert("Ошибка сети"); b.disabled = false; b.innerText = "🔌 Подключиться"; }
+    }
+
+    function showDebug() { 
+      const w = document.getElementById('debugWindow');
+      w.style.display = w.style.display === 'block' ? 'none' : 'block';
+    }
+
+    function showAdmin() {
+      const w = document.getElementById('adminWindow');
+      if(w) w.style.display = w.style.display === 'block' ? 'none' : 'block';
+    }
+
+    function openAiSettings() {
+      togglePanel("aiSettingsPanel");
+      // ✅ ВСЕГДА ОБНОВЛЯЙ СТАТУС ПРИ ОТКРЫТИИ ПАНЕЛИ
+      updateCurrentAiStatus();
+    }
+    
+    function updateCurrentAiStatus() {
+      const st = document.getElementById("aiCurrentStatus");
+      // Добавляем timestamp, чтобы обойти кэш
+      fetch("/api/admin/get-ai-settings?vk_user_id=" + userId + "&t=" + Date.now())
+        .then(r => r.json())
+        .then(d => {
+          let txt = "📊 <b>Текущие модели:</b><br>";
+          for (const k in d.services) {
+            const s = d.services[k];
+            txt += "• " + s.name + ": " + s.currentModelName + "<br>";
+          }
+          st.innerHTML = txt;
+        })
+        .catch(e => {
+          st.innerHTML = "❌ Ошибка загрузки";
+          console.error(e);
+        });
+    }
+    
+    function loadModels(el) {
+      const type = el.id; // Например, TEXT_TO_TEXT
+      const panel = document.getElementById("modelsList");
+      panel.style.display = "block";
+      
+      // МГНОВЕННАЯ ГЕНЕРАЦИЯ ИЗ ПАМЯТИ
+      let html = "<b>Доступные модели для " + type + ":</b><br>";
+      
+      // Перебираем ключи локального объекта
+      Object.keys(allAiModels).forEach(key => {
+        if (key.startsWith(type)) {
+          const modelName = allAiModels[key].MODEL;
+          const serviceName = allAiModels[key].SERVICE;
+          const displayName = "<b>" + serviceName + "</b>: " + modelName;
+          html += '<div class="chat-btn" id="' + key + '" title="' + type + '" onclick="applyModel(this)">' + displayName + '</div>';
+        }
+      });
+    
+      panel.innerHTML = html;
+      panel.scrollIntoView({behavior: 'smooth'});
+    }
+    
+    function applyModel(el) {
+      const modelId = el.id; 
+      const type = el.getAttribute("title");
+    
+      if (!confirm("Выбрать модель " + modelId + "?")) return;
+    
+      const statusBox = document.getElementById("aiCurrentStatus");
+      const originalText = el.innerText; // Сохраняем имя (например, Gemini)
+    
+      // 1. Включаем индикацию загрузки
+      el.innerText = "⏳ Сохранение...";
+      el.style.pointerEvents = "none";
+      statusBox.style.opacity = "0.5";
+    
+      fetch("/api/admin/set-model?vk_user_id=" + userId, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, type, model: modelId })
+      })
+      .then(r => r.json())
+      .then(res => {
+        if (res.success) {
+          // Мгновенно подменяем текст в черном блоке вручную (Оптимистичный UI)
+          // Чтобы не ждать KV, мы сами знаем, что выбрали
+          const modelName = allAiModels[modelId] ? allAiModels[modelId].MODEL : modelId;
+          console.log("Модель успешно изменена на:", modelName);
+          
+          alert("✅ Установлено!");
+          
+          // Скрываем список и обновляем статус
+          document.getElementById("modelsList").style.display = "none";
+          if (typeof updateCurrentAiStatus === "function") {
+              updateCurrentAiStatus();
+          }
+        } else {
+          alert("❌ Ошибка сервера: " + res.error);
+        }
+      })
+      .catch(err => {
+        console.error("Fetch error:", err);
+        alert("❌ Ошибка сети (проверьте консоль)");
+      })
+      .finally(() => {
+        // 2. В ЛЮБОМ СЛУЧАЕ возвращаем кнопку и статус в норму
+        el.innerText = originalText;
+        el.style.pointerEvents = "auto";
+        statusBox.style.opacity = "1";
+      });
+    }
+
+    function startChecking() {
+      let a = 0;
+      const i = setInterval(async () => {
+        a++;
+        const res = await fetch('/api/get-status?vk_user_id=' + userId + '&t=' + Date.now());
+        const d = await res.json();
+        if (d.isConnected) { clearInterval(i); location.reload(); }
+        if (a > 10) clearInterval(i);
+      }, 3000);
+    }
+
+    async function disconnect() {
+      if(confirm("Отключить хранилище?")) {
+        await fetch('/api/disconnect', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({userId}) });
+        location.reload();
+      }
+    }
+
+    async function updateQuota() {
+      if (!${isConnected}) return;
+      try {
+        const res = await fetch('/api/get-quota?vk_user_id=' + userId);
+        const data = await res.json();
+        if (data.total > 0) {
+          const percent = Math.round((data.used / data.total) * 100);
+          document.getElementById('quotaBar').style.width = percent + '%';
+          document.getElementById('quotaText').innerHTML = 'Заполнено на <b>' + percent + '%</b>. Использовано ' + (data.used/1e9).toFixed(1) + ' ГБ из ' + (data.total/1e9).toFixed(1) + ' ГБ';
+        }
+      } catch(e) {}
+    }
+    setTimeout(updateQuota, 800);
+
+    function shareApp() {
+      vkBridge.send("VKWebAppShare", { "link": 'https://vk.com/app' + appId + '#ref=' + userId });
+    }
+    
+    async function openFolderSelector() {
+      const modal = document.getElementById('folderModal'), listCont = document.getElementById('modalFolderList');
+      modal.style.display = 'flex';
+      if (foldersCache) renderMyList(foldersCache);
+      try {
+        const res = await fetch('/api/list-folders?vk_user_id=' + userId);
+        const folders = await res.json();
+        foldersCache = folders;
+        renderMyList(folders);
+      } catch (e) { listCont.innerText = 'Ошибка'; }
+
+      function renderMyList(data) {
+        listCont.innerHTML = data.map(f => {
+          const n = (typeof f === 'object') ? f.name : f;
+          return \`<div class="folder-item" onclick="selectFolder('\${n}', '\${n}')">📁 \${n}</div>\`;
+        }).join('');
+      }
+    }
+
+    function closeFolders() { document.getElementById('folderModal').style.display = 'none'; }
+
+    async function selectFolder(id, name) {
+      document.querySelector('#curFolderLabel b').innerText = "⏳ " + name;
+      closeFolders();
+      await fetch('/api/select-folder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, folderId: name }) });
+      location.reload();
+    }
+
+    async function promptCreateFolder() {
+      const n = prompt("Название папки:");
+      if (!n || !n.trim()) return;
+      try {
+        await fetch('/api/create-folder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, name: n.trim() }) });
+        await fetch('/api/select-folder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, folderId: n.trim() }) });
+        location.reload();
+      } catch (e) { location.reload(); }
+    }
+
+    async function openFriendsStorage() {
+      const link = prompt("Ссылка друга:");
+      if (!link) return;
+      const fId = link.match(/ref[=_](\\d+)/)?.[1] || link.replace(/\\D/g,'');
+      if (fId) {
+        const res = await fetch('/api/connect-friend?vk_user_id=' + userId + '&friend_id=' + fId);
+        const data = await res.json();
+        if (data.success) location.reload();
+      }
+    }
+  </script>
+  
+  </div>
+</body>
+</html>`;
+}
+
+// Универсальная функция для генерации HTML-перехода (чтобы не дублировать код)
+const renderRedirectPage = (targetUrl, providerName) => {
+  return new Response(`
+  <!DOCTYPE html>
+  <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Авторизация...</title>
+      <style>
+        body { background: #ebedf0; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; font-family: -apple-system, system-ui, sans-serif; }
+        .loader { border: 3px solid #f3f3f3; border-top: 3px solid #2688eb; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+      </style>
+    </head>
+    <body>
+      <div style="text-align: center;">
+        <div class="loader" style="margin: 0 auto 15px;"></div>
+        <div style="color: #555; font-size: 14px;">Переход к авторизации...</div>
+      </div>
+      <script>
+        // Выполняем переход через JS, что "нравится" мобильным браузерам
+        setTimeout(() => { window.location.href = "${targetUrl}"; }, 100);
+      </script>
+    </body>
+  </html>`, { headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
+};
+
+function renderSuccessPage() {
+  return new Response(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { font-family: -apple-system, system-ui, sans-serif; text-align:center; padding-top:50px; background: #ebedf0; margin: 0; }
+          .card { background: white; margin: 20px; padding: 30px; border-radius: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 400px; margin: 0 auto; }
+          h2 { color: #4bb34b; margin-bottom: 10px; }
+          p { color: #626d7a; font-size: 15px; line-height: 1.4; padding: 0 10px; }
+          .btn { margin-top: 20px; padding: 14px 24px; border-radius: 12px; border: none; background: #0077ff; color: white; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h2>✅ Успешно подключено!</h2>
+          <p>Теперь вы можете закрыть это окно и вернуться назад.<br>Окно закроется автоматически через 3 секунды.</p>
+          <button class="btn" onclick="handleClose()">Закрыть окно</button>
+        </div>
+        <script>
+          // Инициализация Bridge сразу при загрузке
+          if (window.vkBridge) {
+            vkBridge.send("VKWebAppInit");
+          }
+          function handleClose() {
+            // 1. Попытка для Telegram
+            if (window.Telegram && window.Telegram.WebApp) {
+              window.Telegram.WebApp.close();
+            }
+            // 2. Попытка для ВК (Bridge)
+            if (typeof vkBridge !== 'undefined') {
+              vkBridge.send("VKWebAppClose", {"status": "success"});
+            }
+            // 3. Стандартный метод для ПК
+            window.close();
+            // 4. Если всё выше не сработало (обычный браузер или чат)
+            // Информируем пользователя, что пора выходить
+            const btn = document.querySelector('.btn');
+            if (btn) btn.innerText = "Закройте вкладку вручную";
+          }
+          // Авто-закрытие
+          setTimeout(handleClose, 3000);
+        </script>
+      </body>
+    </html>`, { 
+    headers: { "Content-Type": "text/html; charset=utf-8" } 
+  });
 }
 
 /**
@@ -2030,7 +3143,7 @@ async function handleCallbackQuery(query, env, ctx) {
       } else if (userData.provider === "dropbox") {
         success = await createDropboxFolder(folderIdOrName, userData.access_token);
       } else if (userData.provider === "webdav") {
-        success = await createWebDAVFolder(folderIdOrName, userData);
+        success = await createWebDavFolder(folderIdOrName, userData);
       }
       if (success) {
         userData.folderId = folderIdOrName;
@@ -2301,10 +3414,12 @@ async function processOneAttachment(attach, userData, userId, chatId, env) {
       url = attach.doc.url;
       name = attach.doc.title || `Doc_${dateStr}.${attach.doc.ext}`;
       dbFileType = "document";
-      // Определяем MIME для AI
       const ext = (attach.doc.ext || "").toLowerCase();
+      
+      // ИСПРАВЛЕННЫЙ MIME ДЛЯ PNG
       if (ext === "pdf") mimeType = "application/pdf";
-      else if (["jpg","jpeg","png"].includes(ext)) mimeType = "image/jpeg";
+      else if (ext === "png") mimeType = "image/png"; // Вот это добавили
+      else if (["jpg","jpeg"].includes(ext)) mimeType = "image/jpeg";
       else mimeType = "text/plain";
     }
     else if (fType === "audio") {
@@ -2447,6 +3562,161 @@ async function processOneAttachment(attach, userData, userId, chatId, env) {
     return uploadOk;
   } catch (err) {
     console.error("Critical OneAttach Error:", err);
+    return false;
+  }
+}
+
+async function processOneAttachmentStream(attach, userData, userId, chatId, env) {
+  try {
+    let url = "", name = "", fType = attach.type;
+    let dbFileType = fType;
+    let mimeType = ""; 
+
+    const now = new Date();
+    const dateStr = now.getFullYear() + '-' + 
+                    String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                    String(now.getDate()).padStart(2, '0') + '_' + 
+                    String(now.getHours()).padStart(2, '0') + '-' + 
+                    String(now.getMinutes()).padStart(2, '0') + '-' + 
+                    String(now.getSeconds()).padStart(2, '0');
+
+    // --- 1. ТВОЯ ЛОГИКА ОПРЕДЕЛЕНИЯ ТИПА ---
+    if (fType === "photo") {
+      url = attach.photo.sizes.sort((a,b) => b.width - a.width)[0].url;
+      name = `Photo_${dateStr}.jpg`;
+      mimeType = "image/jpeg";
+    } 
+    else if (fType === "doc") {
+      url = attach.doc.url;
+      name = attach.doc.title || `Doc_${dateStr}.${attach.doc.ext}`;
+      dbFileType = "document";
+      const ext = (attach.doc.ext || "").toLowerCase();
+      if (ext === "pdf") mimeType = "application/pdf";
+      else if (ext === "png") mimeType = "image/png";
+      else if (["jpg","jpeg"].includes(ext)) mimeType = "image/jpeg";
+      else mimeType = "text/plain";
+    }
+    else if (fType === "audio") {
+      url = attach.audio.url;
+      const artist = (attach.audio.artist || "Unknown").replace(/[\\/:*?"<>|]/g, "");
+      const title = (attach.audio.title || "Track").replace(/[\\/:*?"<>|]/g, "");
+      name = `${artist} - ${title}.mp3`;
+      dbFileType = "audio";
+      mimeType = "audio/mpeg";
+    } 
+    else if (fType === "video") {
+      const v = attach.video;
+      let vFiles = v.files || {};
+      url = vFiles.mp4_1080 || vFiles.mp4_720 || vFiles.mp4_480 || vFiles.mp4_360 || vFiles.src;
+      // HTML-плеер тут пропускаем, так как нам нужен прямой поток для "трубы"
+      if (!url) return false;
+      name = (v.title || `Video_${dateStr}`).replace(/[\\/:*?"<>|]/g, "") + ".mp4";
+      dbFileType = "video";
+      mimeType = "video/mp4";
+    }
+    else if (fType === "video_message") {
+      url = attach.video_message.video_url;
+      name = `VideoNote_${dateStr}.mp4`;
+      dbFileType = "video";
+      mimeType = "video/mp4";
+    }
+    else if (fType === "audio_message") {
+      url = attach.audio_message.link_mp3 || attach.audio_message.link_ogg;
+      name = `Voice_${dateStr}.mp3`;
+      dbFileType = "audio_message";
+      mimeType = "audio/mpeg";
+    }
+
+    if (!url) return false;
+
+    // --- 2. СКАЧИВАНИЕ ПОТОКА ---
+    const fileRes = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0...', 'Accept': '*/*' }
+    });
+    if (!fileRes.ok || !fileRes.body) return false;
+
+    // --- 3. ЗАПИСЬ В БАЗУ (D1) ---
+    const vkId = String(attach[fType]?.id || Date.now());
+    await env.FILES_DB.prepare(
+      "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).bind(String(userId), name, vkId, dbFileType, userData.provider, userData.folderId || "Root", Date.now()).run();
+
+    // --- 4. ЗАГРУЗКА В ОБЛАКО (РЕЖИМ ТРУБЫ) ---
+    let uploadOk = false;
+    const stream = fileRes.body;
+
+    if (userData.provider === "google") {
+      // Google требует multipart или resumable для стримов, упростим до простого media upload для мелких
+      const up = await fetch(`https://www.googleapis.com/upload/drive/v3/files?uploadType=media`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${userData.access_token}`,
+          'Content-Type': mimeType 
+        },
+        body: stream
+      });
+      uploadOk = up.ok;
+    } 
+    else if (userData.provider === "yandex") {
+      const getUrl = `https://cloud-api.yandex.net/v1/disk/resources/upload?path=${encodeURIComponent((userData.folderId || "") + "/" + name)}&overwrite=true`;
+      const res = await fetch(getUrl, { headers: { 'Authorization': `OAuth ${userData.access_token}` } });
+      const { href } = await res.json();
+      if (href) {
+        // @ts-ignore
+        const up = await fetch(href, { method: 'PUT', body: stream, duplex: 'half' });
+        uploadOk = up.ok;
+      }
+    } 
+    else if (userData.provider === "webdav") {
+      const up = await fetch(`${userData.webdav_host}/${name}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': 'Basic ' + btoa(`${userData.webdav_user}:${userData.webdav_pass}`),
+          'Content-Type': mimeType
+        },
+        body: stream,
+        // @ts-ignore
+        duplex: 'half'
+      });
+      uploadOk = up.ok;
+    }
+    else if (userData.provider === "dropbox") {
+      const up = await fetch('https://content.dropboxapi.com/2/files/upload', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${userData.access_token}`,
+          'Dropbox-API-Arg': JSON.stringify({ path: (userData.folderId || "") + "/" + name, mode: "overwrite" }),
+          'Content-Type': "application/octet-stream"
+        },
+        body: stream,
+        // @ts-ignore
+        duplex: 'half'
+      });
+      uploadOk = up.ok;
+    }
+    else if (userData.provider === "mailru") {
+      // Для Mail.ru используем твой метод, если он поддерживает стрим, иначе — только через Buffer
+      // Здесь оставлен WebDAV-совместимый вызов
+      const up = await fetch(`https://webdav.cloud.mail.ru/${name}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': 'Basic ' + btoa(`${userData.mailru_user}:${userData.mailru_pass}`),
+          'Content-Type': mimeType
+        },
+        body: stream,
+        // @ts-ignore
+        duplex: 'half'
+      });
+      uploadOk = up.ok;
+    }
+
+    if (uploadOk) {
+      await sendVKMessage(chatId, `✅ Сохранен: ${name}`, env).catch(() => {});
+    }
+    
+    return uploadOk;
+  } catch (err) {
+    console.error("Stream Error:", err);
     return false;
   }
 }
@@ -2675,8 +3945,7 @@ async function handleYandexCallback(req, env) {
     // СООБЩЕНИЕ 2: Список папок (отдельным вызовом)
     // Используем setTimeout или просто await, так как это JS в Воркере
     await showFolderSelector(uid, userData, env);
-
-    return new Response("Успешно! Возвращайся в Telegram.");
+    return renderSuccessPage();
   }
   return new Response("Error", { status: 400 });
 }
@@ -2788,7 +4057,7 @@ async function handleGoogleCallback(req, env) {
     };
     await env.USER_DB.put(`user:${uid}`, JSON.stringify(userToSave));
     await sendMessage(uid, "✅ <b>Google Drive подключен!</b>", null, env);
-    return new Response("Успешно! Возвращайся в Telegram.");
+    return renderSuccessPage();
   }
   return new Response("Error");
 }
@@ -2831,20 +4100,27 @@ async function uploadToGoogleFromArrayBuffer(arrayBuffer, name, token, folderId 
 }
 
 async function listGoogleFolders(token) {
-  // Добавляем encodeURIComponent для безопасности запроса
-  const query = encodeURIComponent("mimeType='application/vnd.google-apps.folder' and trashed=false");
-  const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id, name)`;
-  
-  const res = await fetch(url, {
-    headers: { "Authorization": `Bearer ${token}` }
-  });
+  try {
+    // Ищем только папки, не в корзине. Параметр spaces=drive обязателен для некоторых типов аккаунтов.
+    const q = encodeURIComponent("mimeType='application/vnd.google-apps.folder' and trashed=false");
+    const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=30&spaces=drive`;
 
-  if (res.status === 401) {
-      throw new Error("TOKEN_EXPIRED"); // Сигнал для системы обновить токен
+    const res = await fetch(url, {
+      headers: { "Authorization": `Bearer ${token}` }
+    });
+
+    if (!res.ok) {
+      const errBody = await res.text();
+      console.error("DRIVE_ERROR:", errBody);
+      return [];
+    }
+
+    const data = await res.json();
+    // Если папок реально нет, вернет [], если есть — массив объектов
+    return (data.files || []).map(f => ({ id: f.id, name: f.name }));
+  } catch (e) {
+    return [];
   }
-
-  const data = await res.json();
-  return data.files || []; // Возвращает массив объектов [{id, name}, ...]
 }
 
 async function createGoogleFolder(folderName, token, parentId = "root") {
@@ -2965,7 +4241,60 @@ async function uploadWebDAVFromArrayBuffer(arrayBuffer, fileName, userData, env)
   return res.status === 201 || res.status === 204;
 }
 
-async function createWebDAVFolder(folderName, userData) {
+async function listWebDavFolders(user) {
+  const host = user.webdav_host.startsWith('http') ? user.webdav_host : `https://${user.webdav_host}`;
+  
+  // Запрос PROPFIND для получения списка файлов и папок
+  // Depth: 1 означает "только в текущей папке"
+  const response = await fetch(host, {
+    method: 'PROPFIND',
+    headers: {
+      'Authorization': 'Basic ' + btoa(`${user.webdav_user}:${user.webdav_pass}`),
+      'Depth': '1',
+      'Content-Type': 'application/xml; charset=utf-8'
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error('WebDAV server error: ' + response.status);
+  }
+
+  const xml = await response.text();
+  
+  // Парсим XML вручную (так как воркеры не имеют полноценного DOMParser)
+  // Ищем теги <d:response>, где внутри есть <d:collection />
+  const folders = [];
+  const responses = xml.split('</d:response>');
+
+  responses.forEach(res => {
+    // Проверяем, что это папка (есть тег collection)
+    if (res.includes('<d:collection') || res.includes('<collection')) {
+      // Вытаскиваем имя папки из <d:href>
+      const hrefMatch = res.match(/<d:href>([^<]+)<\/d:href>/) || res.match(/<href>([^<]+)<\/href>/);
+      if (hrefMatch) {
+        let path = hrefMatch[1];
+        // Декодируем URL (превращаем %20 в пробелы и т.д.)
+        path = decodeURIComponent(path);
+        
+        // Отрезаем полный путь, оставляя только имя папки
+        const parts = path.split('/').filter(Boolean);
+        const name = parts[parts.length - 1] || "/";
+        
+        // Не добавляем корневую папку в список выбора (чтобы не дублировать)
+        if (name !== user.webdav_host.split('/').pop()) {
+          folders.push({
+            name: name,
+            path: path
+          });
+        }
+      }
+    }
+  });
+
+  return folders;
+}
+
+async function createWebDavFolder(folderName, userData) {
   const url = `${userData.host}/${encodeURIComponent(folderName)}/`; // ← Обязательно с /
   const auth = btoa(`${userData.user}:${userData.pass}`);
 
@@ -3006,7 +4335,7 @@ async function handleDropboxCallback(request, env) {
       refresh_token: data.account_id // У Dropbox свои нюансы с рефрешем, для начала хватит этого
     }));
     await sendMessage(userId, "🎉 <b>Dropbox успешно подключен!</b>", null, env);
-    return new Response("OK! Go back to Telegram.");
+    return renderSuccessPage();
   }
   return new Response("Error", { status: 400 });
 }
@@ -3035,29 +4364,29 @@ async function listDropboxFolders(token) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        path: "", // Пустое значение для корня Full Dropbox
-        recursive: false,
-        include_media_info: false,
-        include_deleted: false
+        path: "", // Попробуй сначала так, если не сработает - замени на "/"
+        recursive: false
       })
     });
 
+    const data = await res.json();
+
     if (!res.ok) {
-      const errorData = await res.json();
-      console.error("Dropbox list error:", errorData);
+      // Это поможет нам понять, что не так
+      console.error("Dropbox Error:", data);
       return [];
     }
 
-    const data = await res.json();
-    // Фильтруем только записи с тегом "folder"
-    return (data.entries || [])
+    // Dropbox возвращает папки с тегом "folder"
+    const folders = (data.entries || [])
       .filter(item => item[".tag"] === "folder")
       .map(item => ({ 
-        id: item.name, // Для Dropbox используем имя как ID
+        id: item.path_display, 
         name: item.name 
       }));
+
+    return folders;
   } catch (e) {
-    console.error("Dropbox fetch error:", e);
     return [];
   }
 }
@@ -4093,8 +5422,8 @@ const AI_MODELS = {
   TEXT_TO_TEXT_GEMINI: { 
     SERVICE: 'GEMINI', 
     FUNCTION: callGeminiChat, 
-    //MODEL: 'gemini-2.5-flash',
-    MODEL: 'gemini-2.5-flash-lite', 
+    MODEL: 'gemini-2.5-flash',
+    //MODEL: 'gemini-2.5-flash-lite', 
     API_KEY: 'GEMINI_API_KEY', 
     BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
   },
@@ -4102,7 +5431,7 @@ const AI_MODELS = {
   AUDIO_TO_TEXT_GEMINI: { 
     SERVICE: 'GEMINI', 
     FUNCTION: callGeminiSpeechToText,
-    //'nj dct bpvtytybz&MODEL: 'gemini-2.5-flash',
+    //MODEL: 'gemini-2.5-flash',
     MODEL: 'gemini-2.5-flash-lite', 
     API_KEY: 'GEMINI_API_KEY', 
     BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
