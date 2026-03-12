@@ -10,7 +10,7 @@ Telegram-бот для автоматической загрузки фото и
 Скрытая функция: Команда /search для поиска и возможность достать файлы с хранилки.
 */
 // Глобальные константы
-const version = "v2.4.7 от 28.01.2026"; // актуальная версия
+const version = "v2.4.8 от 28.01.2026"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -91,7 +91,8 @@ export default {
         const vkUserId = url.searchParams.get("userId");
         const nameFromUrl = url.searchParams.get("name");   // Получаем имя
         const photoFromUrl = url.searchParams.get("photo"); // Получаем фото
-    
+        const friendOf = await env.USER_DB.get("friend_of:" + state);
+
         // 1. Достаем юзера
         const kvData = await env.USER_DB.get(`user:${vkUserId}`);
         let user = kvData ? JSON.parse(kvData) : {};
@@ -128,6 +129,7 @@ export default {
     
         return new Response(JSON.stringify({
             isAdmin: isAdmin,
+            friendId: friendOf,
             isConnected: isConnected,
             provider: user.provider || null,
             providerName: providerName,
@@ -320,8 +322,8 @@ export default {
           "Access-Control-Allow-Origin": "*" 
         };
       
-        if (uId && fId && uId !== fId) {
-          // Сохраняем: кто (uId) подключился к кому (fId)
+        // УБРАЛИ ЗАЩИТУ (убрали && uId !== fId)
+        if (uId && fId) { 
           await env.USER_DB.put("friend_of:" + uId, fId);
           return new Response(JSON.stringify({ success: true }), { headers });
         }
@@ -2144,6 +2146,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
     #send-ai-btn { border-radius: 20px !important; padding: 0 20px; height: 40px; background-color: #4986cc; color: white; border: none; cursor: pointer; font-weight: 500; }
     .loading-msg { font-style: italic; color: #888; font-size: 13px; margin-bottom: 5px; display: flex; align-items: center; gap: 5px; }
     @keyframes slideIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    #ref-banner button:hover { background: #3b6da5 !important; } #ref-banner b { font-weight: bold; }
   </style>
 </head>
 <body>
@@ -2239,7 +2242,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
       </div>
     </div>
   </div>
-
+  <div id="inviterZone"></div>
   <div class="upload-container" id="dropZone" style="margin: 10px; padding: 15px; border: 2px dashed #3f8ae0; border-radius: 12px; background: #ebf2fa; text-align: center; transition: all 0.2s;">
 
     <div id="ai-chat-container">
@@ -2284,7 +2287,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
     <button class="btn-s" onclick="showCustomWD()">
       <img src="${cdn}/network-drive.png"> Свой FTP/SFTP/WebDAV
     </button>
-    <button class="btn-s" onclick="openFriendsStorage()">🤝 Подключить Хранилку друга</button>
+    <button class="btn-s" onclick="openFriendsStorage()">🤝 Подключить Хранилку по ссылке</button>
     <button class="btn-s" style="margin-top: 12px; background: #2688eb; color: #fff; border: none;" onclick="goToChat()">💬 Открыть чат Хранилку</button>
   </div>
 
@@ -2480,7 +2483,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
       html += '<button class="btn-s" onclick="showCustomWD()">';
       html += '<img src="' + UI_CDN + '/network-drive.png"> Свой FTP/SFTP/WebDAV</button>';
       // Друг
-      html += '<button class="btn-s" onclick="openFriendsStorage()">🤝 Подключить Хранилку друга</button>';
+      html += '<button class="btn-s" onclick="openFriendsStorage()">🤝 Подключить Хранилку по ссылке</button>';
       // Чат
       html += '<button class="btn-s" style="margin-top: 12px; background: #2688eb; color: #fff; border: none;" onclick="goToChat()">💬 Открыть чат Хранилку</button>';
       container.innerHTML = html;
@@ -2687,16 +2690,6 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
       el.style.display = isVisible ? 'none' : 'block';
       if(!isVisible) el.scrollIntoView({behavior: 'smooth'});
     }
-
-    async function checkReferral() {
-      const urlParams = new URLSearchParams(window.location.search);
-      const hashParams = new URLSearchParams((window.location.hash || '').replace('#', '?'));
-      const refId = urlParams.get('ref') || hashParams.get('ref');
-      if (refId && refId !== userId) {
-        try { fetch('/api/connect-friend?vk_user_id=' + userId + '&friend_id=' + refId); } catch(e) {}
-      }
-    }
-    checkReferral();
 
     function goToChat() {
       vkBridge.send("VKWebAppOpenExternalLink", { "url": "https://vk.com/write-" + groupId })
@@ -3566,36 +3559,195 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
       }
     }
 
-    async function openFriendsStorage() {
-      const link = prompt("Вставьте ссылку друга (из раздела /share):");
-      if (!link) return;
+    // Проверка реферала при загрузке страницы
+    async function checkReferral() {
+      try {
+        const urlParameters = new URLSearchParams(window.location.search);
+        const hashParameters = new URLSearchParams((window.location.hash || '').replace('#', '?'));
+        
+        // Собираем потенциальный ID из всех возможных источников
+        let rawReferrer = urlParameters.get('ref') || hashParameters.get('ref') || urlParameters.get('vk_ref');
+        
+        if (!rawReferrer) return; // Если параметра нет вообще — выходим
 
-      // Извлекаем ID: ищем цифры после ref= или просто забираем все цифры из строки
-      // Используем [0-9], чтобы избежать проблем с экранированием слэшей
-      let fId = "";
-      const match = link.match(/ref[=_]([0-9]+)/);
-      if (match && match[1]) {
-        fId = match[1];
-      } else {
-        fId = link.replace(/[^0-9]/g, ""); // Оставляем только цифры
-      }
+        // Очищаем от префиксов
+        let referrerId = String(rawReferrer).replace('ref_', '').trim();
 
-      if (fId && fId.length > 3) {
-        try {
-          const res = await fetch("?action=connect-friend&state=" + userId + "&friend_id=" + fId);
-          const data = await res.json();
-          if (data.success) {
-            uiReload(); // Используем твой релоад вместо системного
-          } else {
-            alert("Ошибка: " + (data.error || "не удалось подключиться"));
-          }
-        } catch (e) {
-          alert("Сбой сети или неверный ID");
+        // ФИЛЬТРАЦИЯ: баннер не покажется, если:
+        // - В ref передана системная строка (меню группы, реклама и т.д.)
+        // - Это твой собственный ID
+        // - ID отрицательный (метка сообщества)
+        const systemTags = ['group_menu', 'none', 'ads', 'snippet_im', 'catalog', 'story', 'left_nav', 'right_nav'];
+        const isSystemTag = systemTags.includes(referrerId);
+        //const isYourself = referrerId === String(userId);
+        const isGroup = referrerId.startsWith('-');
+        
+        // Самая важная проверка: если это не текстовый код (как из ТГ/чата), 
+        // то это должен быть либо чистый числовой ID, либо мы это игнорируем
+        // (Проверка на !isNaN помогает отсечь мусор вроде "group_menu")
+        const isNumeric = !isNaN(referrerId);
+        const isShortCode = referrerId.length >= 8; // Твои инвайты обычно длинные строки
+
+        //if (isSystemTag || isYourself || isGroup || (!isNumeric && !isShortCode)) {
+        if (isSystemTag || isGroup || (!isNumeric && !isShortCode)) {
+          console.log("Вход без приглашения друга или системная метка:", referrerId);
+          return;
         }
-      } else {
-        alert("Не удалось распознать ID друга в ссылке");
+
+        // Запрашиваем данные только если прошли фильтры
+        const [myStatusResponse, friendStatusResponse] = await Promise.all([
+          fetch('?action=get-status&userId=' + userId),
+          fetch('?action=get-status&userId=' + referrerId)
+        ]);
+        
+        const myData = await myStatusResponse.json();
+        const friendData = await friendStatusResponse.json();
+        
+        // Показываем баннер, только если в базе записан ДРУГОЙ ID или пусто
+        if (myData.friendId !== referrerId) {
+          renderInviteBanner(referrerId, friendData.userName, friendData.userPhoto);
+        }
+      } catch (error) {
+        console.error("Ошибка при обработке реферала:", error);
       }
     }
+
+    // Отрисовка баннера приглашения
+    function renderInviteBanner(friendId, friendName, friendPhoto) {
+      if (sessionStorage.getItem('hideInviterBanner') === 'true') return;
+    
+      const zone = document.getElementById('inviterZone');
+      if (!zone || document.getElementById('inviter-panel')) return;
+      
+      const panel = document.createElement('div');
+      panel.id = 'inviter-panel';
+      
+      // Добавили transition для плавной анимации возврата/улета
+      panel.style.cssText = "position:relative; margin:10px 0; padding:15px; background:#f2faf2; border-radius:12px; border:2px dashed #4caf50; text-align:center; display:flex; flex-direction:column; align-items:center; gap:12px; transition: transform 0.2s ease-out, opacity 0.2s ease-out; touch-action: pan-y; overflow: hidden;";
+      
+      const photoUrl = friendPhoto || 'https://vk.com/images/camera_50.png';
+      const displayName = friendName || ('ID ' + friendId);
+    
+      panel.innerHTML = 
+        '<div id="close-inviter-banner" style="position:absolute; top:8px; right:12px; cursor:pointer; color:#4caf50; font-size:22px; line-height:1; opacity:0.5; padding: 5px;">&times;</div>' +
+        '<div style="display:flex; align-items:center; gap:12px; pointer-events: none;">' +
+          '<img src="' + photoUrl + '" style="width:45px; height:45px; border-radius:50%; border:2px solid #4caf50; object-fit:cover;">' +
+          '<div style="text-align:left;">' +
+            '<span style="font-size:13px; color:#558b2f; display:block;">Вас пригласил друг:</span>' +
+            '<b style="font-weight:bold; font-size:16px; color:#1b5e20;">' + displayName + '</b>' +
+          '</div>' +
+        '</div>' +
+        '<button id="confirm-ref-button" style="background:#4caf50; color:white; border:none; padding:12px 20px; border-radius:25px; cursor:pointer; font-weight:bold; box-shadow:0 3px 8px rgba(76,175,80,0.3); width:100%; transition:0.2s;">' +
+        '🤝 Подключить Хранилку друга</button>';
+      
+      zone.appendChild(panel);
+    
+      // --- ЛОГИКА СВАЙПА ---
+      let startX = 0;
+      let currentX = 0;
+      const threshold = 100; // Расстояние в пикселях для удаления
+    
+      panel.addEventListener('touchstart', (e) => {
+        startX = e.touches[0].clientX;
+        panel.style.transition = 'none'; // Отключаем анимацию пока тянем
+      }, {passive: true});
+    
+      panel.addEventListener('touchmove', (e) => {
+        currentX = e.touches[0].clientX - startX;
+        // Разрешаем тянуть только в стороны
+        if (Math.abs(currentX) > 10) {
+          panel.style.transform = 'translateX(' + currentX + 'px) rotate(' + (currentX / 20) + 'deg)';
+          panel.style.opacity = 1 - (Math.abs(currentX) / 300);
+        }
+      }, {passive: true});
+    
+      panel.addEventListener('touchend', () => {
+        panel.style.transition = 'transform 0.3s ease-out, opacity 0.3s ease-out';
+        
+        if (Math.abs(currentX) > threshold) {
+          // Улетает влево или вправо
+          const direction = currentX > 0 ? 500 : -500;
+          panel.style.transform = 'translateX(' + direction + 'px)';
+          panel.style.opacity = '0';
+          setTimeout(() => {
+            panel.remove();
+            sessionStorage.setItem('hideInviterBanner', 'true');
+          }, 300);
+        } else {
+          // Возвращается на место
+          panel.style.transform = 'translateX(0px) rotate(0deg)';
+          panel.style.opacity = '1';
+        }
+        currentX = 0;
+      });
+    
+      // Кнопки по клику (для ПК и обычного нажатия)
+      document.getElementById('close-inviter-banner').onclick = () => {
+        panel.style.opacity = '0';
+        setTimeout(() => { panel.remove(); sessionStorage.setItem('hideInviterBanner', 'true'); }, 200);
+      };
+      
+      document.getElementById('confirm-ref-button').onclick = () => confirmFriendConnection(friendId);
+    }
+
+    // Функция записи связи в базу
+    async function confirmFriendConnection(friendId) {
+      try {
+        const response = await fetch('/api/connect-friend?vk_user_id=' + userId + '&friend_id=' + friendId);
+        const result = await response.json();
+        
+        if (result.success) {
+          const panel = document.getElementById('inviter-panel');
+          if (panel) {
+            panel.innerHTML = '<b style="color:#1a5c1a;font-weight:bold;">✅ Хранилка друга успешно подключена!</b>';
+          }
+          // Перезагружаем через секунду, чтобы интерфейс обновился
+          setTimeout(function() {
+            location.reload();
+          }, 1500);
+        }
+      } catch (error) {
+        alert("Не удалось подключиться к другу");
+      }
+    }
+
+    // Функция для ручного ввода ссылки (та самая кнопка внизу)
+    async function openFriendsStorage() {
+      const inputLink = prompt("Вставьте ссылку друга:");
+      if (!inputLink) return;
+    
+      let extractedCode = "";
+    
+      // 1. Ищем текстовый код (ТГ или ВК-чат)
+      const codeMatch = inputLink.match(/ref_([a-zA-Z0-9_-]+)/);
+      
+      if (codeMatch && codeMatch[1]) {
+        extractedCode = codeMatch[1];
+      } else {
+        // 2. Ищем цифровой ID (ВК приложение #ref=123)
+        // Специально ищем после #ref= или ?ref=
+        const idMatch = inputLink.match(/(?:ref|start)[=_]([0-9]+)/) || inputLink.match(/#ref=([0-9]+)/);
+        if (idMatch && idMatch[1]) {
+          extractedCode = idMatch[1];
+        }
+      }
+    
+      if (extractedCode) {
+        // Проверяем, чтобы это не был ID твоего бота (235249123)
+        if (extractedCode === "235249123") {
+          alert("Это ID бота, а не друга!");
+          return;
+        }
+        confirmFriendConnection(extractedCode);
+      } else {
+        alert("Код приглашения не найден в ссылке");
+      }
+    }
+
+    // Запуск при полной загрузке страницы
+    window.addEventListener('DOMContentLoaded', function() {
+      checkReferral();
+    });
   </script>
 </body>
 </html>`;
