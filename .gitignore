@@ -1,11 +1,18 @@
-# Файлы с секретами и зависимостями
-index.js
-storage-gateway.yml
+# Node
 node_modules
+npm-debug.log
+
+# Env
+.env
+
+# Logs
+*.log
+
+# Mac
+.DS_Store
+
+# Gateway
+storage-gateway.yml
 
 # версии
 versions
-
-# Системные файлы
-.DS_Store
-npm-debug.log
