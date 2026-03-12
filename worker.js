@@ -10,7 +10,7 @@ Telegram-бот для автоматической загрузки фото и
 Скрытая функция: Команда /search для поиска и возможность достать файлы с хранилки.
 */
 // Глобальные константы
-const version = "v2.3.8 от 15.01.2026"; // актуальная версия
+const version = "v2.4.0 от 17.01.2026"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -20,26 +20,46 @@ export default {
     const url = new URL(request.url);
     const hostname = url.hostname;
     const state = url.searchParams.get("state"); // Это наш userId
+    
+    // --- ОБРАБОТКА CORS (OPTIONS) ---
+    const corsHeaders = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Content-Length, Authorization, Accept, Origin, x-vk-user-id, x-file-name, x-file-size",
+      "Access-Control-Expose-Headers": "Content-Length",
+      "Access-Control-Max-Age": "86400",
+    };
 
+    // Ответ на предварительный запрос браузера
+    if (request.method === "OPTIONS") {
+      return new Response(null, { headers: corsHeaders });
+    }
+
+    // --- ЗАГРУЗКА ФАЙЛОВ ИЗ MINI APP ---
+    if (url.pathname === "/api/upload-from-vk" && request.method === "POST") {
+      const vkUserId = request.headers.get("x-vk-user-id");
+      return handleVkUpload(request, env, ctx, vkUserId, corsHeaders); 
+    }
+
+    if (url.pathname === "/api/upload-buffer" && request.method === "POST") {
+      return handleVkUploadArrayBuffer(request, env, ctx); 
+    }
+
+    if (url.pathname === "/api/get-upload-link" && request.method === "POST") {
+      return handleGetUploadLink(request, env);
+    }
+    
+    if (url.pathname === "/api/confirm-upload" && request.method === "POST") {
+        return handleConfirmUpload(request, env);
+    }
+    
     // ЧИТАЕМ request ТУТ
     let body = null;
     if (request.method === "POST") {
       try { body = await request.json();
       } catch (e) { body = {};}}
 
-    // --- ОБРАБОТКА CORS (OPTIONS) ---
-    if (request.method === "OPTIONS") {
-      return new Response(null, {
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type",
-          "Access-Control-Max-Age": "86400",
-        }
-      });
-    }
-
-    // --- 1. ВЕБ-ИНТЕРФЕЙС И МИНИ-ПРИЛОЖЕНИЕ VK ---
+    // --- ВЕБ-ИНТЕРФЕЙС И МИНИ-ПРИЛОЖЕНИЕ VK ---
     if (request.method === "GET") {
       // 1. Яндекс Диск
       if (url.pathname === "/auth/yandex") {
@@ -70,6 +90,7 @@ export default {
         let providerName = "Не настроено";
         if (user.provider === 'yandex') providerName = "Яндекс Диск";
         if (user.provider === 'google') providerName = "Google Drive";
+        if (user.provider === 'dropbox') providerName = "Dropbox";
         if (user.provider === 'webdav') providerName = user.webdav_host?.includes('mail.ru') ? "Mail.ru" : "WebDAV";
       
         return new Response(JSON.stringify({
@@ -108,6 +129,37 @@ export default {
           .filter(k => k.startsWith(type))
           .map(k => ({ id: k, name: AI_MODELS[k].MODEL }));
         return new Response(JSON.stringify({ current, models }), { headers: { "Content-Type": "application/json" } });
+      }
+
+      if (url.pathname === "/api/vk/get-upload-server") {
+        const corsHeaders = {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
+        };
+      
+        if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+      
+        try {
+          const vkUserId = url.searchParams.get("vk_user_id");
+          const userData = await env.USER_DB.get(`user:${vkUserId}`, { type: "json" });
+      
+          if (!userData) {
+            return new Response(JSON.stringify({ error: "Сначала выберите диск в боте!" }), { status: 403, headers: corsHeaders });
+          }
+      
+          // Вызываем метод именно для сообщений, как ты и написал
+          const vkRes = await fetch(`https://api.vk.com/method/photos.getMessagesUploadServer?v=5.199&access_token=${env.VK_GROUP_TOKEN}&peer_id=${vkUserId}`);
+          const vkData = await vkRes.json();
+      
+          if (vkData.error) throw new Error(vkData.error.error_msg);
+      
+          return new Response(JSON.stringify({ upload_url: vkData.response.upload_url }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        } catch (e) {
+          return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+        }
       }
 
       if (url.pathname === "/api/get-quota") {
@@ -389,6 +441,7 @@ export default {
               }
           });
         }
+
         if (url.pathname === "/api/disconnect") {
           const { userId } = body;
           // Просто удаляем данные из KV
@@ -495,6 +548,7 @@ async function sendVKMessageWithKeyboard(peerId, text, env, kb = null) {
   return await response.json();
 }
 
+// @ts-ignore
 function getStartKeyboardVK(userId, hostname, env, inviteData = null) {
   let buttons = [];
   
@@ -545,6 +599,7 @@ function getStartKeyboardVK(userId, hostname, env, inviteData = null) {
 * @param {Object} env - Окружение.
 * @param {string} userId - ID пользователя.
 */
+// @ts-ignore
 async function renderSearchPageVK(searchKey, offset, env, userId) {
   const dataRaw = await env.USER_DB.get(searchKey);
   if (!dataRaw) return { text: "❌ Поиск устарел или не найден.", kb: null };
@@ -876,6 +931,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     const list = await env.USER_DB.list({ prefix: "user:" });
     const authIds = list.keys.map(k => k.name.split(":")[1]);
     const allowedIds = await env.USER_DB.get("admin:allowed_ids", { type: "json" }) || [];
+    // @ts-ignore
     const allUniqueIds = [...new Set([...authIds, ...allowedIds])];
   
     const adminMsg = `⚙️ <b>Панель администратора</b>\n\n` +
@@ -1214,6 +1270,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
  */
 async function handleVK(body, env, hostname, ctx) {
   let chatId = null;
+  // @ts-ignore
   const VK_APP_ID = env.VK_APP_ID
   const VK_GROUP_ID = env.VK_GROUP_ID
   try {
@@ -1849,7 +1906,27 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     @keyframes ptr-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     body { overscroll-behavior-y: contain; } /* Важно: отключает системный рефреш браузера */
-  </style>
+    /* Контейнер (фон всей дорожки) */
+    .progress-bar {
+        width: 100%;
+        height: 8px;           /* Обязательно задай высоту */
+        background: #e0e0e0;   /* Светло-серый цвет дорожки */
+        border-radius: 4px;
+        margin-top: 5px;
+        overflow: hidden;      /* Чтобы заливка не вылезала за края */
+    }
+    /* Сама ползущая полоска */
+    .progress-fill {
+        height: 100%;
+        width: 0%;             /* Начальное состояние */
+        background: #007bff;   /* Сделай её ярко-синей или зеленой */
+        transition: width 0.2s ease; /* Чтобы она двигалась плавно, а не рывками */
+    }
+    /* Цвет при успехе */
+    [data-status="done"] .progress-fill { background: #28a745; }
+    /* Цвет при ошибке */
+    [data-status="error"] .progress-fill { background: #dc3545; }
+    </style>
 </head>
 <body>
   <div id="pull-to-refresh" style="position:fixed; top:0; left:0; width:100%; height:80px; display:flex; flex-direction:column; align-items:center; justify-content:center; background:#ebedf0; z-index:1;">
@@ -1925,6 +2002,22 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
       ${isConnected ? `<span class="blue-link" onclick="disconnect()" style="color:#ff3347;">/disconnect</span> — 🔌 Отключить диск<br>` : ''}
     </div>
 
+    <div class="upload-container" id="dropZone" style="margin: 10px; padding: 15px; border: 2px dashed #3f8ae0; border-radius: 12px; background: #ebf2fa; text-align: center; transition: all 0.2s;">
+    <input type="file" id="vkFileInput" style="display: none;" onchange="uploadFileFromVK(this)" multiple>
+    <button class="btn-s" onclick="document.getElementById('vkFileInput').click()" id="uploadBtn" style="background: #2688eb; color: #fff; border: none; width: 100%; font-weight: 500; cursor: pointer;">
+        📁 Выбрать файл для загрузки
+    </button>
+    <div id="uploadProgress" style="margin-top: 10px; font-size: 13px; color: #555; display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span id="progressText">Загрузка...</span>
+            <span id="cancelBtn" style="color: #999; cursor: pointer; font-size: 11px; text-decoration: underline; display: none;" onclick="cancelUpload()">отмена</span>
+        </div>
+        <div style="width: 100%; background: #dce1e6; height: 4px; border-radius: 2px; margin-top: 5px;">
+            <div id="progressBar" style="width: 0%; background: #2688eb; height: 100%; border-radius: 2px; transition: width 0.3s;"></div>
+        </div>
+    </div>
+  </div>
+
   <div id="authButtons">
     <button class="btn-s ${provider === 'yandex' ? 'active' : ''}" onclick="openAuthLink('/auth/yandex')">
       <img src="${cdn}/YandexDisk.png"> Яндекс Диск ${provider === 'yandex' ? '<span class="check-mark">✅</span>' : ''}
@@ -1977,41 +2070,30 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
   <div class="footer">Версия: ${version} | ID: ${userId}</div>
 
   <script>
-    // 1. В самом начале скрипта Mini App
-    const urlParams = new URLSearchParams(window.location.search);
-    const platform = urlParams.get('vk_platform');
-
-    // Определяем окружение
-    const isMobileWeb = platform === 'mobile_web' || platform === 'mvk_external';
-    const isNativeApp = ['mobile_android', 'mobile_iphone', 'mobile_ipad'].includes(platform);
+    // Сначала инициализируем Bridge
     vkBridge.send("VKWebAppInit");
-
+    // Определяем окружение
+    function getLaunchParam(name) {
+      const params = new URLSearchParams(window.location.search);
+      return params.get(name);
+    }
     // Проверяем метку при каждом фокусе на окно
     window.addEventListener("focus", function() {
       if (localStorage.getItem('awaiting_auth') === 'true') {
         localStorage.removeItem('awaiting_auth'); // Сразу удаляем, чтобы не рефрешить вечно
-        
         // Даем 1.5 секунды бэкенду записать токены и делаем рефреш
         setTimeout(() => {
           uiReload(); 
         }, 1500);
       }
     });
-    // Рефреш на мобильном, когда фокус вернётся на Mini App
-    document.addEventListener("visibilitychange", function() {
-      if (document.visibilityState === 'visible') {
-        localStorage.removeItem('awaiting_auth'); // Сразу удаляем, чтобы не рефрешить вечно
-        // Даем 1.5 секунды бэкенду записать токены и делаем рефреш
-        setTimeout(() => {
-          uiReload(); 
-        }, 1500);
-      }
-    });
+
     const userId = "${userId}";
     const groupId = "${groupId}";
     const appId = "${appId}";
     const allAiModels = ${JSON.stringify(AI_MODELS)};
     let foldersCache = null;
+    
 
     // Функция обновления стягиванием на мобилке
     (function() {
@@ -2065,9 +2147,8 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
           ptrLoader.style.display = "block";
     
           // Вызываем обновление
-          if (typeof uiReload === "function") {
-            uiReload();
-          }
+          document.getElementById('reloadIcon').classList.add('loading');
+          location.reload();
     
           // Возвращаем всё назад
           setTimeout(function() {
@@ -2082,6 +2163,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
 
     function uiReload() {
       document.getElementById('reloadIcon').classList.add('loading');
+      localStorage.removeItem('awaiting_auth'); // Сразу удаляем, чтобы не рефрешить вечно
       location.reload();
     }
 
@@ -2141,44 +2223,29 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
     }
 
     function openAuthLink(path) {
-      // 1. Сначала инициализируем Bridge, если он есть
-      if (window.vkBridge) {
-        vkBridge.send("VKWebAppInit");
-      }
+      // Прямое получение платформы и UID здесь и сейчас
+      const platform = getLaunchParam('vk_platform') || '';
+      const userId = getLaunchParam('vk_user_id') || '';
 
-      // 2. Вычисляем userId прямо здесь (безопасно)
-      const params = new URLSearchParams(window.location.search);
-      const currentUid = params.get('vk_user_id') || (typeof userId !== 'undefined' ? userId : '');
-      const platform = params.get('vk_platform') || '';
+      const isMobileWeb = platform === 'mobile_web' || platform === 'mvk_external';
+      const isNativeApp = ['mobile_android', 'mobile_iphone', 'mobile_ipad', 'mobile_android_messenger', 'mobile_iphone_messenger'].includes(platform);
 
-      // 3. Формируем ссылку
-      const url = "https://leshiy-storage-bot.leshiyalex.workers.dev" + path + "?state=" + currentUid + "&t=" + Date.now();
-      
-      // 4. Метка для рефреша
+      // Формируем ссылку
+      const url = "https://leshiy-storage-bot.leshiyalex.workers.dev" + path + "?state=" + userId;
+      // Метка для рефреша
       localStorage.setItem('awaiting_auth', 'true');
-
-      // 5. ЛОГИКА ОТКРЫТИЯ
-      
-      // А. Если мы в нативном мобильном приложении ВК
-      const isNative = ['mobile_android', 'mobile_iphone', 'mobile_ipad'].includes(platform);
-      const bridgeExists = (typeof vkBridge !== 'undefined' && vkBridge.send);
-
-      if (isNative && bridgeExists) {
+      // ЛОГИКА ОТКРЫТИЯ
+      if (isNativeApp) {
+        // А. Если мы в нативном мобильном приложении ВК
         vkBridge.send("VKWebAppOpenExternalLink", { "url": url })
           .catch(() => { window.location.href = url; });
-      } 
-      // Б. Если это мобильный браузер (m.vk.com) - самый проблемный случай
-      else if (platform === 'mobile_web' || platform === 'mvk_external') {
+      } else if (isMobileWeb) {
+        // Б. Если это мобильный браузер (m.vk.com) - самый проблемный случай
         // Используем replace, чтобы не плодить историю и проскочить away.php
         window.location.replace(url);
-      } 
-      // В. Все остальные случаи (ПК, Телеграм, или если платформа не определилась)
-      else {
-        // На ПК НИКОГДА не используй location.href для авторизации, 
-        // иначе Яндекс/Google не откроются во фрейме.
-        // Обязательно "_blank" в кавычках!
-        const win = window.open(url, "_blank");
-        
+      } else {
+        // В. Все остальные случаи (ПК, Телеграм, или если платформа не определилась)
+        window.open(url, "_blank");
         // Если браузер заблокировал поп-ап, тогда (и только тогда) пробуем href
         if (!win || win.closed || typeof win.closed === 'undefined') {
           window.location.href = url;
@@ -2194,7 +2261,6 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
       
       // 1. Ставим метку для рефреша (LocalStorage работает везде)
       localStorage.setItem('awaiting_auth', 'true');
-      
       // 2. Определяем среду
       const isVkEnv = window.location.search.includes('vk_app_id') || window.name.includes('fXD');
       const bridgeExists = (typeof vkBridge !== 'undefined' && vkBridge.send);
@@ -2243,7 +2309,9 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
       b.disabled = true; b.innerText = "💾 Сохраняю...";
       try {
         const res = await fetch('/api/setup-webdav', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ userId, host: h, user: u, pass: p, folderId: "Storage" }) });
-        if(res.ok) localStorage.setItem('awaiting_auth', 'true'); else { alert("Ошибка"); b.disabled = false; b.innerText = "🔌 Подключиться"; }
+        if(res.ok) {
+          localStorage.setItem('awaiting_auth', 'true'); 
+        } else { alert("Ошибка"); b.disabled = false; b.innerText = "🔌 Подключиться"; }
       } catch(e) { alert("Ошибка сети"); b.disabled = false; b.innerText = "🔌 Подключиться"; }
     }
 
@@ -2372,6 +2440,250 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
       }
     }
 
+    function checkAuthAndButton() {
+      var btn = document.getElementById('uploadBtn'); // ID твоей кнопки выбора файлов
+      if (!btn) return;
+  
+      // Проверяем, авторизован ли юзер (есть ли ID и выбран ли провайдер/папка)
+      // У тебя переменная userData или подобные должны быть доступны
+      var isAuth = (typeof userId !== 'undefined' && userId !== null); 
+      
+      if (!isAuth) {
+          btn.style.opacity = '0.5';
+          btn.style.pointerEvents = 'none';
+          btn.title = 'Сначала авторизуйтесь в облаке';
+      } else {
+          btn.style.opacity = '1';
+          btn.style.pointerEvents = 'auto';
+          btn.title = '';
+      }
+    }
+  
+    // 1. Глобальное состояние
+    var uploadQueue = [];
+    var isUploading = false;
+
+    function uploadFileFromVK(input) {
+      var files = input.files;
+      if (!files || files.length === 0) return;
+  
+      var container = document.getElementById('dropZone');
+  
+      // 1. Очистка старых строк (кроме тех, что в очереди или грузятся)
+      var oldRows = container.querySelectorAll('.upload-row');
+      oldRows.forEach(function(r) {
+          var status = r.getAttribute('data-status');
+          if (status === 'done' || status === 'error' || status === 'cancelled') {
+              r.remove();
+          }
+      });
+  
+      for (var i = 0; i < files.length; i++) {
+          var file = files[i];
+          var fileId = 'f' + Date.now() + i;
+  
+          var row = document.createElement('div');
+          row.id = fileId;
+          row.className = 'upload-row';
+          row.setAttribute('data-status', 'waiting');
+          row.style.cssText = 'margin-top:10px; padding:10px; background:#fff; border-radius:8px; border:1px solid #dce1e6; text-align:left; position:relative;';
+  
+          // СТАБИЛЬНЫЙ ВАРИАНТ (без onclick внутри строки)
+          row.innerHTML = 
+            '<div class="info" style="font-size:12px; display:flex; justify-content:space-between;">' +
+                '<span>⌛ В очереди: <b>' + file.name + '</b></span>' +
+                '<span class="cancel-btn" style="color:#ff4d4f; cursor:pointer; font-size:11px; text-decoration:underline;">Отмена</span>' +
+            '</div>' +
+            // Высота 6px и убрали внутренний блок pct
+            '<div style="width:100%; background:#dce1e6; height:6px; border-radius:2px; overflow:hidden; position:relative; margin-top:8px;">' +
+                '<div class="bar" style="width:0%; background:#2688eb; height:100%; transition:width 0.2s;"></div>' +
+            '</div>';
+  
+          container.appendChild(row);
+  
+          // 2. Создаем задачу
+          var task = {
+              id: fileId,
+              file: file,
+              fileName: file.name,
+              row: row,
+              bar: row.querySelector('.bar'),
+              pct: row.querySelector('.pct'),
+              info: row.querySelector('.info span'),
+              xhr: null
+          };
+  
+          // 3. ПРАВИЛЬНАЯ ПРИВЯЗКА КНОПКИ (Через замыкание)
+          // Мы используем let или создаем отдельную область видимости, чтобы id не перепутались
+          (function(currentId) {
+              row.querySelector('.cancel-btn').onclick = function() {
+                  cancelUploadTask(currentId);
+              };
+          })(fileId);
+  
+          uploadQueue.push(task);
+      }
+  
+      input.value = '';
+      if (!isUploading) processQueue();
+    }
+
+    function cancelUploadTask(id) {
+      var taskIndex = uploadQueue.findIndex(t => t.id === id);
+      if (taskIndex === -1) return;
+  
+      var task = uploadQueue[taskIndex];
+      var row = document.getElementById(id);
+      var wasUploading = (row.getAttribute('data-status') === 'uploading');
+  
+      if (task.xhr) task.xhr.abort();
+  
+      // ПЕРЕД ТЕМ КАК УДАЛИТЬ ИЗ МАССИВА:
+      applyCancelledStyle(row); // Сразу серим и ставим статус 'cancelled'
+      
+      uploadQueue.splice(taskIndex, 1); // Теперь удаляем
+  
+      if (wasUploading) {
+          isUploading = false; // Освобождаем поток
+      }
+  
+      // Тот самый "пинок" очереди, чтобы она не заснула
+      setTimeout(processQueue, 100); 
+    }
+    
+    function applyCancelledStyle(row) {
+      row.setAttribute('data-status', 'cancelled');
+      row.style.opacity = '0.5';
+      var bar = row.querySelector('.bar');
+      if (bar) {
+          bar.style.background = '#999';
+          bar.style.width = '100%';
+      }
+      // Обновляем только текст статуса, сохраняя имя файла
+      var infoSpan = row.querySelector('.info span');
+      if (infoSpan) {
+          var fileNameTag = infoSpan.querySelector('b');
+          var fileName = fileNameTag ? fileNameTag.innerText : "Файл";
+          infoSpan.innerHTML = '🔘 Отменено: <b>' + fileName + '</b>';
+      }
+      var btn = row.querySelector('.cancel-btn');
+      if (btn) btn.style.display = 'none';
+    }
+
+    // Основная функция обработки (ЕДИНСТВЕННАЯ)
+    async function processQueue() {
+      try {
+          if (typeof uploadQueue === 'undefined' || !uploadQueue || isUploading) return;
+          var task = uploadQueue.find(t => t.row && t.row.getAttribute('data-status') === 'waiting');
+          if (!task || isUploading) return;
+  
+          isUploading = true;
+          task.row.setAttribute('data-status', 'uploading');
+          var fileNameHTML = ' Файл: <b>' + task.fileName + '</b>';
+  
+          // ШАГ 1: Получаем "билет" на загрузку
+          const res = await fetch('https://leshiy-storage-bot.leshiyalex.workers.dev/api/get-upload-link', {
+              method: 'POST',
+              headers: {
+                  'x-file-name': encodeURIComponent(task.fileName),
+                  'x-file-size': task.file.size.toString(), // ПЕРЕДАЕМ РАЗМЕР
+                  'x-vk-user-id': window.userId || userId
+              }
+          });
+          
+          const plan = await res.json();
+          if (!plan.upload_url) throw new Error(plan.error || "Нет ссылки");
+  
+          // ШАГ 2: Прямая загрузка в облако
+          const xhr = new XMLHttpRequest();
+          task.xhr = xhr;
+          xhr.open(plan.method, plan.upload_url, true);
+  
+          // Указываем тип и размер, чтобы облако не ругалось на пустой файл
+          xhr.setRequestHeader('Content-Type', task.file.type || 'application/octet-stream');
+          // ВНИМАНИЕ: Content-Length браузер ставит сам из task.file, но если облако требует
+          // специфичный заголовок (типа x-amz-content-sha256), воркер должен его выплюнуть в plan.headers
+  
+          if (plan.headers) {
+              for (let k in plan.headers) xhr.setRequestHeader(k, plan.headers[k]);
+          }
+  
+          xhr.upload.onprogress = function(e) {
+              if (e.lengthComputable && task.info) {
+                  var pct = Math.round((e.loaded / e.total) * 100);
+                  task.info.innerHTML = '📤 ' + pct + '%' + fileNameHTML;
+                  if (task.bar) task.bar.style.width = pct + '%';
+              }
+          };
+  
+          xhr.onload = async function() {
+              if (xhr.status >= 200 && xhr.status <= 204) {
+                  // ШАГ 3: Подтверждение — теперь на свой отдельный эндпоинт
+                  fetch('https://leshiy-storage-bot.leshiyalex.workers.dev/api/confirm-upload', {
+                      method: 'POST',
+                      headers: {
+                          'Content-Type': 'application/json',
+                          'x-vk-user-id': window.userId || userId
+                      },
+                      body: JSON.stringify({
+                          fileName: task.fileName,
+                          fileSize: task.file.size
+                      })
+                  });
+  
+                  task.row.setAttribute('data-status', 'done');
+                  task.info.innerHTML = '✅ Готово!' + fileNameHTML;
+                  if (task.bar) { task.bar.style.background = '#28a745'; task.bar.style.width = '100%'; }
+              } else {
+                  task.row.setAttribute('data-status', 'error');
+                  task.info.innerHTML = '❌ Ошибка облака: ' + xhr.status;
+              }
+              finish();
+          };
+  
+          xhr.onerror = function() {
+              task.row.setAttribute('data-status', 'error');
+              task.info.innerHTML = '❌ Ошибка сети';
+              finish();
+          };
+  
+          xhr.send(task.file); // Шлем бинарник
+  
+        } catch (e) {
+          console.error("Ошибка в очереди:", e);
+          if (task && task.row) {
+              task.row.setAttribute('data-status', 'error');
+              // Сохраняем имя файла в выводе ошибки
+              task.info.innerHTML = '❌ Ошибка: ' + e.message + ' Файл: <b>' + task.fileName + '</b>';
+              if (task.bar) task.bar.style.background = '#ff4d4f';
+          }
+          finish();
+      }
+  
+      function finish() {
+          isUploading = false;
+          setTimeout(processQueue, 200);
+      }
+    }
+
+    // Оживляем Drop Zone (чтобы файлы не открывались в окне)
+    var dz = document.getElementById('dropZone');
+    if (dz) {
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(function(ev) {
+            dz.addEventListener(ev, function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }, false);
+        });
+    
+        dz.addEventListener('drop', function(e) {
+            var files = e.dataTransfer.files;
+            if (files && files.length > 0) {
+                uploadFileFromVK({ files: files });
+            }
+        }, false);
+    }
+
     async function updateQuota() {
       if (!${isConnected}) return;
       try {
@@ -2443,6 +2755,317 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
   </div>
 </body>
 </html>`;
+}
+
+async function handleVkUpload(request, env, ctx, userId, corsHeaders) {
+  try {
+    // 1. Читаем форму ОДИН РАЗ
+    const formData = await request.formData();
+    const file = formData.get("file"); // Это наш Blob/File
+    const uploadUrl = formData.get("upload_url");
+    const name = formData.get("filename");
+
+    // --- ВОТ ОНО, ПРОБИТИЕ ПОРОГА ---
+    // Превращаем файл в чистый поток, как в твоем примере с fetch
+    const finalStream = file.stream(); 
+    const finalSize = file.size;
+
+    // ВАЖНО: Клонируем поток для ВК, чтобы не закрыть основной
+    const [streamForCloud, streamForVK] = finalStream.tee();
+
+    const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
+    if (!userData) throw new Error("Пользователь не авторизован");
+
+    // --- 1. ОПРЕДЕЛЕНИЕ ТИПА (ТВОЙ БЛОК БЕЗ ИЗМЕНЕНИЙ) ---
+    let mimeType = file.type || "application/octet-stream";
+    let dbFileType = "document";
+    const ext = (name.split('.').pop() || "").toLowerCase();
+    
+    if (["jpg", "jpeg", "png", "webp", "gif"].includes(ext)) {
+        dbFileType = "photo";
+        mimeType = ext === "png" ? "image/png" : "image/jpeg";
+    } else if (["mp3", "wav", "ogg", "m4a"].includes(ext)) {
+        dbFileType = "audio";
+        mimeType = "audio/mpeg";
+    } else if (["mp4", "mov", "avi", "mkv"].includes(ext)) {
+        dbFileType = "video";
+        mimeType = "video/mp4";
+    }
+
+    // --- 2. ПРОКСИ НА ВК (делаем как в чате - в фоне) ---
+    ctx.waitUntil((async () => {
+      try {
+          const vkFd = new FormData();
+          // Превращаем половинку потока в Blob для ВК
+          const vkBlob = await new Response(streamForVK).blob();
+          vkFd.append('photo', vkBlob, name);
+          await fetch(uploadUrl, { method: 'POST', body: vkFd });
+      } catch (e) { console.error("VK Error:", e); }
+    })());
+
+    // --- 3. ЗАПИСЬ В БАЗУ D1 ---
+    const fileId = String(Date.now());
+    await env.FILES_DB.prepare(
+        "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).bind(String(userId), name, fileId, dbFileType, userData.provider, userData.folderId || "Root", Date.now()).run();
+
+    // --- 4. ЗАГРУЗКА В ОБЛАКО (Прямой проброс потока) ---
+    // Главное изменение: берем stream напрямую. 
+    // Если Яндекс/Google поддерживают стриминг, Cloudflare не будет копить файл в памяти.
+    let uploadOk = false;
+
+    // ВНИМАНИЕ: Для пробития 40кб используем именно file.stream() 
+    // и убедись, что твои функции uploadTo...Stream не делают await body.arrayBuffer() внутри!
+    if (userData.provider === "google") {
+        uploadOk = await uploadToGoogleStream(streamForCloud, name, userData.access_token, userData.folderId, mimeType, finalSize);
+    } else if (userData.provider === "yandex") {
+        uploadOk = await uploadToYandexStream(streamForCloud, name, userData.access_token, userData.folderId, mimeType, finalSize);
+    } else if (userData.provider === "dropbox") {
+        uploadOk = await uploadToDropboxStream(streamForCloud, name, userData.access_token, userData.folderId, finalSize);
+    } else if (userData.provider === "webdav") {
+        uploadOk = await uploadWebDAVStream(streamForCloud, name, userData, env, mimeType, finalSize);
+    }
+
+    if (!uploadOk) throw new Error("Cloud upload failed");
+
+    // --- 5. AI АНАЛИТИКА (В ФОНЕ) ---
+    if (ctx?.waitUntil) {
+        // Клонируем данные для AI, чтобы основной запрос завершился
+        const aiData = await file.arrayBuffer(); 
+        ctx.waitUntil((async () => {
+            try {
+                let sType = "";
+                if (dbFileType === "photo") sType = "IMAGE_TO_TEXT";
+                else if (dbFileType === "audio") sType = "AUDIO_TO_TEXT";
+                else if (dbFileType === "video") sType = "VIDEO_TO_ANALYSIS";
+                else if (dbFileType === "document" && ["jpg","jpeg","png"].includes(ext)) sType = "IMAGE_TO_TEXT";
+
+                if (sType) {
+                    const cfg = await loadActiveConfig(sType, env);
+                    if (cfg?.FUNCTION) {
+                        const description = await cfg.FUNCTION(cfg, aiData, env, mimeType);
+                        if (description) {
+                            await env.FILES_DB.prepare("UPDATE files SET ai_description = ? WHERE userId = ? AND fileName = ?")
+                                .bind(description, String(userId), name).run();
+                        }
+                    }
+                }
+            } catch (e) { console.error("AI BG Error:", e); }
+        })());
+    }
+
+    return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
+
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+  }
+}
+
+async function handleVkUploadArrayBuffer(request, env, ctx) {
+  const corsHeaders = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, x-vk-user-id, x-file-name, x-upload-url",
+  };
+
+  if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  try {
+      const fileName = decodeURIComponent(request.headers.get('x-file-name') || 'file.bin');
+      const vkUserId = request.headers.get('x-vk-user-id');
+      const uploadUrl = decodeURIComponent(request.headers.get('x-upload-url') || '');
+      
+      // --- ЧИСТЫЙ БУФЕР (Пробиваем лимит 40 КБ) ---
+      const fileBuffer = await request.arrayBuffer(); 
+      if (fileBuffer.byteLength === 0) throw new Error("Файл пустой");
+
+      const userData = await env.USER_DB.get("user:" + vkUserId, { type: "json" });
+      if (!userData) return new Response("User Error", { status: 403, headers: corsHeaders });
+
+      // --- 1. ОПРЕДЕЛЕНИЕ ТИПА И AI-КАТЕГОРИИ ---
+      let dbFileType = "document";
+      let mimeType = "application/octet-stream";
+      let sType = ""; // Тип для AI
+      const ext = (fileName.split('.').pop() || "").toLowerCase();
+
+      if (["jpg", "jpeg", "png", "webp", "gif"].includes(ext)) {
+          dbFileType = "photo";
+          mimeType = ext === "png" ? "image/png" : "image/jpeg";
+          sType = "IMAGE_TO_TEXT";
+      } else if (["mp3", "wav", "ogg", "m4a"].includes(ext)) {
+          dbFileType = "audio";
+          mimeType = "audio/mpeg";
+          sType = "AUDIO_TO_TEXT";
+      } else if (["mp4", "mov", "avi", "mkv"].includes(ext)) {
+          dbFileType = "video";
+          mimeType = "video/mp4";
+          sType = "VIDEO_TO_ANALYSIS";
+      } else if (["pdf", "docx", "txt"].includes(ext)) {
+          dbFileType = "document";
+          // Доп. проверка: если это картинка внутри документа
+          if (["jpg", "jpeg", "png"].includes(ext)) sType = "IMAGE_TO_TEXT";
+      }
+
+      // --- 2. ПРОКСИ НА ВК (в фоне) ---
+      if (uploadUrl) {
+          ctx.waitUntil((async () => {
+              try {
+                  const vkFd = new FormData();
+                  vkFd.append('photo', new Blob([fileBuffer], { type: mimeType }), fileName);
+                  await fetch(uploadUrl, { method: 'POST', body: vkFd });
+              } catch (e) { console.error("VK Sync Error:", e); }
+          })());
+      }
+
+      // --- 3. ЗАГРУЗКА В ОБЛАКО (WebDAV, Yandex, Google, Dropbox) ---
+      let uploadOk = false;
+      const { provider, access_token, folderId } = userData;
+      const folder = folderId || "";
+
+      if (provider === "yandex") {
+          uploadOk = await uploadToYandexFromArrayBuffer(fileBuffer, fileName, access_token, folder);
+      } else if (provider === "google") {
+          uploadOk = await uploadToGoogleFromArrayBuffer(fileBuffer, fileName, access_token, folder || "root");
+      } else if (provider === "dropbox") {
+          uploadOk = await uploadToDropboxFromArrayBuffer(fileBuffer, fileName, access_token, folder);
+      } else if (provider === "webdav") {
+          uploadOk = await uploadWebDAVFromArrayBuffer(fileBuffer, fileName, userData, env);
+      }
+
+      if (!uploadOk) throw new Error("Cloud upload failed");
+
+      // --- 4. ЗАПИСЬ В БАЗУ D1 ---
+      const fileId = "app_" + Date.now();
+      await env.FILES_DB.prepare(
+          "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      ).bind(String(vkUserId), fileName, fileId, dbFileType, provider, folder, Date.now()).run();
+
+      // --- 5. AI АНАЛИТИКА (В ФОНЕ) ---
+      if (sType && ctx?.waitUntil) {
+          ctx.waitUntil((async () => {
+              try {
+                  const cfg = await loadActiveConfig(sType, env);
+                  if (cfg?.FUNCTION) {
+                      const description = await cfg.FUNCTION(cfg, fileBuffer, env, mimeType);
+                      if (description) {
+                          await env.FILES_DB.prepare("UPDATE files SET ai_description = ? WHERE userId = ? AND fileName = ?")
+                              .bind(description, String(vkUserId), fileName).run();
+                      }
+                  }
+              } catch (e) { console.error("AI BG Error:", e); }
+          })());
+      }
+
+      return new Response(JSON.stringify({ success: true, fileId }), { 
+          headers: { ...corsHeaders, "Content-Type": "application/json" } 
+      });
+
+  } catch (e) {
+      return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+  }
+}
+
+// --- ПОЛУЧЕНИЕ ССЫЛКИ ---
+async function handleGetUploadLink(request, env) {
+  const corsHeaders = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, x-vk-user-id, x-file-name",
+  };
+
+  try {
+      const vkUserId = request.headers.get('x-vk-user-id');
+      const userData = await env.USER_DB.get("user:" + vkUserId, { type: "json" });
+      const fileName = decodeURIComponent(request.headers.get('x-file-name'));
+      const fileSize = request.headers.get('x-file-size'); // Вот он!
+      if (!userData) return new Response("User Error", { status: 403, headers: corsHeaders });
+
+      const { provider, access_token, folderId } = userData;
+      const folder = folderId || "";
+
+      // --- YANDEX ---
+      if (provider === "yandex") {
+          const path = (folder ? `/${folder}/${fileName}` : `/${fileName}`).replace(/\/+/g, '/');
+          const res = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/upload?path=${encodeURIComponent(path)}&overwrite=true`, {
+              headers: { "Authorization": `OAuth ${access_token}` }
+          });
+          const data = await res.json();
+          return new Response(JSON.stringify({ upload_url: data.href, method: "PUT", provider: "yandex" }), { headers: corsHeaders });
+      } 
+      
+      // --- GOOGLE DRIVE ---
+      if (provider === "google") {
+          const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable', {
+              method: 'POST',
+              headers: {
+                  'Authorization': `Bearer ${access_token}`,
+                  'X-Upload-Content-Type': 'application/octet-stream',
+                  'Content-Type': 'application/json; charset=UTF-8'
+              },
+              body: JSON.stringify({ name: fileName, parents: folder ? [folder] : [] })
+          });
+          return new Response(JSON.stringify({ upload_url: res.headers.get('Location'), method: "PUT", provider: "google" }), { headers: corsHeaders });
+      }
+
+      // --- DROPBOX ---
+      if (provider === "dropbox") {
+          const dbxUrl = 'https://content.dropboxapi.com/2/files/upload';
+          const args = JSON.stringify({ 
+              path: (folder.startsWith('/') ? folder : '/' + folder) + '/' + fileName, 
+              mode: 'overwrite' 
+          });
+          // Для Dropbox фронту нужно будет добавить эти заголовки в XHR
+          return new Response(JSON.stringify({ 
+              upload_url: dbxUrl, 
+              method: "POST", 
+              headers: { 
+                  "Authorization": `Bearer ${access_token}`, 
+                  "Dropbox-API-Arg": args, 
+                  "Content-Type": "application/octet-stream" 
+              } 
+          }), { headers: corsHeaders });
+      }
+
+      // --- WEBDAV ---
+      if (provider === "webdav") {
+          const baseUrl = userData.webdav_url.endsWith('/') ? userData.webdav_url : userData.webdav_url + '/';
+          const fullUrl = baseUrl + (folder ? folder + '/' : '') + fileName;
+          const auth = btoa(`${userData.login}:${userData.password}`);
+          return new Response(JSON.stringify({ 
+              upload_url: fullUrl, 
+              method: "PUT", 
+              headers: { "Authorization": `Basic ${auth}` } 
+          }), { headers: corsHeaders });
+      }
+
+      throw new Error("Provider not supported");
+  } catch (e) {
+      return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+  }
+}
+
+// --- ПОДТВЕРЖДЕНИЕ И ЗАПИСЬ В БАЗУ ---
+async function handleConfirmUpload(request, env) {
+  const corsHeaders = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" };
+  try {
+      // 1. Берем данные из JSON
+      const { fileName } = await request.json();
+      // 2. А userId берем из заголовков (там он точно есть)
+      const userId = request.headers.get('x-vk-user-id');
+
+      if (!userId) throw new Error("userId is missing in headers");
+
+      const userData = await env.USER_DB.get("user:" + userId, { type: "json" });
+      if (!userData) throw new Error("User data not found in KV");
+
+      await env.FILES_DB.prepare(
+          "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      ).bind(String(userId), fileName, "app_" + Date.now(), "document", userData.provider, userData.folderId || "Root", Date.now()).run();
+
+      return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
+  } catch (e) {
+      return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+  }
 }
 
 // Универсальная функция для генерации HTML-перехода (чтобы не дублировать код)
@@ -2552,6 +3175,7 @@ async function handleChatRequest(userPrompt, modelConfig, env) {
   // --- 2. ФОРМИРУЕМ ФИНАЛЬНЫЙ ПРОМПТ ---
   // Workers AI и Bothub используют историю в формате messages, но Gemini — нет.
   // Для простоты и совместимости используем один общий формат промпта.
+  // @ts-ignore
   const finalPrompt = `${CHAT_INSTRUCTION}\n\nВопрос пользователя: ${userPrompt}`;
 
   // --- 3. ВЫЗЫВАЕМ СООТВЕТСТВУЮЩУЮ ФУНКЦИЮ ---
@@ -2621,6 +3245,7 @@ function getStartKeyboard(userId, hostname, env, inviteData = null) {
   const mailruRedirectUri = `https://${hostname}/auth/mailru/callback`;
   // Старый вариант: scope=cloud.write.all
   const scope = "cloud";
+  // @ts-ignore
   const mAuth = `https://connect.mail.ru/oauth/authorize?client_id=${mailruClientId}&response_type=code&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(mailruRedirectUri)}&state=${userId}`;
 
   keyboard.push([{ 
@@ -2746,6 +3371,7 @@ async function handleCallbackQuery(query, env, ctx) {
   const data = query.data; // Пример: "set_folder:12345:ID_ПАПКИ"
   const chatId = query.message.chat.id;
   const userId = query.from.id;
+  // @ts-ignore
   const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
   const parts = data.split(":");
   const action = parts[0];
@@ -3126,6 +3752,7 @@ async function handleCallbackQuery(query, env, ctx) {
     }
 
     if (action === "create_folder") {
+      // @ts-ignore
       let finalId;
       let success = false;
       const targetUserId = parts[1] || userId; // Для команды /add или личного использования
@@ -3390,6 +4017,7 @@ async function editMessageWithKeyboard(chatId, messageId, text, env, keyboard) {
 }
 
 // Функция обработки каждого файла в карусели сообщения ВК
+// @ts-ignore
 async function processOneAttachment(attach, userData, userId, chatId, env) {
   try {
     let url = "", name = "", fType = attach.type;
@@ -3566,158 +4194,174 @@ async function processOneAttachment(attach, userData, userId, chatId, env) {
   }
 }
 
-async function processOneAttachmentStream(attach, userData, userId, chatId, env) {
+async function processOneAttachmentStream(attach, userData, userId, chatId, env, ctx) {
   try {
-    let url = "", name = "", fType = attach.type;
-    let dbFileType = fType;
-    let mimeType = ""; 
+      let url = "", name = "", fType = attach.type;
+      let dbFileType = fType;
+      let mimeType = ""; 
 
-    const now = new Date();
-    const dateStr = now.getFullYear() + '-' + 
-                    String(now.getMonth() + 1).padStart(2, '0') + '-' + 
-                    String(now.getDate()).padStart(2, '0') + '_' + 
-                    String(now.getHours()).padStart(2, '0') + '-' + 
-                    String(now.getMinutes()).padStart(2, '0') + '-' + 
-                    String(now.getSeconds()).padStart(2, '0');
+      const now = new Date();
+      const dateStr = now.getFullYear() + '-' + 
+                      String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                      String(now.getDate()).padStart(2, '0') + '_' + 
+                      String(now.getHours()).padStart(2, '0') + '-' + 
+                      String(now.getMinutes()).padStart(2, '0') + '-' + 
+                      String(now.getSeconds()).padStart(2, '0');
 
-    // --- 1. ТВОЯ ЛОГИКА ОПРЕДЕЛЕНИЯ ТИПА ---
-    if (fType === "photo") {
-      url = attach.photo.sizes.sort((a,b) => b.width - a.width)[0].url;
-      name = `Photo_${dateStr}.jpg`;
-      mimeType = "image/jpeg";
-    } 
-    else if (fType === "doc") {
-      url = attach.doc.url;
-      name = attach.doc.title || `Doc_${dateStr}.${attach.doc.ext}`;
-      dbFileType = "document";
-      const ext = (attach.doc.ext || "").toLowerCase();
-      if (ext === "pdf") mimeType = "application/pdf";
-      else if (ext === "png") mimeType = "image/png";
-      else if (["jpg","jpeg"].includes(ext)) mimeType = "image/jpeg";
-      else mimeType = "text/plain";
-    }
-    else if (fType === "audio") {
-      url = attach.audio.url;
-      const artist = (attach.audio.artist || "Unknown").replace(/[\\/:*?"<>|]/g, "");
-      const title = (attach.audio.title || "Track").replace(/[\\/:*?"<>|]/g, "");
-      name = `${artist} - ${title}.mp3`;
-      dbFileType = "audio";
-      mimeType = "audio/mpeg";
-    } 
-    else if (fType === "video") {
-      const v = attach.video;
-      let vFiles = v.files || {};
-      url = vFiles.mp4_1080 || vFiles.mp4_720 || vFiles.mp4_480 || vFiles.mp4_360 || vFiles.src;
-      // HTML-плеер тут пропускаем, так как нам нужен прямой поток для "трубы"
-      if (!url) return false;
-      name = (v.title || `Video_${dateStr}`).replace(/[\\/:*?"<>|]/g, "") + ".mp4";
-      dbFileType = "video";
-      mimeType = "video/mp4";
-    }
-    else if (fType === "video_message") {
-      url = attach.video_message.video_url;
-      name = `VideoNote_${dateStr}.mp4`;
-      dbFileType = "video";
-      mimeType = "video/mp4";
-    }
-    else if (fType === "audio_message") {
-      url = attach.audio_message.link_mp3 || attach.audio_message.link_ogg;
-      name = `Voice_${dateStr}.mp3`;
-      dbFileType = "audio_message";
-      mimeType = "audio/mpeg";
-    }
-
-    if (!url) return false;
-
-    // --- 2. СКАЧИВАНИЕ ПОТОКА ---
-    const fileRes = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0...', 'Accept': '*/*' }
-    });
-    if (!fileRes.ok || !fileRes.body) return false;
-
-    // --- 3. ЗАПИСЬ В БАЗУ (D1) ---
-    const vkId = String(attach[fType]?.id || Date.now());
-    await env.FILES_DB.prepare(
-      "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
-    ).bind(String(userId), name, vkId, dbFileType, userData.provider, userData.folderId || "Root", Date.now()).run();
-
-    // --- 4. ЗАГРУЗКА В ОБЛАКО (РЕЖИМ ТРУБЫ) ---
-    let uploadOk = false;
-    const stream = fileRes.body;
-
-    if (userData.provider === "google") {
-      // Google требует multipart или resumable для стримов, упростим до простого media upload для мелких
-      const up = await fetch(`https://www.googleapis.com/upload/drive/v3/files?uploadType=media`, {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${userData.access_token}`,
-          'Content-Type': mimeType 
-        },
-        body: stream
-      });
-      uploadOk = up.ok;
-    } 
-    else if (userData.provider === "yandex") {
-      const getUrl = `https://cloud-api.yandex.net/v1/disk/resources/upload?path=${encodeURIComponent((userData.folderId || "") + "/" + name)}&overwrite=true`;
-      const res = await fetch(getUrl, { headers: { 'Authorization': `OAuth ${userData.access_token}` } });
-      const { href } = await res.json();
-      if (href) {
-        // @ts-ignore
-        const up = await fetch(href, { method: 'PUT', body: stream, duplex: 'half' });
-        uploadOk = up.ok;
+      // --- 1. ПОЛНАЯ ЛОГИКА ОПРЕДЕЛЕНИЯ ТИПА И ПАРСИНГА ВИДЕО ---
+      if (fType === "photo") {
+          url = attach.photo.sizes.sort((a,b) => b.width - a.width)[0].url;
+          name = `Photo_${dateStr}.jpg`;
+          mimeType = "image/jpeg";
+      } 
+      else if (fType === "doc") {
+          url = attach.doc.url;
+          name = attach.doc.title || `Doc_${dateStr}.${attach.doc.ext}`;
+          dbFileType = "document";
+          const ext = (attach.doc.ext || "").toLowerCase();
+          if (ext === "pdf") mimeType = "application/pdf";
+          else if (ext === "png") mimeType = "image/png";
+          else if (["jpg","jpeg"].includes(ext)) mimeType = "image/jpeg";
+          else mimeType = "application/octet-stream";
       }
-    } 
-    else if (userData.provider === "webdav") {
-      const up = await fetch(`${userData.webdav_host}/${name}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': 'Basic ' + btoa(`${userData.webdav_user}:${userData.webdav_pass}`),
-          'Content-Type': mimeType
-        },
-        body: stream,
-        // @ts-ignore
-        duplex: 'half'
-      });
-      uploadOk = up.ok;
-    }
-    else if (userData.provider === "dropbox") {
-      const up = await fetch('https://content.dropboxapi.com/2/files/upload', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${userData.access_token}`,
-          'Dropbox-API-Arg': JSON.stringify({ path: (userData.folderId || "") + "/" + name, mode: "overwrite" }),
-          'Content-Type': "application/octet-stream"
-        },
-        body: stream,
-        // @ts-ignore
-        duplex: 'half'
-      });
-      uploadOk = up.ok;
-    }
-    else if (userData.provider === "mailru") {
-      // Для Mail.ru используем твой метод, если он поддерживает стрим, иначе — только через Buffer
-      // Здесь оставлен WebDAV-совместимый вызов
-      const up = await fetch(`https://webdav.cloud.mail.ru/${name}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': 'Basic ' + btoa(`${userData.mailru_user}:${userData.mailru_pass}`),
-          'Content-Type': mimeType
-        },
-        body: stream,
-        // @ts-ignore
-        duplex: 'half'
-      });
-      uploadOk = up.ok;
-    }
+      else if (fType === "audio") {
+          url = attach.audio.url;
+          const artist = (attach.audio.artist || "Unknown").replace(/[\\/:*?"<>|]/g, "");
+          const title = (attach.audio.title || "Track").replace(/[\\/:*?"<>|]/g, "");
+          name = `${artist} - ${title}.mp3`;
+          dbFileType = "audio";
+          mimeType = "audio/mpeg";
+      } 
+      else if (fType === "video") {
+          const v = attach.video;
+          let vFiles = v.files || {};
+          // Пытаемся взять прямую ссылку
+          url = vFiles.mp4_1080 || vFiles.mp4_720 || vFiles.mp4_480 || vFiles.mp4_360 || vFiles.src;
 
-    if (uploadOk) {
-      await sendVKMessage(chatId, `✅ Сохранен: ${name}`, env).catch(() => {});
-    }
-    
-    return uploadOk;
+          // Если прямой ссылки нет, парсим плеер
+          if (!url && v.player) {
+              try {
+                  const playerRes = await fetch(v.player, {
+                      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                  });
+                  if (playerRes.ok) {
+                      const html = await playerRes.text();
+                      const videoMatch = html.match(/https?:\/\/[^\s"'<>]+?\.mp4[^\s"'<>]*\?[\w=&%-]+/g);
+                      if (videoMatch) {
+                          url = videoMatch[0].replace(/\\/g, ''); 
+                      } else {
+                          const flashVarsMatch = html.match(/\"url(\d+)\"\:\"(https?.*?)\"/g);
+                          if (flashVarsMatch) {
+                              const lastMatch = flashVarsMatch[flashVarsMatch.length - 1];
+                              url = lastMatch.split('":"')[1].replace('"', '').replace(/\\/g, '');
+                          }
+                      }
+                  }
+              } catch (e) { console.error("Player parsing failed", e); }
+          }
+          if (!url) return false;
+          name = (v.title || `Video_${dateStr}`).replace(/[\\/:*?"<>|]/g, "") + ".mp4";
+          dbFileType = "video";
+          mimeType = "video/mp4";
+      }
+      else if (fType === "video_message") {
+          url = attach.video_message.video_url;
+          name = `VideoNote_${dateStr}.mp4`;
+          dbFileType = "video";
+          mimeType = "video/mp4";
+      }
+      else if (fType === "audio_message") {
+          url = attach.audio_message.link_mp3 || attach.audio_message.link_ogg;
+          name = `Voice_${dateStr}.mp3`;
+          dbFileType = "audio_message";
+          mimeType = "audio/mpeg";
+      }
+
+      if (!url) return false;
+
+      // --- 2. СКАЧИВАНИЕ (ПЕРВИЧНЫЙ ЗАПРОС) ---
+      let fileRes = await fetch(url, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept': '*/*' }
+      });
+      if (!fileRes.ok) return false;
+
+      // --- 3. ПЕРЕХВАТЧИК REDIRECT/HTML (ЧТОБЫ НЕ БЫЛО 55КБ HTML) ---
+      let finalStream = fileRes.body;
+      let finalSize = fileRes.headers.get("Content-Length");
+      const contentType = fileRes.headers.get("Content-Type") || "";
+
+      if (contentType.includes("text/html")) {
+          const textContent = await fileRes.text();
+          const match = textContent.match(/https?:\/\/[^\s"'<>]+(?:psv4|userapi|vk-cdn|vk\.me)[^\s"'<>]+\b/);
+          if (match) {
+              let directUrl = match[0].replace(/&amp;/g, '&');
+              const secondRes = await fetch(directUrl, {
+                  headers: { 'User-Agent': 'Mozilla/5.0...', 'Referer': 'https://vk.com/' }
+              });
+              if (secondRes.ok && !secondRes.headers.get("Content-Type").includes("text/html")) {
+                  finalStream = secondRes.body;
+                  finalSize = secondRes.headers.get("Content-Length");
+              }
+          }
+      }
+
+      // --- 4. ЗАПИСЬ В БАЗУ ---
+      const vkId = String(attach[fType]?.id || Date.now());
+      await env.FILES_DB.prepare(
+          "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      ).bind(String(userId), name, vkId, dbFileType, userData.provider, userData.folderId || "Root", Date.now()).run();
+
+      // --- 5. ЗАГРУЗКА В ОБЛАКО (СТРИМИНГ) ---
+      let uploadOk = false;
+      if (userData.provider === "google") {
+          uploadOk = await uploadToGoogleStream(finalStream, name, userData.access_token, userData.folderId, mimeType, finalSize);
+      } else if (userData.provider === "yandex") {
+          uploadOk = await uploadToYandexStream(finalStream, name, userData.access_token, userData.folderId, mimeType, finalSize);
+      } else if (userData.provider === "dropbox") {
+          uploadOk = await uploadToDropboxStream(finalStream, name, userData.access_token, userData.folderId, finalSize);
+      } else if (userData.provider === "webdav") {
+          uploadOk = await uploadWebDAVStream(finalStream, name, userData, env, mimeType, finalSize);
+      }
+
+      if (uploadOk) {
+          await sendVKMessage(chatId, `✅ Сохранен: ${name}`, env);
+          
+          // --- 6. AI АНАЛИТИКА (В ФОНЕ) ---
+          if (ctx && ctx.waitUntil) {
+              ctx.waitUntil((async () => {
+                  try {
+                      // Для аналитики скачиваем заново в Buffer (т.к. стрим уже закрыт)
+                      const aiRes = await fetch(url);
+                      const aiBuffer = await aiRes.arrayBuffer();
+                      
+                      let sType = "";
+                      if (dbFileType === "photo") sType = "IMAGE_TO_TEXT";
+                      else if (dbFileType === "document") {
+                          const ext = name.split('.').pop().toLowerCase();
+                          sType = ["jpg","jpeg","png","webp"].includes(ext) ? "IMAGE_TO_TEXT" : "DOCUMENT_TO_TEXT";
+                      }
+                      else if (dbFileType === "audio" || dbFileType === "audio_message") sType = "AUDIO_TO_TEXT";
+                      else if (dbFileType === "video") sType = "VIDEO_TO_ANALYSIS";
+
+                      if (sType) {
+                          const cfg = await loadActiveConfig(sType, env);
+                          if (cfg && cfg.FUNCTION) {
+                              const description = await cfg.FUNCTION(cfg, aiBuffer, env, mimeType);
+                              if (description) {
+                                  await env.FILES_DB.prepare("UPDATE files SET ai_description = ? WHERE userId = ? AND fileName = ?")
+                                      .bind(description, String(userId), name).run();
+                              }
+                          }
+                      }
+                  } catch (e) { console.error("AI BG Error:", e); }
+              })());
+          }
+      }
+      
+      return uploadOk;
   } catch (err) {
-    console.error("Stream Error:", err);
-    return false;
+      console.error("Critical OneAttach Error:", err);
+      return false;
   }
 }
 
@@ -3786,6 +4430,7 @@ async function getFileStream(fileId, env) {
   return await response.arrayBuffer(); // ← ВСЁ! Только ArrayBuffer
 }
 
+// @ts-ignore
 function getFileType(fileName) {
   const ext = fileName.toLowerCase().split('.').pop();
   if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff'].includes(ext)) {
@@ -4008,6 +4653,25 @@ async function uploadToYandexFromArrayBuffer(arrayBuffer, name, token, folder = 
   return false;
 }
 
+// @ts-ignore
+async function uploadToYandexStream(stream, name, token, folder, type, fileSize) {
+  const path = folder ? `/${folder}/${name}` : `/${name}`;
+  const getUrl = `https://cloud-api.yandex.net/v1/disk/resources/upload?path=${encodeURIComponent(path.replace(/\/+/g, '/'))}&overwrite=true`;
+  
+  const r = await fetch(getUrl, { headers: { "Authorization": `OAuth ${token}` } });
+  const d = await r.json();
+  if (!d.href) return false;
+
+  const res = await fetch(d.href, { 
+      method: "PUT", 
+      body: stream, 
+      headers: { "Content-Type": type },
+      // @ts-ignore
+      duplex: 'half' 
+  });
+  return res.ok;
+}
+
 async function listYandexFolders(token) {
   try {
     const res = await fetch(`https://cloud-api.yandex.net/v1/disk/resources?path=%2F&fields=_embedded.items.name%2C_embedded.items.type&limit=100`, {
@@ -4062,6 +4726,7 @@ async function handleGoogleCallback(req, env) {
   return new Response("Error");
 }
 
+// @ts-ignore
 async function downloadFromGoogle(folderId, fileName, token, env) {
   try {
     // Ищем файлы в облаке
@@ -4095,6 +4760,30 @@ async function uploadToGoogleFromArrayBuffer(arrayBuffer, name, token, folderId 
     method: 'POST',
     headers: { 'Authorization': `Bearer ${token}` },
     body: fd
+  });
+  return res.ok;
+}
+
+// @ts-ignore
+async function uploadToGoogleStream(stream, name, token, folder, type, fileSize) {
+  // Для Google используем Simple Upload (поддерживает стрим до 5МБ на бесплатном лимите легко)
+  // Если нужно больше 5МБ, нужен Resumable, но для начала стабилизируем это
+  // @ts-ignore
+  const folderId = (folder === "root" || !folder) ? "" : folder;
+  const url = `https://www.googleapis.com/upload/drive/v3/files?uploadType=media&ignoreDefaultVisibility=true`;
+  
+  // В простом режиме метаданные (имя) передать сложнее одним запросом через стрим, 
+  // поэтому сначала создаем файл, потом переименуем, ЛИБО используем multipart (но он сложен для стрима).
+  // Оставим пока медиа-аплоад для стабильности.
+  const res = await fetch(url, {
+      method: 'POST',
+      headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': type
+      },
+      body: stream,
+      // @ts-ignore
+      duplex: 'half'
   });
   return res.ok;
 }
@@ -4218,6 +4907,7 @@ async function createMailruFolder(folderName, accessToken, env) {
 }
 
 // Работа с WebDAV
+// @ts-ignore
 async function uploadWebDAVFromArrayBuffer(arrayBuffer, fileName, userData, env) {
   let fullPath;
   let headers = { "Content-Type": "application/octet-stream" };
@@ -4239,6 +4929,26 @@ async function uploadWebDAVFromArrayBuffer(arrayBuffer, fileName, userData, env)
     body: arrayBuffer
   });
   return res.status === 201 || res.status === 204;
+}
+
+// @ts-ignore
+async function uploadWebDAVStream(stream, name, userData, env, type, fileSize) {
+    // Подходит и для Mail.ru, и для своего WebDAV
+    const baseUrl = userData.webdav_url || userData.webdav_host || "";
+    const url = `${baseUrl}/${name}`.replace(/\/+/g, '/').replace(':/', '://');
+    const auth = btoa(`${userData.webdav_user}:${userData.webdav_pass}`);
+    
+    const res = await fetch(url, {
+        method: 'PUT',
+        headers: { 
+            'Authorization': `Basic ${auth}`, 
+            'Content-Type': type 
+        },
+        body: stream,
+        // @ts-ignore
+        duplex: 'half'
+    });
+    return res.ok;
 }
 
 async function listWebDavFolders(user) {
@@ -4351,6 +5061,23 @@ async function uploadToDropboxFromArrayBuffer(arrayBuffer, fileName, accessToken
       "Content-Type": "application/octet-stream"
     },
     body: arrayBuffer
+  });
+  return res.ok;
+}
+
+// @ts-ignore
+async function uploadToDropboxStream(stream, name, token, folder, fileSize) {
+  const path = (folder ? `/${folder}/${name}` : `/${name}`).replace(/\/+/g, '/');
+  const res = await fetch('https://content.dropboxapi.com/2/files/upload', {
+      method: 'POST',
+      headers: {
+          'Authorization': `Bearer ${token}`,
+          'Dropbox-API-Arg': JSON.stringify({ path: path, mode: "overwrite" }),
+          'Content-Type': 'application/octet-stream'
+      },
+      body: stream,
+      // @ts-ignore
+      duplex: 'half'
   });
   return res.ok;
 }
@@ -4576,6 +5303,7 @@ ${candidatesList}
  * @param {string} userMessageText - Текущее сообщение пользователя. 
  * @returns {Promise<string>} Сгенерированный текстовый ответ.
  */
+// @ts-ignore
 async function callGeminiChat(prompt, config, env, userMessageText) {
     
   // --- ДИНАМИЧЕСКИЕ ПАРАМЕТРЫ ИЗ КОНФИГУРАЦИИ ---
@@ -4973,6 +5701,7 @@ async function callWorkersAIVision(config, imageBuffer, env) { // <-- ИЗМЕН
  * @param {Object} env - Объект окружения (включает DEBUG_ENABLED и ctx).
  * @returns {Promise<string>} Сгенерированный текстовый ответ.
  */
+// @ts-ignore
 async function callBotHubTextChat(prompt, config, env, messageText) {
   // 1. ОПРЕДЕЛЕНИЕ СИСТЕМНОГО КОНТЕКСТА (ГЛОБАЛЬНАЯ КОНСТАНТА)
   const SYSTEM_PROMPT = `
