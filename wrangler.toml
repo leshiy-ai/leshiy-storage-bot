@@ -30,8 +30,6 @@ VK_SECURE_KEY = ""
 VK_SERVICE_KEY = ""
 MAILRU_CLIENT_ID = ""
 MAILRU_CLIENT_SECRET = ""
-YANDEX_CLIENT_ID = ""
-YANDEX_CLIENT_SECRET = ""
 
 # [[kv_namespaces]] - Здесь Привязки KV
 [[kv_namespaces]]
