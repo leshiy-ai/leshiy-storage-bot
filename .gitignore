@@ -1,4 +1,11 @@
-.wrangler/
-.dev.vars
-dist/
+# Файлы с секретами и зависимостями
+index.js
+storage-gateway.yml
+node_modules
+
+# версии
 versions
+
+# Системные файлы
+.DS_Store
+npm-debug.log
