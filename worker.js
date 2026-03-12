@@ -1,20 +1,33 @@
-/* ?? Приложение Storage Bot "Хранилка" by Leshiy
-Одновременно работает как Telegram-бот, vk-чат-бот, и vkMiniApp-приложение с функцией аплоад/доунлоад с реферальной системой доступа.
-Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака.
-Это продвинутый SaaS-инструмент работающий круглосуточно 24/7 для личного использования или сообщества по обмену файлами с друзьями и родственниками. 
-Автор: Огорельцев Александр Валерьевич
+/* 🗄 Приложение "Хранилка" by Leshiy
 
-? Основные функции: Автоматическая загрузка фото и видео на облачные платформы (Яндекс Диск, Google Drive, Dropbox, Облако Mail.Ru WebDAV и др.) 
-прямо через телеграмм или вконтакте. Возможность предоставления доступа к Вашему хранилищу друзьям и близким просто отправив им реферальную ссылку.
-Универсальность: Поддержка облачных провайдеров с авторизацией OAuth (Яндекс Диск, Google Drive, Dropbox) и WebDAV (Облако Mail.Ru, Yandex WebDAV и др.).
-Умное именование: Сохраняет исходные имена для файлов без сжатия и генерирует имена по дате/времени для сжатых фото/видео/голосовых.
-Также есть функция поиска по Хранилке и возможность достать файлы с Вашего облака, в телеграмм напрямую в чат, а в вк через ссылку "скачать".
-Интеграция ИИ: В сопровождение прикручен умный искуственный интеллект Gemini AI (через Google AI Studio API), который может подсказать любой вопрос.
-Поддержка WEBM: Возможность сохранять видеофайлы в современных форматах без потери качества и размера.
-Диагностика: Команда /debug для проверки статуса подключения к хранилищу в реальном времени.
+Чат-бот и приложение для автоматической загрузки фото и видео в облачное хранилище с реферальной системой доступа.
+
+🇷🇺 Одновременно работает как Telegram-бот, vk-чат-бот, и vkMiniApp-приложение и okMiniApp в одноклассниках с функцией аплоад/доунлоад с реферальной системой доступа.
+🆓 Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. Абсолютно бесплатно.
+🌐 Это продвинутый SaaS-инструмент работающий круглосуточно 24/7 для личного использования или сообщества по обмену файлами с друзьями и родственниками.
+✨ Основные функции: Автоматическая загрузка фото и видео на облачные платформы (Яндекс Диск, Google Drive, Dropbox, Облако Mail.Ru WebDAV, или Свои FTP/SFTP/WebDAV сервера.)
+прямо через приложение.
+🤝 Возможность предоставления доступа к Вашему хранилищу друзьям и близким просто отправив им реферальную ссылку.
+☁️ Универсальность: Поддержка облачных провайдеров с авторизацией OAuth (Яндекс Диск, Google Drive, Dropbox) и WebDAV (Облако Mail.Ru, Yandex WebDAV и др.), а также FTP/SFTP-серверов.
+🤖 Умное именование: Сохраняет исходные имена для файлов без сжатия и генерирует имена по дате/времени для сжатых фото/видео/голосовых. Сохраняет фото и видеофайлы в современных форматах без потери качества и размера.
+🔍 Также есть функция поиска по Хранилке и возможность достать файлы с Вашего облака, в телеграмм напрямую в чат, а в вк и ок через ссылку "скачать".
+🧠 Интеграция ИИ: В сопровождение прикручен умный искуственный интеллект Gemini AI (через Google AI Studio API), который может подсказать любой вопрос.
+🛠 Диагностика: Команда /debug для проверки статуса подключения к хранилищу в реальном времени.
+👨 Автор: Огорельцев Александр Валерьевич
 */
+
 // Глобальные константы
-const version = "v3.0.5 от 07.02.2026"; // актуальная версия
+const version = "v3.0.6 от 08.02.2026"; // актуальная версия
+
+const providerNames = {
+    'yandex': '☁️ Яндекс Диск',
+    'google': '☁️ Google Drive',
+    'dropbox': '☁️ Dropbox',
+    'mailru': '✉️ Облако Mail.ru',
+    'webdav': '🌐 WebDAV Сервер',
+    'ftp': '🔒 FTP Сервер',
+    'sftp': '🔐 SFTP Сервер'
+};
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -31,7 +44,7 @@ async function worker_code_fetch(request, env, ctx) {
     if (typeof data === 'object' && data !== null) return data;
       try { return JSON.parse(data || '{}');
       } catch (e) { return {}; }};  
-    //console.log("?? Запрос:", request.method, request.url);
+    //console.log("📥 Запрос:", request.method, request.url);
 
     // Ссылка для проверки: https://.../debug?test=1
     if (url.pathname.includes('/debug')) {
@@ -170,6 +183,47 @@ async function worker_code_fetch(request, env, ctx) {
         else if (user.provider === 'ftp') providerName = "FTP Сервер";
         else if (user.provider === 'sftp') providerName = "SFTP Сервер";
     
+        // === ПРОВЕРКА УВЕДОМЛЕНИЙ О ПОДКЛЮЧЕНИИ ДРУГА ===
+        let friendConnected = null;
+        try {
+          const notificationsKey = `notifications:${vkUserId}`;
+          const rawNotif = await env.USER_DB.get(notificationsKey);
+          
+          if (rawNotif) {
+            console.log("[get-status] Найдены уведомления:", rawNotif);
+            const notif = (typeof rawNotif === 'string') ? JSON.parse(rawNotif) : rawNotif;
+            const recentIndex = notif.findIndex(n => 
+              n.type === 'friend_connected' && 
+              !n.read && 
+              (Date.now() - n.timestamp) < 86400000
+            );
+            
+            if (recentIndex !== -1) {
+              const recent = notif[recentIndex];
+              friendConnected = {
+                userId: recent.userId,
+                userName: recent.userName || 'Друг',
+                userPhoto: recent.userPhoto || recent.photo || 'https://vk.com/images/camera_50.png',
+                provider: recent.provider,
+                notificationIndex: recentIndex  // ← ДОБАВЛЕНО: индекс для последующей пометки
+              };
+              
+              // Помечаем как прочитанное
+              //notif[recentIndex].read = true;
+              //await env.USER_DB.put(notificationsKey, JSON.stringify(notif));
+              //console.log("[get-status] Уведомление помечено как прочитанное:", friendConnected);
+              console.log("[get-status] Найдено новое уведомление:", friendConnected);
+            } else {
+              console.log("[get-status] Нет непрочитанных уведомлений");
+            }
+          } else {
+            console.log("[get-status] Уведомлений нет");
+          }
+        } catch (e) {
+          console.error("[get-status] Ошибка уведомлений:", e.message);
+        }
+        // === КОНЕЦ ПРОВЕРКИ ===
+
         return new Response(JSON.stringify({
             isAdmin: isAdmin,
             friendId: friendOf,
@@ -178,15 +232,59 @@ async function worker_code_fetch(request, env, ctx) {
             providerName: providerName,
             currentFolder: user.folderId || "Root",
             userName: user.name || "Пользователь", // Отдаем имя обратно на фронт
-            userPhoto: user.photo || "",           // И фото тоже
-            webdav_host: user.webdav_host || ""
+            userPhoto: user.photo || "https://vk.com/images/camera_50.png",           // И фото тоже
+            webdav_host: user.webdav_host || "",
+            shared_from: user.shared_from || null,
+            friendConnected: friendConnected
         }), {
             headers: { 
                 "Content-Type": "application/json; charset=UTF-8",
                 "Access-Control-Allow-Origin": "*" 
             }
         });
-    }
+      }
+
+      // === ЭНДПОИНТ: ПОМЕТИТЬ УВЕДОМЛЕНИЕ КАК ПРОЧИТАННОЕ ===
+      if (url.pathname === "/api/mark-notification-read") {
+        const vkUserId = url.searchParams.get("vk_user_id");
+        const notificationIndex = parseInt(url.searchParams.get("index"));
+        
+        if (!vkUserId || isNaN(notificationIndex)) {
+          return new Response(JSON.stringify({ success: false, error: "Invalid parameters" }), {
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+          });
+        }
+        
+        try {
+          const notificationsKey = `notifications:${vkUserId}`;
+          const rawNotif = await env.USER_DB.get(notificationsKey);
+          
+          if (rawNotif) {
+            const notif = (typeof rawNotif === 'string') ? JSON.parse(rawNotif) : rawNotif;
+            
+            if (notif[notificationIndex]) {
+              notif[notificationIndex].read = true;
+              await env.USER_DB.put(notificationsKey, JSON.stringify(notif));
+              
+              console.log("[mark-notification-read] Уведомление помечено как прочитанное:", notificationIndex);
+              
+              return new Response(JSON.stringify({ success: true }), {
+                headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+              });
+            }
+          }
+          
+          return new Response(JSON.stringify({ success: false, error: "Notification not found" }), {
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+          });
+        } catch (e) {
+          console.error("[mark-notification-read] Ошибка:", e.message);
+          return new Response(JSON.stringify({ success: false, error: e.message }), {
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+          });
+        }
+      } // === КОНЕЦ ЭНДПОИНТА ===
+      
 
       // --- ОБРАБОТКА ЧАТА ИИ (ДЛЯ МИНИ-АППА) ---
       if (url.searchParams.get("action") === "ai_chat") {
@@ -297,7 +395,7 @@ async function worker_code_fetch(request, env, ctx) {
         </head>
         <body style="background:#19191a; color:#fff; display:flex; justify-content:center; align-items:center; height:100vh; font-family:sans-serif;">
             <div style="text-align:center;">
-                <p>?? Перенаправление на загрузку...</p>
+                <p>🔄 Перенаправление на загрузку...</p>
                 <a href="${directLink}" style="color:#4bb34b; text-decoration:none; font-size:14px;">Нажмите сюда, если загрузка не началась</a>
             </div>
             <script>
@@ -533,9 +631,48 @@ async function worker_code_fetch(request, env, ctx) {
           referralData.is_referral = true;
           referralData.invited_by = fId;
       
-          // 5. Сохраняем обновленный профиль реферала и связь
+          // 5. Сохраняем обновленный профиль реферала
           await env.USER_DB.put(`user:${uId}`, JSON.stringify(referralData));
-          await env.USER_DB.put("friend_of:" + String(uId), String(fId));
+          
+          // === ИСПРАВЛЕННЫЙ БЛОК: ЗАПИСЬ УВЕДОМЛЕНИЯ ДЛЯ ВЛАДЕЛЬЦА ===
+          try {
+            // Проверка: НЕ подключается ли пользователь к самому себе?
+            if (String(uId) !== String(fId)) {
+              const ownerNotificationsKey = `notifications:${fId}`;
+              const ownerRawNotif = await env.USER_DB.get(ownerNotificationsKey);
+              const ownerNotif = ownerRawNotif ? JSON.parse(ownerRawNotif) : [];
+              // Получаем имя текущего пользователя
+              let userName = 'Друг';
+              try {
+                userName = referralData.name || await getVKUserName(uId, env) || 'Друг';
+                userPhoto = referralData.photo || "https://vk.com/images/camera_50.png";
+              } catch (e) {
+                console.error("[connect-friend] Ошибка получения имени:", e.message);
+              }
+              
+              // Добавляем новое уведомление
+              ownerNotif.push({
+                type: 'friend_connected',
+                userId: uId,
+                userName: userName,
+                userPhoto: userPhoto,
+                provider: ownerData.provider,
+                folderId: ownerData.folderId,
+                timestamp: Date.now(),
+                read: false
+              });
+              
+              // Сохраняем обновленный список
+              await env.USER_DB.put(ownerNotificationsKey, JSON.stringify(ownerNotif));
+              
+              console.log("[connect-friend] Уведомление записано для владельца:", fId, "от пользователя:", uId);
+            } else {
+              console.log("[connect-friend] Самоподключение — уведомление НЕ записано");
+            }
+          } catch (e) {
+            console.error("[connect-friend] Ошибка записи уведомления:", e.message);
+          }
+          // === КОНЕЦ ИСПРАВЛЕННОГО БЛОКА ===
           
           return new Response(JSON.stringify({ success: true, connectedTo: fId }), { headers });
         }
@@ -584,7 +721,7 @@ async function worker_code_fetch(request, env, ctx) {
     <body style="font-family:sans-serif; text-align:center; padding-top:100px; background:#f4f4f4;">
     <div style="display:inline-block; background:white; padding:40px; border-radius:20px; box-shadow:0 10px 30px rgba(0,0,0,0.1);">
     <h1 style="margin:0;">Telegram Storage Bot "Хранилка" by Leshiy</h1>
-    <p style="color:green; font-weight:bold;">? Система работает штатно</p>
+    <p style="color:green; font-weight:bold;">✅ Система работает штатно</p>
     <hr style="border:0; border-top:1px solid #eee; margin:20px 0;">
     <a href="https://t.me/leshiy_storage_bot" style="display:inline-block; background:#0088cc; color:white; padding:12px 25px; border-radius:50px; text-decoration:none; font-weight:bold;">Открыть бота в Telegram</a>
     </div>
@@ -623,14 +760,13 @@ async function worker_code_fetch(request, env, ctx) {
         const html = renderVKMiniAppHTML(params, userData, isAdmin, countUser, env); 
         
         return new Response(html, {
-            headers: {
-                "Content-Type": "text/html; charset=utf-8",
-                // Добавляем 'self' (текущий домен) и убираем привязку к конкретному старому адресу
-                "Content-Security-Policy": "frame-ancestors https://vk.com https://*.vk.com ${domain}; script-src 'self' https://unpkg.com 'unsafe-inline'; img-src * data: blob:; connect-src *; style-src 'unsafe-inline';",
-                "Access-Control-Allow-Origin": "*",
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-                "Expires": "0"
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Content-Security-Policy": "frame-ancestors 'self' https://ok.ru https://*.ok.ru https://*.okcdn.ru https://vk.com https://*.vk.com https://*.vk-portal.net https://id.vk.com https://connect.ok.ru https://*.mycdn.me https://*.mail.ru https://d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://st.okcdn.ru https://*.okcdn.ru https://*.vk.ru https://*.mail.ru https://dzen.ru https://st-ok.cdn-vk.ru; img-src * data: blob:; connect-src *; style-src 'self' 'unsafe-inline' https://*.vk.ru https://*.okcdn.ru;",
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
             }
         });
       }
@@ -711,27 +847,82 @@ async function worker_code_fetch(request, env, ctx) {
         
         if (url.pathname === "/api/setup-webdav") {
           const userId = String(body.userId);
-      
-          // 1. Сначала получаем текущие данные пользователя из KV
           const kvData = await env.USER_DB.get(`user:${userId}`);
-          let userObj = kvData ? JSON.parse(kvData) : { userId: userId };
-      
-          // 2. Обновляем поля WebDAV (как это делает команда /setup_webdav)
-          userObj.provider = 'webdav';
+          let userObj = kvData ? (typeof kvData === 'string' ? JSON.parse(kvData) : kvData) : { userId: userId };
+          
+          // === 1. ОПРЕДЕЛЯЕМ ПРОВАЙДЕРА ПО ПОЛНОМУ URL ===
+          let provider = 'webdav'; // по умолчанию
+          let port = null;
+          
+          if (body.fullUrl) {
+            if (body.fullUrl.startsWith('ftp://')) {
+              provider = 'ftp';
+              port = '21'; // стандартный порт FTP
+            } else if (body.fullUrl.startsWith('sftp://')) {
+              provider = 'sftp';
+              port = '22'; // стандартный порт SFTP
+            }
+            // Для webdav порт не нужен — определяется по протоколу (http/https)
+            
+            // === 2. ИЗВЛЕКАЕМ ПОРТ ИЗ URL, ЕСЛИ УКАЗАН ЯВНО (например: ftp://server.com:2121) ===
+            if (provider === 'ftp' || provider === 'sftp') {
+              try {
+                const urlObj = new URL(body.fullUrl);
+                if (urlObj.port) port = urlObj.port;
+              } catch (e) { /* игнорируем ошибки парсинга */ }
+            }
+          }
+          
+          // === 3. СОХРАНЯЕМ ДАННЫЕ В ЗАВИСИМОСТИ ОТ ПРОВАЙДЕРА ===
+          userObj.provider = provider;
           userObj.folderId = body.folderId || 'Root';
-          userObj.webdav_host = body.host; 
-          userObj.webdav_user = body.user;
-          userObj.webdav_pass = body.pass;
           userObj.timestamp = Date.now();
-      
-          // 3. Сохраняем обратно в KV
+          userObj.fullUrl = body.fullUrl || ''; // ← КЛЮЧЕВОЕ: сохраняем полный исходный URL
+          
+          if (provider === 'webdav') {
+            // Для WebDAV: хост с протоколом (если нет — добавляем https://)
+            let host = body.host;
+            if (host && !host.startsWith('http')) host = 'https://' + host;
+            
+            userObj.webdav_host = host;
+            userObj.webdav_user = body.user;
+            userObj.webdav_pass = body.pass;
+            userObj.host = host; // для совместимости
+            userObj.user = body.user;
+            userObj.pass = body.pass;
+            
+            // Чистим FTP/SFTP поля
+            delete userObj.port;
+          } 
+          else if (provider === 'ftp' || provider === 'sftp') {
+            // Для FTP/SFTP: только хост (без протокола), порт, логин, пароль
+            userObj.host = body.host; // чистый хост (например: 92.255.162.189)
+            userObj.port = port;
+            userObj.user = body.user;
+            userObj.pass = body.pass;
+            
+            // Чистим WebDAV поля
+            delete userObj.webdav_host;
+            delete userObj.webdav_user;
+            delete userObj.webdav_pass;
+          }
+          
+          // === 4. СОХРАНЯЕМ В KV ===
           await env.USER_DB.put(`user:${userId}`, JSON.stringify(userObj));
-      
-          return new Response(JSON.stringify({ success: true }), {
-              headers: { 
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*" 
-              }
+          
+          // === 5. ВОЗВРАЩАЕМ ОТВЕТ С УКАЗАНИЕМ ПРОВАЙДЕРА ===
+          const message = provider === 'webdav' ? '✅ WebDAV подключён!' : 
+                          provider === 'ftp' ? '✅ FTP подключён!' : '✅ SFTP подключён!';
+          
+          return new Response(JSON.stringify({ 
+            success: true,
+            provider: provider,
+            message: message
+          }), {
+            headers: {
+              "Content-Type": "application/json; charset=utf-8",
+              "Access-Control-Allow-Origin": "*"
+            }
           });
         }
 
@@ -773,7 +964,7 @@ async function worker_code_fetch(request, env, ctx) {
           }
         }
 
-        // VK API > POST /vk
+        // VK API → POST /vk
         if (url.pathname === "/vk") {
           return await handleVK(body, env, hostname, ctx);
         }
@@ -877,29 +1068,29 @@ function getStartKeyboardVK(userId, hostname, env, inviteData = null, isReply = 
     
     // Верхний ряд кнопок
     buttons.push([
-      createBtn("??", "/start", "positive"),
-      createBtn("??", "/folder", "secondary"),
-      createBtn("??", "/debug", "primary"),
+      createBtn("🏠", "/start", "positive"),
+      createBtn("📂", "/folder", "secondary"),
+      createBtn("🛠", "/debug", "primary"),
     ]);
     
     // Основные команды
     buttons.push([
-      //createBtn("??", "/start", "positive"),
-      createBtn("??", "/about", "secondary"),
-      //createBtn("??", "/folder", "secondary"),
-      createBtn("??", "/share", "secondary"),
-      createBtn("??", "search", "secondary"),
-      //createBtn("??", "/debug", "primary"),
-      createBtn("??", "/disconnect", "negative")
+      //createBtn("🏠", "/start", "positive"),
+      createBtn("💬", "/about", "secondary"),
+      //createBtn("📂", "/folder", "secondary"),
+      createBtn("🤝", "/share", "secondary"),
+      createBtn("🔎", "search", "secondary"),
+      //createBtn("🛠", "/debug", "primary"),
+      createBtn("🔌", "/disconnect", "negative")
     ]);
 
   } else {
-    buttons.push([createBtn("?? Яндекс.Диск", "auth", "secondary", { provider: "yandex" })]);
-    buttons.push([createBtn("?? Google Drive", "auth", "secondary", { provider: "google" })]);
-    buttons.push([createBtn("?? Dropbox", "auth", "secondary", { provider: "dropbox" })]);
-    buttons.push([createBtn("?? Облако Mail.ru", "auth_mailru")]);
-    buttons.push([createBtn("??? Свой WebDAV", "auth_webdav")]);
-    buttons.push([createBtn("?? Подключить диск друга", "ask_ref_token")]);
+    buttons.push([createBtn("🔗 Яндекс.Диск", "auth", "secondary", { provider: "yandex" })]);
+    buttons.push([createBtn("🔗 Google Drive", "auth", "secondary", { provider: "google" })]);
+    buttons.push([createBtn("🔗 Dropbox", "auth", "secondary", { provider: "dropbox" })]);
+    buttons.push([createBtn("✉️ Облако Mail.ru", "auth_mailru")]);
+    buttons.push([createBtn("🌐 Свой WebDAV", "auth_webdav")]);
+    buttons.push([createBtn("🤝 Подключить диск друга", "ask_ref_token")]);
   }
   return {
     inline: !isReply, // Если isReply = true, то inline будет false
@@ -914,7 +1105,7 @@ function getInviteKeyboardVK(token) {
       {
         action: {
           type: "text",
-          label: "? Подключить Хранилку друга",
+          label: "✅ Подключить Хранилку друга",
           payload: JSON.stringify({ cmd: "confirm_ref", token: token })
         },
         color: "positive"
@@ -931,7 +1122,7 @@ function getStartInlineKeyboardVK(userId, hostname, env, inviteData = null) {
     buttons.push([{
       action: {
         type: "text",
-        label: "? Подключить диск",
+        label: "✅ Подключить диск",
         payload: JSON.stringify({ cmd: "confirm_ref", token: inviteData.token })
       },
       color: "positive"
@@ -948,17 +1139,17 @@ function getStartInlineKeyboardVK(userId, hostname, env, inviteData = null) {
     };
   };
   
-  buttons.push([createBtn("?? Яндекс.Диск", "auth", { provider: "yandex" })]);
-  buttons.push([createBtn("?? Google Drive", "auth", { provider: "google" })]);
-  buttons.push([createBtn("?? Dropbox", "auth", { provider: "dropbox" })]);
-  buttons.push([createBtn("?? Облако Mail.ru", "auth_mailru")]);
-  buttons.push([createBtn("??? Свой WebDAV", "auth_webdav")]);
+  buttons.push([createBtn("🔗 Яндекс.Диск", "auth", { provider: "yandex" })]);
+  buttons.push([createBtn("🔗 Google Drive", "auth", { provider: "google" })]);
+  buttons.push([createBtn("🔗 Dropbox", "auth", { provider: "dropbox" })]);
+  buttons.push([createBtn("✉️ Облако Mail.ru", "auth_mailru")]);
+  buttons.push([createBtn("🌐 Свой WebDAV", "auth_webdav")]);
 
   if (inviteData) {
-    buttons.push([createBtn("?? Подтвердить", "confirm_ref", { token: inviteData.token })]);
-    //buttons.push([{ action: { type: "text", label: "?? Выбрать папку", payload: JSON.stringify({ cmd: "/folder" }) }, color: "primary" }]);
+    buttons.push([createBtn("🤝 Подтвердить", "confirm_ref", { token: inviteData.token })]);
+    //buttons.push([{ action: { type: "text", label: "📂 Выбрать папку", payload: JSON.stringify({ cmd: "/folder" }) }, color: "primary" }]);
   } else {
-    buttons.push([createBtn("?? Пригласить друга", "ask_ref_token")]);
+    buttons.push([createBtn("🤝 Пригласить друга", "ask_ref_token")]);
   }
 
   return {
@@ -976,44 +1167,44 @@ function getStartInlineKeyboardVK(userId, hostname, env, inviteData = null) {
 */
 async function renderSearchPageVK(searchKey, offset, env, userId) {
   const dataRaw = await env.USER_DB.get(searchKey);
-  if (!dataRaw) return { text: "? Поиск устарел или не найден.", kb: null };
+  if (!dataRaw) return { text: "❌ Поиск устарел или не найден.", kb: null };
   const searchData = (typeof dataRaw === 'string') ? JSON.parse(dataRaw) : dataRaw;
   const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
   const total = searchData.ids.length;
   const pageIds = searchData.ids.slice(offset, offset + 5);
-  let list = `?? <b>Найдено всего: ${total}</b> (Страница ${Math.floor(offset/5) + 1})
+  let list = `🔍 <b>Найдено всего: ${total}</b> (Страница ${Math.floor(offset/5) + 1})
 `;
   const userFolder = userData?.folderId || "/";
   for (const id of pageIds) {
     const f = await env.FILES_DB.prepare("SELECT fileName, provider, folderId FROM files WHERE id = ?").bind(id).first();
     const isProviderOk = f?.provider?.toLowerCase() === userData?.provider?.toLowerCase();
     const isPathOk = f?.folderId?.replace(/^\//, '') === userData?.folderId?.replace(/^\//, '');
-    const status = (isProviderOk && isPathOk) ? '??' : '??';
+    const status = (isProviderOk && isPathOk) ? '🟢' : '🔴';
     list += `${status} <code>${f?.fileName || 'Файл'}</code>
 `;
   }
   list += `
 Активное подключение:`;
   list += `
-<b>?? Провайдер: ${userData?.provider}</b> ?? Папка: ${userData?.folderId}`;
+<b>☁️ Провайдер: ${userData?.provider}</b> 📁 Папка: ${userData?.folderId}`;
   list += `
-<b>?? доступно</b> | <b>?? не доступно</b> для выгрузки`;
+<b>🟢 доступно</b> | <b>🔴 не доступно</b> для выгрузки`;
 
   // Формируем клавиатуру
   const kb = { inline_keyboard: [
-    [{ text: "?? Выгрузить эти файлы", callback_data: `dl:${searchKey}:${offset}` },
-    { text: "?? Изменить поиск", callback_data: "search_retry" }],
+    [{ text: "📥 Выгрузить эти файлы", callback_data: `dl:${searchKey}:${offset}` },
+    { text: "🔎 Изменить поиск", callback_data: "search_retry" }],
     []
   ]};
 
   if (offset > 0) {
-    kb.inline_keyboard[1].push({ text: `?? стр. ${Math.floor(offset/5) + 0}`, callback_data: `pg:${searchKey}:${offset - 5}` });
+    kb.inline_keyboard[1].push({ text: `⬅️ стр. ${Math.floor(offset/5) + 0}`, callback_data: `pg:${searchKey}:${offset - 5}` });
   }
   if (offset + 5 < total) {
-    kb.inline_keyboard[1].push({ text: `?? стр. ${Math.floor(offset/5) + 1}`, callback_data: "dummy_ignore" });
+    kb.inline_keyboard[1].push({ text: `⬆️ стр. ${Math.floor(offset/5) + 1}`, callback_data: "dummy_ignore" });
   }
   if (offset + 5 < total) {
-    kb.inline_keyboard[1].push({ text: `стр. ${Math.floor(offset/5) + 2} ??`, callback_data: `pg:${searchKey}:${offset + 5}` });
+    kb.inline_keyboard[1].push({ text: `стр. ${Math.floor(offset/5) + 2} ➡️`, callback_data: `pg:${searchKey}:${offset + 5}` });
   }
 
   return { text: list, kb };
@@ -1032,7 +1223,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
   let userData = await env.USER_DB.get(userKey, { type: "json" });
 
   // -----------------------------------------------------------------------------------
-  // ? НОВЫЙ БЛОК: ФОРМИРОВАНИЕ ИНФОРМАЦИИ О ПОЛЬЗОВАТЕЛЕ
+  // ✅ НОВЫЙ БЛОК: ФОРМИРОВАНИЕ ИНФОРМАЦИИ О ПОЛЬЗОВАТЕЛЕ
   // -----------------------------------------------------------------------------------
   let adminLog = '';
   const request_user = msg.from;
@@ -1053,7 +1244,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
       
       // Опционально: лог админу, что кто-то сменил имя
       if (userData?.name && userData.name !== newFullName) {
-         await logDebug(`Сообщение админу:\n?? <b>${newFullName}</b> обновил профиль`, env);
+         await logDebug(`Сообщение админу:\n🔄 <b>${newFullName}</b> обновил профиль`, env);
       }
     }
   }
@@ -1113,46 +1304,46 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
           };
           await env.USER_DB.put(userKey, JSON.stringify(userData));          
           // Добавляем инфо о папке в сообщение, чтобы сразу видеть результат
-          await sendMessage(chatId, `?? <b>Готово!</b>\nТы подключился к хранилке пользователя <code>${inviteData.inviterId}</code> (${ownerData.provider}).\n?? Папка: <code>${ownerData.folderId}</code>`, null, env);
-          await sendMessage(inviteData.inviterId, `?? Твоей хранилкой начал пользоваться ID <code>${userId}</code> (папка: ${userData.folderId})`, null, env);
+          await sendMessage(chatId, `🤝 <b>Готово!</b>\nТы подключился к хранилке пользователя <code>${inviteData.inviterId}</code> (${ownerData.provider}).\n📁 Папка: <code>${ownerData.folderId}</code>`, null, env);
+          await sendMessage(inviteData.inviterId, `🔔 Твоей хранилкой начал пользоваться ID <code>${userId}</code> (папка: ${userData.folderId})`, null, env);
         }
       } else {
-        await sendMessage(chatId, "? Ссылка недействительна или устарела.", null, env);
+        await sendMessage(chatId, "❌ Ссылка недействительна или устарела.", null, env);
       }
     }
 
     // Уведомление админу о новом юзере (только если это первый заход)
     if (!userData && !isAdmin) {
       const userTag = msg.from.username ? ` (@${msg.from.username})` : "";
-      const report = `?? Новый пользователь: ${msg.from.first_name || "?"}\n` +
-                     `L Имя: <b>${welcomeName}</b>${userTag}\n` +
-                     `?? ID: <code>${userId}</code>\n` +
-                     `?? Статус: Ожидает подключения`;
+      const report = `👤 Новый пользователь: ${msg.from.first_name || "ᅠ"}\n` +
+                     `└ Имя: <b>${welcomeName}</b>${userTag}\n` +
+                     `🆔 ID: <code>${userId}</code>\n` +
+                     `📂 Статус: Ожидает подключения`;
       await logDebug(report, env);
     }
 
     // Формирование текста приветствия
-    let statusText = "? Диск не подключен";
+    let statusText = "❌ Диск не подключен";
     if (userData && userData.provider) {
       const folderInfo = userData.folderId ? ` (папка: <b>${userData.folderId}</b>)` : " (корень)";
       const sharedInfo = userData.shared_from ? ` [Общий диск]` : "";
-      statusText = `? <b>${userData.provider}</b> подключен${folderInfo}${sharedInfo}`;
+      statusText = `✅ <b>${userData.provider}</b> подключен${folderInfo}${sharedInfo}`;
     }
 
-    let welcome = `?? <b>Привет, ${welcomeName}! Я твоя личная Хранилка.</b>\n\n` +
-                  `?? Просто пришли мне фото или видео, и я закину их на сервер.\n\n` +
-                  `?? Статус: ${statusText}\n\n` +
-                  `?? <b>Команды:</b>\n` +
-                  `${isAdmin ? "/admin - ?? Меню админа\n" : ""}` +
-                  `/about — ?? О приложении\n` +
-                  `/folder — ?? Выбрать папку для загрузки\n` +
-                  `/share — ?? Создать ссылку для друга\n` +
-                  `/search — ?? Поиск файлов по хранилке\n` +
-                  `/disconnect — ?? Отключить диск друга\n` +
-                  `/debug — ?? Техническая информация`;
+    let welcome = `👋 <b>Привет, ${welcomeName}! Я твоя личная Хранилка.</b>\n\n` +
+                  `📁 Просто пришли мне фото или видео, и я закину их на сервер.\n\n` +
+                  `⚙️ Статус: ${statusText}\n\n` +
+                  `📖 <b>Команды:</b>\n` +
+                  `${isAdmin ? "/admin - 👑 Меню админа\n" : ""}` +
+                  `/about — 💬 О приложении\n` +
+                  `/folder — 📂 Выбрать папку для загрузки\n` +
+                  `/share — 🤝 Создать ссылку для друга\n` +
+                  `/search — 🔎 Поиск файлов по хранилке\n` +
+                  `/disconnect — 🔌 Отключить диск друга\n` +
+                  `/debug — 🛠 Техническая информация`;
     
     if (inviteData && !userData?.shared_from) {
-      welcome += `\n\n?? <b>Найдено приглашение!</b>\nОт владельца облака <b>${inviteData.provider}</b>.\nНажми кнопку подтверждения в меню ниже.`;
+      welcome += `\n\n🎁 <b>Найдено приглашение!</b>\nОт владельца облака <b>${inviteData.provider}</b>.\nНажми кнопку подтверждения в меню ниже.`;
     }
   
     const kb = getStartKeyboard(userId, hostname, env, inviteData);
@@ -1163,14 +1354,14 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
   const hasAccess = isAdmin || (userData && (userData.access_token || userData.provider === 'webdav' || userData.shared_from));
   
   if (!hasAccess) {
-    const restrictedMsg = `?? <b>Доступ ограничен.</b>\nУ тебя не подключено облако и нет активной ссылки от друга.`;
+    const restrictedMsg = `🚫 <b>Доступ ограничен.</b>\nУ тебя не подключено облако и нет активной ссылки от друга.`;
     return await sendMessage(chatId, restrictedMsg, null, env);
   }
 
   // --- КОМАНДА /SHARE ---
   if (text.startsWith("/share")) {
     if (userData.is_ref) {
-      return await sendMessage(chatId, "?? Ты используешь чужой диск и не можешь создавать свои реф-ссылки.", null, env);
+      return await sendMessage(chatId, "⚠️ Ты используешь чужой диск и не можешь создавать свои реф-ссылки.", null, env);
     }
     
     // Берем папку из команды (напр. /share STORAGE) или текущую выбранную
@@ -1191,9 +1382,9 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     const inviteLink = `https://t.me/${botName}?start=ref_${inviteToken}`;
     
     return await sendMessage(chatId, 
-      `?? <b>Твоя ссылка для друга:</b>\n<code>${inviteLink}</code>\n\n` +
-      `?? Облако: <b>${userData.provider}</b>\n` +
-      `?? Папка: <b>${currentFolder}</b>`, 
+      `🚀 <b>Твоя ссылка для друга:</b>\n<code>${inviteLink}</code>\n\n` +
+      `☁️ Облако: <b>${userData.provider}</b>\n` +
+      `📁 Папка: <b>${currentFolder}</b>`, 
       null, env
     );
   }
@@ -1205,14 +1396,14 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     const currentFolder = userData?.folderId || "Не установлена";
     
     // Статус меняется в зависимости от наличия провайдера
-    const statusIcon = userData?.provider ? "? Соединение активно" : "? Не подключен";
-    const debugMsg = `?? <b>Бот онлайн</b>\n` +
-                     `?? Версия: ${version}\n` +
-                     `?? Статус: ${statusIcon}\n` +
-                     `?? Провайдер: ${currentProvider}\n` +
-                     `?? Папка: <code>${currentFolder}</code>\n` +
-                     `?? Твой ID: <code>${userId}</code>\n` +
-                     `${isAdmin ? "?? Админ: Да" : "?? Админ: Нет"}`;
+    const statusIcon = userData?.provider ? "✅ Соединение активно" : "❌ Не подключен";
+    const debugMsg = `🤖 <b>Бот онлайн</b>\n` +
+                     `📦 Версия: ${version}\n` +
+                     `🔗 Статус: ${statusIcon}\n` +
+                     `☁️ Провайдер: ${currentProvider}\n` +
+                     `📁 Папка: <code>${currentFolder}</code>\n` +
+                     `👤 Твой ID: <code>${userId}</code>\n` +
+                     `${isAdmin ? "👑 Админ: Да" : "👑 Админ: Нет"}`;
     return await sendMessage(chatId, debugMsg, null, env);
   }
 
@@ -1220,10 +1411,10 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
   if (text === '/about') {
     const aboutText = `<b>Приложение «Хранилка» by Leshiy</b>
 
-  Одновременно работает как <a href='https://t.me/leshiy_storage_bot'>Telegram-бот</a>, <a href='https://vk.com/write-235249123'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010'>vkMiniApp-приложение</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.
+  Одновременно работает как <a href='https://t.me/leshiy_storage_bot'>Telegram-бот</a>, <a href='https://vk.com/write-235249123'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010'>vkMiniApp-приложение</a> а также доступно как <a href='https://ok.ru/app/512004791160'>okMiniApp в одноклассниках</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.
 
-  ? <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru, WebDAV, FTP, SFTP. Можно делиться доступом с близкими!
-  ?? <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.
+  ✨ <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru, WebDAV, FTP, SFTP. Можно делиться доступом с близкими!
+  🧠 <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.
 
   © Автор: <b>Огорельцев Александр Валерьевич</b>`;
 
@@ -1241,9 +1432,9 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
 
     await env.USER_DB.delete(userKey);
     
-    let dMsg = `?? <b>Диск отключен.</b>\nТы больше не подключен к ?? ${provider}.`;
+    let dMsg = `🔌 <b>Диск отключен.</b>\nТы больше не подключен к ☁️ ${provider}.`;
     if (isShared) {
-      dMsg = `?? <b>Ты отключился от хранилки друга.</b>\nТеперь ты можешь подключить своё собственное облако.`;
+      dMsg = `🔌 <b>Ты отключился от хранилки друга.</b>\nТеперь ты можешь подключить своё собственное облако.`;
     }
     return await sendMessage(chatId, dMsg, null, env);
   }
@@ -1263,7 +1454,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
         folders = await listWebDavFolders(userData); 
       }
     } catch (e) {
-      return await sendMessage(chatId, `? Ошибка списка папок: ${e.message}`, null, env);
+      return await sendMessage(chatId, `❌ Ошибка списка папок: ${e.message}`, null, env);
     }
 
     // Защита: если folders пришел undefined или не массив — превращаем в []
@@ -1273,15 +1464,15 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
       // Еще одна защита: проверяем, что объект f существует и в нем есть name
       if (!f || !f.name) return null;
       return [{ 
-        text: `?? ${f.name}`, 
+        text: `📁 ${f.name}`, 
         callback_data: `set_folder:${userId}:${userData.provider === 'google' ? (f.id || f.name) : f.name}` 
       }];
     }).filter(Boolean); // Убираем пустые кнопки
     
     // Кнопка для ручного ввода (теперь одна для всех провайдеров)
-    buttons.unshift([{ text: "? Создать папку", callback_data: `manual_folder:${userId}:prompt` }]);
+    buttons.unshift([{ text: "➕ Создать папку", callback_data: `manual_folder:${userId}:prompt` }]);
 
-    const msgText = `?? <b>${userData.provider.toUpperCase()} Drive</b>\n` +
+    const msgText = `📂 <b>${userData.provider.toUpperCase()} Drive</b>\n` +
                     `Текущая папка: <code>${userData.folderId || 'Root'}</code>\n\n` +
                     `Выбери из списка или укажи название:`;
     return await sendMessage(chatId, msgText, { inline_keyboard: buttons }, env);
@@ -1291,7 +1482,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
   if (text.startsWith("/search")) {
     // ПРОВЕРКА: Если диска нет, то и искать не в чем
     if (!userData || (!userData.provider && !userData.shared_from)) {
-      const noDiscMsg = `?? <b>Поиск недоступен</b>\n\n` +
+      const noDiscMsg = `⚠️ <b>Поиск недоступен</b>\n\n` +
                         `Твоё хранилище не подключено. Сначала авторизуйся или подключись к другу, чтобы я мог просканировать файлы.`;
       return await sendMessage(chatId, noDiscMsg, null, env);
     }
@@ -1302,18 +1493,18 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
       // Ставим стейт ожидания поиска на 5 минут
       await env.USER_DB.put(`state:${userId}`, "waiting_for_search", { expirationTtl: 300 });
 
-      const helpMsg = `?? <b>Поиск по архиву</b>\n\n` +
+      const helpMsg = `🔎 <b>Поиск по архиву</b>\n\n` +
                       `Пришли мне название файла или его часть.\n` +
                       `<i>Примеры: "сейф", "jpg", "2025"</i>\n\n` +
-                      `?? Ищу только по именам файлов.\n` +
-                      `?? Поиск не чувствителен к регистру.\n\n` +
-                      `?? <b>Просто напиши, что искать:</b>`;
+                      `🔹 Ищу только по именам файлов.\n` +
+                      `🔹 Поиск не чувствителен к регистру.\n\n` +
+                      `👇 <b>Просто напиши, что искать:</b>`;
       
       return await sendMessage(chatId, helpMsg, null, env);
     }
 
     // Если запрос есть — выполняем поиск
-    await sendMessage(chatId, "? <b>Выполняю поиск файлов...</b>", null, env);
+    await sendMessage(chatId, "⏳ <b>Выполняю поиск файлов...</b>", null, env);
     //const searchResult = await searchFilesByQuery(userId, isAdmin, query, env);
     // Определяем тип поиска: обычный или интеллектуальный
     const isAIQuery = query.includes(" ") && isAdmin; // Только у админа и только если есть пробел
@@ -1328,7 +1519,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     }
 
     if (!searchResult.success || searchResult.fileIds.length === 0) {
-      return await sendMessage(chatId, `? По запросу "<b>${query}</b>" ничего не найдено.`, null, env);
+      return await sendMessage(chatId, `❌ По запросу "<b>${query}</b>" ничего не найдено.`, null, env);
     }
 
     const shortId = Math.random().toString(36).substring(2, 8);
@@ -1349,16 +1540,16 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     if (!query) {
       // Ставим стейт ожидания поиска на 5 минут
       await env.USER_DB.put(`state:${userId}`, "waiting_for_aisearch", { expirationTtl: 300 });
-      return await sendMessage(chatId, "?? Что ищем с помощью ИИ?", null, env);
+      return await sendMessage(chatId, "🔎 Что ищем с помощью ИИ?", null, env);
     }
-    await sendMessage(chatId, "? <b>Выполняю интеллектуальный поиск...</b>", null, env);
+    await sendMessage(chatId, "⏳ <b>Выполняю интеллектуальный поиск...</b>", null, env);
     const searchResult = await searchAIFilesByQuery(userId, isAdmin, query, env);
   
     if (!searchResult.success) {
-      return await sendMessage(chatId, "? Ошибка поиска.", null, env);
+      return await sendMessage(chatId, "❌ Ошибка поиска.", null, env);
     }
     if (searchResult.fileIds.length === 0) {
-      return await sendMessage(chatId, "?? По вашему запросу ничего не найдено.", null, env);
+      return await sendMessage(chatId, "🔍 По вашему запросу ничего не найдено.", null, env);
     }
   
     // Ключ теперь короткий, чтобы влезть в лимиты кнопок TG (64 байта)
@@ -1380,11 +1571,11 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     const list = await env.USER_DB.list({ prefix: "user:" });
     const userCount = list.keys.length;
   
-    const adminMsg = `?? <b>Панель администратора</b>\n\n` +
-      `?? Админ ID: <code>${userId}</code>\n\n` +
-      `?? Авторизовано: <b>${userCount}</b> пользователей\n\n` +
-      `?? Версия: ${version}\n\n` +
-      `?? <b>Команды админа:</b>\n` +
+    const adminMsg = `⚙️ <b>Панель администратора</b>\n\n` +
+      `🆔 Админ ID: <code>${userId}</code>\n\n` +
+      `👥 Авторизовано: <b>${userCount}</b> пользователей\n\n` +
+      `🚀 Версия: ${version}\n\n` +
+      `📖 <b>Команды админа:</b>\n` +
       `/add — Добавить юзера с облаком\n` +
       `/clean_db — Чистка запросов поиска\n` +
       `/invites — Список инвайтов\n` +
@@ -1392,9 +1583,10 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
       `/ai_search — Интеллектуальный поиск\n`;
     const adminKeyboard = {
       inline_keyboard: [
-        [{ text: "?? Управление пользователями", callback_data: "admin_user_menu" }],
-        [{ text: "?? Настройки ИИ", callback_data: "ai_menu_main" }],
-        [{ text: "?? Выход из режима админа", callback_data: "admin_exit" }]
+        [{ text: "👥 Управление пользователями", callback_data: "admin_managed_menu" }],
+        [{ text: "🎫 Список инвайтов", callback_data: "show_invites" }],
+        [{ text: "🧠 Настройки ИИ", callback_data: "ai_menu_main" }],
+        [{ text: "🚪 Выход из режима админа", callback_data: "admin_exit" }]
       ]
     };
     return await sendMessage(chatId, adminMsg, adminKeyboard, env);
@@ -1407,85 +1599,93 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     ]);
     return await sendMessage(
       chatId,
-      `?? <b>Выберите тип ИИ-сервиса:</b>`,
+      `🧠 <b>Выберите тип ИИ-сервиса:</b>`,
       { inline_keyboard: buttons },
       env
     );
   }
 
-  if (text.startsWith("/invites") && isAdmin) {
+if (text.startsWith("/invites") && isAdmin) {
     try {
-        const list = await env.USER_DB.list({ prefix: "invite:" });
+      const list = await env.USER_DB.list({ prefix: "invite:" });
+      
+      if (list.keys.length === 0) {
+        await sendMessage(chatId, "📭 <b>Список инвайтов пуст.</b>", null, env);
+        return new Response("OK");
+      }
+
+      // === ПАГИНАЦИЯ ===
+      const page = parseInt(text.split(" ")[1]) || 1; // /invites 2
+      const maxDisplay = 10;
+      const startIndex = (page - 1) * maxDisplay;
+      const endIndex = startIndex + maxDisplay;
+      const keysToShow = list.keys.slice(startIndex, endIndex);
+      const totalPages = Math.ceil(list.keys.length / maxDisplay);
+      // === КОНЕЦ ПАГИНАЦИИ ===
+
+      let msg = `🎫 <b>Список инвайтов (Всего: ${list.keys.length})</b>\n\n`;
+      msg += `📄 Страница ${page}/${totalPages}\n\n`;
+      
+      const inline_keyboard = [];
+
+      for (let i = 0; i < keysToShow.length; i++) {
+        const keyName = keysToShow[i].name;
+        const code = keyName.split(":")[1] || "???";
         
-        if (list.keys.length === 0) {
-            await sendMessage(chatId, "?? <b>Список инвайтов пуст.</b>", null, env);
-            return new Response("OK");
-        }
-
-        let msg = `?? <b>Список инвайтов (${list.keys.length})</b>\n\n`;
-        const inline_keyboard = [];
+        const rawData = await env.USER_DB.get(keyName);
+        let inviteInfo = { 
+          provider: "unknown", 
+          inviterId: "unknown", 
+          folderId: "unknown",
+          timestamp: 0 
+        };
         
-        // Ограничиваем количество вывода за раз (например, последние 15), 
-        // чтобы не упереться в лимит 4096 символов Telegram
-        const maxDisplay = 15;
-        const keysToShow = list.keys.slice(0, maxDisplay);
-
-        for (let i = 0; i < keysToShow.length; i++) {
-            const keyName = keysToShow[i].name;
-            const code = keyName.split(":")[1] || "???";
-            
-            const rawData = await env.USER_DB.get(keyName);
-            // Инициализируем со всеми полями, которые хотим видеть
-            let inviteInfo = { 
-                provider: "unknown", 
-                inviterId: "unknown", 
-                folderId: "unknown", // Добавили дефолт
-                timestamp: 0 
-            };
-                        
-            if (rawData) {
-                // Твой get уже вернул объект, если это был JSON
-                // Просто сливаем данные в наш шаблон
-                if (typeof rawData === 'object') {
-                    inviteInfo = { ...inviteInfo, ...rawData };
-                } else if (typeof rawData === 'string') {
-                    try { inviteInfo = { ...inviteInfo, ...JSON.parse(rawData) }; } catch(e) {}
-                }
-            }
-            // Достаем имя владельца инвайта из базы пользователей
-            const ownerData = await env.USER_DB.get(`user:${inviteInfo.inviterId}`, { type: "json" });
-            const ownerName = ownerData?.name || "Аноним";
-
-            msg += `??? Токен №${i + 1}: <code>${code}</code>\n`;
-            msg += `?? От кого (ID): <code>${inviteInfo.inviterId}</code>\n`;
-            msg += `?? ФИО: <code>${ownerName}</code>\n`;
-            msg += `?? Провайдер: <b>${inviteInfo.provider}</b>\n`;
-            msg += `?? Папка: <b>${inviteInfo.folderId}</b>\n`;
-            if (inviteInfo.timestamp) {
-                const date = new Date(inviteInfo.timestamp).toLocaleString('ru-RU', { timeZone: 'Asia/Yekaterinburg' });
-                msg += `?? Создан: ${date}\n`;
-            }
-            msg += `--------------------\n`;
-
-            // Кнопки удаления делаем в 2 колонки для компактности
-            if (i % 2 === 0) {
-                inline_keyboard.push([{ text: `? Удалить №${i + 1}. ${code}`, callback_data: `del_inv:${code}` }]);
-            } else {
-                inline_keyboard[inline_keyboard.length - 1].push({ text: `? Удалить №${i + 1}. ${code}`, callback_data: `del_inv:${code}` });
-            }
+        if (rawData) {
+          if (typeof rawData === 'object') {
+            inviteInfo = { ...inviteInfo, ...rawData };
+          } else if (typeof rawData === 'string') {
+            try { inviteInfo = { ...inviteInfo, ...JSON.parse(rawData) }; } catch(e) {}
+          }
         }
+        
+        const ownerData = await env.USER_DB.get(`user:${inviteInfo.inviterId}`, { type: "json" });
+        const ownerName = ownerData?.name || "Аноним";
 
-        if (list.keys.length > maxDisplay) {
-            msg += `<i>...показаны первые ${maxDisplay} из ${list.keys.length}</i>`;
+        msg += `🎟️ Токен №${startIndex + i + 1}: <code>${code}</code>\n`;
+        msg += `🆔 От кого (ID): <code>${inviteInfo.inviterId}</code>\n`;
+        msg += `👤 ФИО: <code>${ownerName}</code>\n`;
+        msg += `🌐 Провайдер: <b>${inviteInfo.provider}</b>\n`;
+        msg += `📂 Папка: <b>${inviteInfo.folderId}</b>\n`;
+        if (inviteInfo.timestamp) {
+          const date = new Date(inviteInfo.timestamp).toLocaleString('ru-RU', { timeZone: 'Asia/Yekaterinburg' });
+          msg += `📅 Создан: ${date}\n`;
         }
+        msg += `────────────────────\n`;
 
-        // Кнопка очистки — всегда отдельной строкой внизу
-        inline_keyboard.push([{ text: "??? УДАЛИТЬ ВСЕ ИНВАЙТЫ", callback_data: "del_inv_all" }]);
+        // Кнопки удаления в 2 колонки
+        if (i % 2 === 0) {
+          inline_keyboard.push([{ text: `❌ Удалить №${startIndex + i + 1}. ${code}`, callback_data: `del_inv:${code}` }]);
+        } else {
+          inline_keyboard[inline_keyboard.length - 1].push({ text: `❌ Удалить №${startIndex + i + 1}. ${code}`, callback_data: `del_inv:${code}` });
+        }
+      }
 
-        await sendMessage(chatId, msg, { inline_keyboard }, env);
+      // === КНОПКИ НАВИГАЦИИ ===
+      const navButtons = [];
+      if (page < totalPages) {
+        navButtons.push({ text: "⏩ Следующие", callback_data: `invites_page:${page + 1}` });
+      }
+      if (navButtons.length > 0) {
+        inline_keyboard.push(navButtons);
+      }
+      // === КОНЕЦ КНОПОК НАВИГАЦИИ ===
+
+      // Кнопка очистки — всегда отдельной строкой внизу
+      inline_keyboard.push([{ text: "⬅️ Назад в меню", callback_data: "admin_back" }]);
+      await sendMessage(chatId, msg, { inline_keyboard }, env);
     } catch (e) {
-        console.error("Invites Error:", e);
-        await sendMessage(chatId, "? Ошибка при формировании списка инвайтов", null, env);
+      console.error("Invites Error:", e);
+      await sendMessage(chatId, "❌ Ошибка при формировании списка инвайтов", null, env);
     }
     return new Response("OK");
   }
@@ -1504,15 +1704,15 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
       }
     }
 
-    return await sendMessage(chatId, `?? <b>База очищена!</b>\nУдалено лишних записей: ${deletedCount}`, null, env);
+    return await sendMessage(chatId, `🧹 <b>База очищена!</b>\nУдалено лишних записей: ${deletedCount}`, null, env);
   }
 
   if (text.startsWith("/add") && isAdmin) {
     const targetId = text.split(" ")[1];
-    if (!targetId) return await sendMessage(chatId, "?? Создание пользователя с текущим настроенным провайдером.\n\nФормат: /add [ID]", null, env);
+    if (!targetId) return await sendMessage(chatId, "⚠️ Создание пользователя с текущим настроенным провайдером.\n\nФормат: /add [ID]", null, env);
 
     const myData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
-    if (!myData) return await sendMessage(chatId, "? Сначала авторизуй свой диск!", null, env);
+    if (!myData) return await sendMessage(chatId, "❌ Сначала авторизуй свой диск!", null, env);
 
     let folders = [];
     try {
@@ -1558,15 +1758,15 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
 
     // Собираем кнопки
     let buttons = folders.map(f => [
-      { text: `?? ${f.name}`, callback_data: `set_folder:${targetId}:${f.id}` }
+      { text: `📁 ${f.name}`, callback_data: `set_folder:${targetId}:${f.id}` }
     ]);
     
     // Кнопка создания — ВСЕГДА первая
-    buttons.unshift([{ text: "? Создать новую папку", callback_data: `create_folder:${targetId}` }]);
+    buttons.unshift([{ text: "➕ Создать новую папку", callback_data: `create_folder:${targetId}` }]);
 
-    const msgText = `?? Пользователь <code>${targetId}</code> инициализирован.\n` +
-                    `?? Облако: <b>${myData.provider}</b>\n\n` +
-                    `?? <b>Выбери папку или создай новую:</b>`;
+    const msgText = `👤 Пользователь <code>${targetId}</code> инициализирован.\n` +
+                    `☁️ Облако: <b>${myData.provider}</b>\n\n` +
+                    `👇 <b>Выбери папку или создай новую:</b>`;
 
     return await sendMessage(chatId, msgText, { inline_keyboard: buttons }, env);
   }
@@ -1580,7 +1780,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
 
   // --- ОБРАБОТКА ФАЙЛОВ ---
   if (isDoc || isVideo || isPhoto || isAudio || isVoice) {
-    await sendMessage(chatId, "? <b>Начинаю загрузку в облако...</b>", null, env);
+    await sendMessage(chatId, "⏳ <b>Начинаю загрузку в облако...</b>", null, env);
     try {
       const fileObj = msg.document || msg.video || msg.video_note || msg.audio || msg.voice || (msg.photo ? msg.photo[msg.photo.length - 1] : null);
       if (!fileObj == null) throw new Error("Файл не найден");
@@ -1627,7 +1827,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
         fileName = `Photo_${dateStr}.jpg`;
       }
 
-      // ?? ЕДИНСТВЕННОЕ СКАЧИВАНИЕ ФАЙЛА
+      // 🔑 ЕДИНСТВЕННОЕ СКАЧИВАНИЕ ФАЙЛА
       const arrayBuffer = await getFileStream(fileObj.file_id, env);
       const fileBuffer = Buffer.from(arrayBuffer);
       
@@ -1648,7 +1848,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
       }
       
       if (success) {
-        // ? Сохраняем метаданные
+        // ✅ Сохраняем метаданные
         await env.FILES_DB.prepare(
           "INSERT INTO files (userId, fileName, fileId, fileType, provider, folderId, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
         ).bind(
@@ -1656,7 +1856,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
           userData.folderId || "Root", Date.now()
         ).run();
 
-        // ? Фоновая генерация описания (если фото/видео/аудио/голос)
+        // ✅ Фоновая генерация описания (если фото/видео/аудио/голос)
         if (fType === "photo" || fType === "video" || fType === "audio" || fType === "voice" || fType === "document") {
           ctx.waitUntil(
             (async () => {
@@ -1693,20 +1893,20 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
                 }
               } catch (e) {
                 console.error(`[AI-ERROR] ${e.message}`);
-                await logDebug(`?? Ошибка генерации описания: ${e.message}`, env);
+                await logDebug(`⚠️ Ошибка генерации описания: ${e.message}`, env);
               }
             })()
           );
         }
 
-        await sendMessage(chatId, `? Файл <b>${fileName}</b> сохранен в ${userData.provider}!`, null, env);
+        await sendMessage(chatId, `✅ Файл <b>${fileName}</b> сохранен в ${userData.provider}!`, null, env);
         return new Response("OK");
       } else {
-        await sendMessage(chatId, "? Ошибка при загрузке. Проверьте токены или место на диске.", null, env);
+        await sendMessage(chatId, "❌ Ошибка при загрузке. Проверьте токены или место на диске.", null, env);
         return new Response("OK");
       }
     } catch (e) {
-      await sendMessage(chatId, `? Ошибка: ${e.message}`, null, env);
+      await sendMessage(chatId, `❌ Ошибка: ${e.message}`, null, env);
       return new Response("OK");
     }
   }
@@ -1765,7 +1965,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
           body: JSON.stringify({ chat_id: chatId, message_id: msg.message_id })
         });
       } catch (e) {}
-      await sendMessage(chatId, `? <b>${selectedProto.toUpperCase()} успешно настроен!</b>\nСервер: <code>${host}</code>\nПапка: <code>${folder}</code>`, null, env);
+      await sendMessage(chatId, `✅ <b>${selectedProto.toUpperCase()} успешно настроен!</b>\nСервер: <code>${host}</code>\nПапка: <code>${folder}</code>`, null, env);
       await showFolderSelector(chatId, userData, env);
       // Если это WebDAV, пробуем создать папку
       if (selectedProto === 'webdav') {
@@ -1773,7 +1973,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
       }
       return new Response("OK");
     } catch (e) {
-      await sendMessage(chatId, `? <b>Ошибка настройки:</b>\n${e.message}`, null, env);
+      await sendMessage(chatId, `❌ <b>Ошибка настройки:</b>\n${e.message}`, null, env);
       return new Response("OK");
     }
   }
@@ -1792,17 +1992,17 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     let searchResult;
     if (isAIQuery) {
       // Текст и логика как в /ai_search
-      await sendMessage(chatId, "? <b>Выполняю интеллектуальный поиск...</b>", null, env);
+      await sendMessage(chatId, "⏳ <b>Выполняю интеллектуальный поиск...</b>", null, env);
       searchResult = await searchAIFilesByQuery(userId, isAdmin, query, env);
     } else {
       // Текст и логика как в обычном /search
-      await sendMessage(chatId, "? <b>Выполняю поиск файлов...</b>", null, env);
+      await sendMessage(chatId, "⏳ <b>Выполняю поиск файлов...</b>", null, env);
       searchResult = await searchFilesByQuery(userId, isAdmin, query, env);
     }
 
     // Общая проверка результата
     if (!searchResult.success || !searchResult.fileIds || searchResult.fileIds.length === 0) {
-      return await sendMessage(chatId, `? По запросу "<b>${query}</b>" ничего не найдено.`, null, env);
+      return await sendMessage(chatId, `❌ По запросу "<b>${query}</b>" ничего не найдено.`, null, env);
     }
 
     const shortId = Math.random().toString(36).substring(2, 8);
@@ -1826,12 +2026,12 @@ if (userState === "waiting_for_aisearch" && !text.startsWith("/")) {
     
     let searchResult;
     // Текст и логика как в /ai_search
-    await sendMessage(chatId, "? <b>Выполняю интеллектуальный поиск...</b>", null, env);
+    await sendMessage(chatId, "⏳ <b>Выполняю интеллектуальный поиск...</b>", null, env);
     searchResult = await searchAIFilesByQuery(userId, isAdmin, query, env);
 
     // Общая проверка результата
     if (!searchResult.success || !searchResult.fileIds || searchResult.fileIds.length === 0) {
-      return await sendMessage(chatId, `? По запросу "<b>${query}</b>" ничего не найдено.`, null, env);
+      return await sendMessage(chatId, `❌ По запросу "<b>${query}</b>" ничего не найдено.`, null, env);
     }
 
     const shortId = Math.random().toString(36).substring(2, 8);
@@ -1879,13 +2079,13 @@ if (userState === "waiting_for_aisearch" && !text.startsWith("/")) {
         
         await env.USER_DB.put(`user:${userId}`, JSON.stringify(userData));
         await env.USER_DB.delete(`state:${userId}`);
-        await sendMessage(chatId, `? Папка <b>${folderName}</b> создана и выбрана!\n<pre>ID: ${targetId}</pre>`, null, env);
+        await sendMessage(chatId, `✅ Папка <b>${folderName}</b> создана и выбрана!\n<pre>ID: ${targetId}</pre>`, null, env);
     } else {
         // Если создание не поддерживается, оставляем введенное имя как путь
         userData.folderId = folderName;
         await env.USER_DB.put(`user:${userId}`, JSON.stringify(userData));
         await env.USER_DB.delete(`state:${userId}`);
-        await sendMessage(chatId, `?? Папка установлена как путь: <code>${folderName}</code> (проверьте наличие вручную)`, null, env);
+        await sendMessage(chatId, `⚠️ Папка установлена как путь: <code>${folderName}</code> (проверьте наличие вручную)`, null, env);
     }
     return new Response("OK");
   }
@@ -1897,11 +2097,11 @@ if (userState === "waiting_for_aisearch" && !text.startsWith("/")) {
       
     // Проверка на число
     if (!/^\d+$/.test(targetId)) {
-      return await sendMessage(chatId, "? Ошибка: ID должен состоять только из цифр. Попробуй снова через меню.", null, env);
+      return await sendMessage(chatId, "❌ Ошибка: ID должен состоять только из цифр. Попробуй снова через меню.", null, env);
     }
 
     const myData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
-    if (!myData) return await sendMessage(chatId, "? Сначала авторизуй свой диск!", null, env);
+    if (!myData) return await sendMessage(chatId, "❌ Сначала авторизуй свой диск!", null, env);
 
     let folders = [];
     try {
@@ -1946,15 +2146,15 @@ if (userState === "waiting_for_aisearch" && !text.startsWith("/")) {
 
     // Собираем кнопки
     let buttons = folders.map(f => [
-      { text: `?? ${f.name}`, callback_data: `set_folder:${targetId}:${f.id}` }
+      { text: `📁 ${f.name}`, callback_data: `set_folder:${targetId}:${f.id}` }
     ]);
     
     // Кнопка создания — ВСЕГДА первая
-    buttons.unshift([{ text: "? Создать новую папку", callback_data: `create_folder:${targetId}` }]);
+    buttons.unshift([{ text: "➕ Создать новую папку", callback_data: `create_folder:${targetId}` }]);
 
-    const msgText = `?? Пользователь <code>${targetId}</code> инициализирован.\n` +
-                    `?? Облако: <b>${myData.provider}</b>\n\n` +
-                    `?? <b>Выбери папку или создай новую:</b>`;
+    const msgText = `👤 Пользователь <code>${targetId}</code> инициализирован.\n` +
+                    `☁️ Облако: <b>${myData.provider}</b>\n\n` +
+                    `👇 <b>Выбери папку или создай новую:</b>`;
 
     return await sendMessage(chatId, msgText, { inline_keyboard: buttons }, env);
   }
@@ -1969,7 +2169,7 @@ if (userState === "waiting_for_aisearch" && !text.startsWith("/")) {
       if (ownerData) {
         userData = { ...ownerData, shared_from: invite.inviterId, is_ref: true, connected_at: Date.now() };
         await env.USER_DB.put(`user:${userId}`, JSON.stringify(userData));
-        await sendMessage(chatId, `?? Вы подключились к облаку друга (${userData.provider})`, null, env);
+        await sendMessage(chatId, `🤝 Вы подключились к облаку друга (${userData.provider})`, null, env);
         return new Response("OK");
       }
     }
@@ -2003,6 +2203,7 @@ async function handleVK(body, env, hostname, ctx) {
   let chatId = null;
   
   const VK_APP_ID = env.VK_APP_ID
+  const OK_APP_ID = env.OK_APP_ID
   const VK_GROUP_ID = env.VK_GROUP_ID
   try {
     // --- 1. Подтверждение сервера ---
@@ -2062,17 +2263,17 @@ async function handleVK(body, env, hostname, ctx) {
             // --- ПОЛУЧАЕМ ИМЯ ВМЕСТО ID ---
             const inviterName = await getVKUserName(inviteData.inviterId, env);
         
-            inviteText += `?? Найдено приглашение!\n\n`;
-            inviteText += `?? Вас пригласил друг: ${inviterName} \n`;
-            inviteText += `?? Облако: ${inviteData.provider} ?? Папка: ${inviteData.folderId}\n\n`;
-            inviteText += `?? Нажмите кнопку ниже, чтобы подтвердить.`;
+            inviteText += `🎁 Найдено приглашение!\n\n`;
+            inviteText += `👤 Вас пригласил друг: ${inviterName} \n`;
+            inviteText += `☁️ Облако: ${inviteData.provider} 📁 Папка: ${inviteData.folderId}\n\n`;
+            inviteText += `👇 Нажмите кнопку ниже, чтобы подтвердить.`;
             
             const inviteKb = getInviteKeyboardVK(token);
             await sendVKMessageWithKeyboard(chatId, inviteText, env, inviteKb);
         }
         // Генерируем клавиатуру
         const kbMain = getStartKeyboardVK(userId, hostname, env, null, true); 
-        await sendVKMessageWithKeyboard(chatId, "Выбирай кнопку ?? или напиши /start", env, kbMain);
+        await sendVKMessageWithKeyboard(chatId, "Выбирай кнопку 🏠 или напиши /start", env, kbMain);
         return new Response("OK");
       }
 
@@ -2085,18 +2286,18 @@ async function handleVK(body, env, hostname, ctx) {
         if (provider === "google") authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${env.GOOGLE_CLIENT_ID}&redirect_uri=https://${domain}/auth/google/callback&response_type=code&scope=${encodeURIComponent("https://www.googleapis.com/auth/drive.file")}&state=${userId}&access_type=offline&prompt=consent`;
         if (provider === "dropbox") authUrl = `https://www.dropbox.com/oauth2/authorize?client_id=${env.DROPBOX_CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(`https://${domain}/auth/dropbox/callback`)}&token_access_type=offline&state=${userId}`;
         
-        await sendVKMessage(chatId, `?? Ссылка для авторизации ${provider}:\n${authUrl}`, env);
+        await sendVKMessage(chatId, `🔗 Ссылка для авторизации ${provider}:\n${authUrl}`, env);
         return new Response("OK");
       }
 
       // Внутри switch/case или if-else для команд в handleVK
       if (command === "auth_mailru") {
         await env.USER_DB.put(`state:${userId}`, "wait_webdav_url"); // Состояние то же самое
-        const msg = "?? Настройка Облака Mail.ru\n\n" +
+        const msg = "✉️ Настройка Облака Mail.ru\n\n" +
                     "1. Зайди в почту через браузер.\n" +
-                    "2. Настройки ? Пароли для внешних приложений.\n" +
+                    "2. Настройки ⮕ Пароли для внешних приложений.\n" +
                     "3. Создай новый пароль (назови его 'VK Bot').\n\n" +
-                    "?? Пришли мне ссылку в формате:\n" +
+                    "🚀 Пришли мне ссылку в формате:\n" +
                     "https://твоя_почта@mail.ru:пароль@webdav.cloud.mail.ru";
         await sendVKMessage(chatId, msg, env);
         return new Response("OK");
@@ -2104,10 +2305,10 @@ async function handleVK(body, env, hostname, ctx) {
 
       if (command === "auth_webdav") {
         await env.USER_DB.put(`state:${userId}`, "wait_webdav_url");
-        const msg = "??? Настройка WebDAV\n\n" +
+        const msg = "🖥️ Настройка WebDAV\n\n" +
                     "Пришли данные в одном из форматов:\n" +
-                    "1??  ХОСТ|ЛОГИН|ПАРОЛЬ\n" +
-                    "2??  https://логин:пароль@хост\n\n" +
+                    "1️⃣  ХОСТ|ЛОГИН|ПАРОЛЬ\n" +
+                    "2️⃣  https://логин:пароль@хост\n\n" +
                     "Пример:\n" +
                     "https://webdav.yandex.ru|myuser|mypass";
         await sendVKMessage(chatId, msg, env);
@@ -2116,7 +2317,7 @@ async function handleVK(body, env, hostname, ctx) {
 
       if (command === "search") {
         await env.USER_DB.put(`state:${userId}`, "waiting_for_search", { expirationTtl: 300 });
-        //await sendVKMessage(chatId, "?? Напиши, что искать (имя файла):", env);
+        //await sendVKMessage(chatId, "🔎 Напиши, что искать (имя файла):", env);
         return await handleVK({ ...body, object: { message: { ...message, text: `/search`, payload: null }}}, env, hostname, ctx);
       }
 
@@ -2144,7 +2345,7 @@ async function handleVK(body, env, hostname, ctx) {
             const start = offset + 1;
             const end = Math.min(offset + limit, totalFound);
             
-            let resList = `?? Показано ${start}-${end} из ${totalFound} (стр. ${page})\n\n`;
+            let resList = `🔍 Показано ${start}-${end} из ${totalFound} (стр. ${page})\n\n`;
             const buttons = [];
 
             for (const id of nextFiles) {
@@ -2166,23 +2367,23 @@ async function handleVK(body, env, hostname, ctx) {
                                     `&userId=${userId}`;
 
                 const ext = fName.split('.').pop().toLowerCase();
-                let emoji = '??';
-                if (['jpg', 'jpeg', 'png', 'gif'].includes(ext) || fType.includes('photo')) emoji = '???';
-                if (['mp4', 'mov', 'avi'].includes(ext) || fType.includes('video')) emoji = '??';
-                if (['mp3', 'wav', 'ogg'].includes(ext) || fType.includes('audio')) emoji = '???';
+                let emoji = '📄';
+                if (['jpg', 'jpeg', 'png', 'gif'].includes(ext) || fType.includes('photo')) emoji = '🖼️';
+                if (['mp4', 'mov', 'avi'].includes(ext) || fType.includes('video')) emoji = '🎬';
+                if (['mp3', 'wav', 'ogg'].includes(ext) || fType.includes('audio')) emoji = '🎙️';
 
                 // 3. СВЕТОФОР: Провайдер + Папка
-                let statusFile = '??'; 
+                let statusFile = '🟢'; 
                 if (fileProvider !== currentProvider) { 
                     // Чужое облако — критично
-                    statusFile = '??'; 
+                    statusFile = '🔴'; 
                 } else if (folderId !== currentFolder) {
                     // Облако то же, но папка отличается
-                    statusFile = '??'; 
+                    statusFile = '🟡'; 
                 }
 
                 //resList += `${statusFile} ${emoji} ${fName}\n`;
-                const labelText = fName.length > 33 ? `${statusFile} ?? ${emoji} ${fName.substring(0, 30)}...` : `${statusFile} ?? ${emoji} ${fName}`;
+                const labelText = fName.length > 33 ? `${statusFile} 📥 ${emoji} ${fName.substring(0, 30)}...` : `${statusFile} 📥 ${emoji} ${fName}`;
 
                 buttons.push([{
                   action: {
@@ -2198,20 +2399,20 @@ async function handleVK(body, env, hostname, ctx) {
               buttons.push([{
                 action: {
                   type: "text",
-                  label: "?? Ещё...",
+                  label: "⬇️ Ещё...",
                   // Передаем объект, который поймаем на следующем шаге
                   payload: JSON.stringify({ button: "next_page", query: query, next_page: page + 1 })
                 }
               }]);
             }
-            resList += `?? доступно | ?? не та папка | ?? не доступно для выгрузки\n`;
+            resList += `🟢 доступно | 🟡 не та папка | 🔴 не доступно для выгрузки\n`;
 
             await sendVKMessageWithKeyboard(chatId, resList, env, { inline: true, buttons });
           }
         } catch (err) {
           console.error("SEARCH NEXT ERROR:", err);
           // Если всё упало, хотя бы ответим пользователю
-          await sendVKMessage(chatId, "?? Ошибка при подгрузке файлов.", env);
+          await sendVKMessage(chatId, "⚠️ Ошибка при подгрузке файлов.", env);
         }
         
         return new Response("OK");
@@ -2244,13 +2445,13 @@ async function handleVK(body, env, hostname, ctx) {
             buttons.push([{
               action: { 
                 type: "text", 
-                label: "?? Загрузить еще", 
+                label: "➡️ Загрузить еще", 
                 payload: JSON.stringify({ cmd: "next_folders", off: offset + limit }) 
               },
               color: "default"
             }]);
           }
-          await sendVKMessageWithKeyboard(chatId, `?? Еще папки (${offset + 1}-${offset + sliced.length}):`, env, { inline: true, buttons });
+          await sendVKMessageWithKeyboard(chatId, `📂 Еще папки (${offset + 1}-${offset + sliced.length}):`, env, { inline: true, buttons });
         }
         return new Response("OK");
       }
@@ -2259,19 +2460,19 @@ async function handleVK(body, env, hostname, ctx) {
         userData.folderId = payloadData.name;
         if (userData.provider === "google") userData.folderId = payloadData.id;
         await env.USER_DB.put(userKey, JSON.stringify(userData));
-        await sendVKMessage(chatId, `? Выбрана папка: ${payloadData.name}`, env);
+        await sendVKMessage(chatId, `✅ Выбрана папка: ${payloadData.name}`, env);
         return new Response("OK");
       }
       // Нажали кнопку "Создать новую папку"
       if (command === "start_create") {
         await env.USER_DB.put(`state:${userId}`, "wait_create_folder");
-        await sendVKMessage(chatId, "?? Напиши название для новой папки:", env);
+        await sendVKMessage(chatId, "📝 Напиши название для новой папки:", env);
         return new Response("OK");
       }
 
       if (command === "ask_ref_token") {
         await env.USER_DB.put(`state:${userId}`, "wait_ref_token", { expirationTtl: 600 });
-        const msg = "?? **Подключение к диску друга**\n\n" +
+        const msg = "🤝 **Подключение к диску друга**\n\n" +
                     "Пришли мне ссылку, которую прислал друг, или просто сам токен (набор букв и цифр).\n\n" +
                     "Примеры:\n" +
                     "• `https://vk.com/write-XXX?ref=ref_abc123` \n" +
@@ -2310,7 +2511,7 @@ async function handleVK(body, env, hostname, ctx) {
                 action: {
                   type: "open_link",
                   link: chatLink,
-                  label: "?? Перейти в общий чат Хранилка"
+                  label: "🗄 Перейти в общий чат Хранилка"
                 }
               }]]
             };
@@ -2318,16 +2519,35 @@ async function handleVK(body, env, hostname, ctx) {
             const userName = await getVKUserName(userId, env);
             await sendVKMessageWithKeyboard(
               chatId, 
-              `? Успешно!\n\nТы подключился к Хранилке друга ${inviterName}.\nТеперь все файлы, которые ты отправишь в общий чат, будут улетать в облако ${inviteData.provider} в папку ${inviteData.folderId}.`, 
+              `✅ Успешно!\n\nТы подключился к Хранилке друга ${inviterName}.\nТеперь все файлы, которые ты отправишь в общий чат, будут улетать в облако ${inviteData.provider} в папку ${inviteData.folderId}.`, 
               env, 
               joinChatKb
             );
             
             // Уведомляем владельца
-            await sendVKMessage(inviteData.inviterId, `?? Пользователь ${userName} теперь использует твое облако!`, env);
+            await sendVKMessage(inviteData.inviterId, `🔔 Пользователь ${userName} теперь использует твое облако!`, env);
+            // === НОВЫЙ БЛОК: ЗАПИСЬ УВЕДОМЛЕНИЯ ДЛЯ ВЛАДЕЛЬЦА ===
+            const ownerNotificationsKey = `notifications:${inviteData.inviterId}`;
+            const ownerRawNotif = await env.USER_DB.get(ownerNotificationsKey);
+            const ownerNotif = ownerRawNotif ? JSON.parse(ownerRawNotif) : [];
+
+            // Добавляем новое уведомление
+            ownerNotif.push({
+              type: 'friend_connected',
+              userId: userId,
+              userName: await getVKUserName(userId, env),
+              provider: inviteData.provider,
+              folderId: inviteData.folderId,
+              timestamp: Date.now(),
+              read: false
+            });
+
+            // Сохраняем обновленный список
+            await env.USER_DB.put(ownerNotificationsKey, JSON.stringify(ownerNotif));
+            // === КОНЕЦ НОВОГО БЛОКА ===
           }
         } else {
-          await sendVKMessage(chatId, "? Ошибка: Ссылка просрочена (24ч) или неверна.", env);
+          await sendVKMessage(chatId, "❌ Ошибка: Ссылка просрочена (24ч) или неверна.", env);
         }
         return new Response("OK");
       }
@@ -2335,28 +2555,28 @@ async function handleVK(body, env, hostname, ctx) {
       // --- КОМАНДА /START ---
       if (command.startsWith("/start") || command === "start" || text === "Начать" || message.ref) {
         // Формируем статус с эмодзи
-        let statusText = "? Диск не подключен";
+        let statusText = "❌ Диск не подключен";
         if (userData && userData.provider) {
           const providerName = userData.provider ? (userData?.provider === 'yandex' ? 'Яндекс Диск' : userData?.provider === 'google' ? 'Google Drive' : userData?.provider === 'dropbox' ? 'Dropbox' : userData?.webdav_host?.includes('mail.ru') ? 'Облако Mail.ru' : 'WebDAV') : "Не настроен";
-          const folderInfo = userData.folderId ? ` ?? ${userData.folderId}` : " ?? корень диска";
-          const sharedInfo = userData.shared_from ? ` [?? Общий доступ]` : "";
-          statusText = `? Подключено: ?? ${providerName}${folderInfo}${sharedInfo}`;
+          const folderInfo = userData.folderId ? ` 📁 ${userData.folderId}` : " 📁 корень диска";
+          const sharedInfo = userData.shared_from ? ` [🤝 Общий доступ]` : "";
+          statusText = `✅ Подключено: ☁️ ${providerName}${folderInfo}${sharedInfo}`;
         }
 
         // Возвращаем классическое приветствие с командами
         let firstName = "Пользователь";
         const userName = await getVKUserName(userId, env);
         if (userName) { firstName = userName.split(' ')[0]; }
-        let welcome = `?? Привет ${firstName}! Я твоя личная Хранилка.\n`;
-        welcome += `?? Просто пришли мне фото или видео, и я закину их на сервер.\n`;
-        welcome += `?? Связь с хранилищем:\n${statusText}\n`;
-        welcome += `\n?? Команды:\n`;
-        welcome += `/about — ?? О приложении\n`;
-        welcome += `/folder — ?? Выбрать папку\n`;
-        welcome += `/share — ?? Ссылка для друга\n`;
-        welcome += `/search — ?? Поиск файлов\n`;
-        welcome += `/debug — ??? Техническая информация\n`;
-        welcome += `/disconnect — ?? Отключить диск`;
+        let welcome = `👋 Привет ${firstName}! Я твоя личная Хранилка.\n`;
+        welcome += `📁 Просто пришли мне фото или видео, и я закину их на сервер.\n`;
+        welcome += `⚙️ Связь с хранилищем:\n${statusText}\n`;
+        welcome += `\n📖 Команды:\n`;
+        welcome += `/about — 💬 О приложении\n`;
+        welcome += `/folder — 📂 Выбрать папку\n`;
+        welcome += `/share — 🤝 Ссылка для друга\n`;
+        welcome += `/search — 🔎 Поиск файлов\n`;
+        welcome += `/debug — 🛠️ Техническая информация\n`;
+        welcome += `/disconnect — 🔌 Отключить диск`;
        
         // Генерируем клавиатуру
         const kbMain = getStartKeyboardVK(userId, hostname, env, null, true); 
@@ -2371,13 +2591,13 @@ async function handleVK(body, env, hostname, ctx) {
       // --- КОМАНДА /ADMIN ---
       if (command === "/admin" && isAdmin) {
         const list = await env.USER_DB.list({ prefix: "user:" });
-        const adminMsg = `?? Панель администратора\n? Авторизовано: ${list.keys.length}\n?? Версия: ${version}\n\nВыбери раздел настроек:`;
+        const adminMsg = `⚙️ Панель администратора\n✅ Авторизовано: ${list.keys.length}\n🚀 Версия: ${version}\n\nВыбери раздел настроек:`;
         
         const adminKb = {
           inline: true,
           buttons: [
-            [{ action: { type: "text", label: "?? Настройки ИИ", payload: JSON.stringify({ cmd: "/ai_settings" }) }, color: "primary" }],
-            [{ action: { type: "text", label: "?? Статистика", payload: JSON.stringify({ cmd: "/debug" }) }, color: "secondary" }]
+            [{ action: { type: "text", label: "🤖 Настройки ИИ", payload: JSON.stringify({ cmd: "/ai_settings" }) }, color: "primary" }],
+            [{ action: { type: "text", label: "📊 Статистика", payload: JSON.stringify({ cmd: "/debug" }) }, color: "secondary" }]
           ]
         };
 
@@ -2390,7 +2610,7 @@ async function handleVK(body, env, hostname, ctx) {
         const type = payloadData?.type;
 
         if (!type) {
-          let msg = "?? Текущие модели ИИ:\n";
+          let msg = "🧠 Текущие модели ИИ:\n";
           for (const [type, info] of Object.entries(SERVICE_TYPE_MAP)) {
             const modelKey = await env.USER_DB.get(info.kvKey) || Object.keys(AI_MODEL_MENU_CONFIG[type]?.models || {})[0];
             const modelName = AI_MODEL_MENU_CONFIG[type]?.models[modelKey] || "—";
@@ -2401,12 +2621,12 @@ async function handleVK(body, env, hostname, ctx) {
           const aiKb = {
             inline: true,
             buttons: [
-              [{ action: { type: "text", label: "?? Text > Text", payload: JSON.stringify({ cmd: "/ai_settings", type: "TEXT_TO_TEXT" }) }, color: "primary" }],
-              [{ action: { type: "text", label: "??? Audio > Text", payload: JSON.stringify({ cmd: "/ai_settings", type: "AUDIO_TO_TEXT" }) }, color: "primary" }],
-              [{ action: { type: "text", label: "?? Video > Text", payload: JSON.stringify({ cmd: "/ai_settings", type: "VIDEO_TO_TEXT" }) }, color: "primary" }],
-              [{ action: { type: "text", label: "??? Image > Text", payload: JSON.stringify({ cmd: "/ai_settings", type: "IMAGE_TO_TEXT" }) }, color: "primary" }],
-              [{ action: { type: "text", label: "?? Document > Text", payload: JSON.stringify({ cmd: "/ai_settings", type: "DOCUMENT_TO_TEXT" }) }, color: "primary" }],
-              [{ action: { type: "text", label: "??? Video > Analysis", payload: JSON.stringify({ cmd: "/ai_settings", type: "VIDEO_TO_ANALYSIS" }) }, color: "primary" }]
+              [{ action: { type: "text", label: "📝 Text → Text", payload: JSON.stringify({ cmd: "/ai_settings", type: "TEXT_TO_TEXT" }) }, color: "primary" }],
+              [{ action: { type: "text", label: "🎙️ Audio → Text", payload: JSON.stringify({ cmd: "/ai_settings", type: "AUDIO_TO_TEXT" }) }, color: "primary" }],
+              [{ action: { type: "text", label: "🎥 Video → Text", payload: JSON.stringify({ cmd: "/ai_settings", type: "VIDEO_TO_TEXT" }) }, color: "primary" }],
+              [{ action: { type: "text", label: "🖼️ Image → Text", payload: JSON.stringify({ cmd: "/ai_settings", type: "IMAGE_TO_TEXT" }) }, color: "primary" }],
+              [{ action: { type: "text", label: "📄 Document → Text", payload: JSON.stringify({ cmd: "/ai_settings", type: "DOCUMENT_TO_TEXT" }) }, color: "primary" }],
+              [{ action: { type: "text", label: "🎞️ Video → Analysis", payload: JSON.stringify({ cmd: "/ai_settings", type: "VIDEO_TO_ANALYSIS" }) }, color: "primary" }]
             ]
           };
           await sendVKMessageWithKeyboard(chatId, msg, env, aiKb);
@@ -2415,7 +2635,7 @@ async function handleVK(body, env, hostname, ctx) {
           const currentConfig = await loadActiveConfig(type, env);
           const availableModels = Object.keys(AI_MODELS).filter(k => k.startsWith(type));
           
-          let msg = `?? Настройка: ${type}\n? Текущая: ${currentConfig.MODEL}\n\nДоступные модели:`;
+          let msg = `⚙️ Настройка: ${type}\n✅ Текущая: ${currentConfig.MODEL}\n\nДоступные модели:`;
           let buttons = [];
           
           availableModels.forEach(mKey => {
@@ -2425,7 +2645,7 @@ async function handleVK(body, env, hostname, ctx) {
             }]);
           });
           // Кнопка Назад
-          buttons.push([{ action: { type: "text", label: "?? Назад", payload: JSON.stringify({ cmd: "/ai_settings" }) }, color: "default" }]);
+          buttons.push([{ action: { type: "text", label: "⬅️ Назад", payload: JSON.stringify({ cmd: "/ai_settings" }) }, color: "default" }]);
 
           await sendVKMessageWithKeyboard(chatId, msg, env, { inline: true, buttons });
         }
@@ -2436,7 +2656,7 @@ async function handleVK(body, env, hostname, ctx) {
         const { type, model } = payloadData;
         const kvKey = SERVICE_TYPE_MAP[type].kvKey;
         await env.USER_DB.put(kvKey, model);
-        await sendVKMessage(chatId, `? Модель для ${type} изменена на ${model}`, env);
+        await sendVKMessage(chatId, `✅ Модель для ${type} изменена на ${model}`, env);
         // Возвращаемся в меню
         return await handleVK({ type: "message_new", object: { message: { peer_id: chatId, from_id: userId, text: "/ai_settings" } } }, env, hostname, ctx);
       }
@@ -2448,24 +2668,24 @@ async function handleVK(body, env, hostname, ctx) {
         const hasToken = !!(actualData?.access_token || actualData?.webdav_pass || actualData?.shared_from);
         const userName = await getVKUserName(userId, env);
         // Формируем статус с эмодзи
-        let debugStatus = "? Диск не подключен";
+        let debugStatus = "❌ Диск не подключен";
         if (actualData && actualData.provider) {
-          const folderInfo = actualData?.folderId ? `\n?? Папка: ${actualData?.folderId}` : "\n?? Папка: корень диска";
-          const sharedInfo = actualData?.shared_from ? ` [?? Общий доступ]` : "";
-          debugStatus = `? Соединение активно\n?? Провайдер: ${actualData?.provider}${folderInfo}${sharedInfo}`;
+          const folderInfo = actualData?.folderId ? `\n📁 Папка: ${actualData?.folderId}` : "\n📁 Папка: корень диска";
+          const sharedInfo = actualData?.shared_from ? ` [🤝 Общий доступ]` : "";
+          debugStatus = `✅ Соединение активно\n☁️ Провайдер: ${actualData?.provider}${folderInfo}${sharedInfo}`;
         }
 
-        let debugInfo = `?? DEBUG INFO\n`;
-        debugInfo += `?? ВК-Чат онлайн\n`;
-        debugInfo += `?? Версия: ${version}\n`;
-        debugInfo += `?? Статус: ${debugStatus}\n`;
-        //debugInfo += `?? Статус: ${hasToken ? "? Соединение активно" : "? Не подключен"}\n`;
-        //debugInfo += `?? Провайдер: ${actualData?.provider || '—'}\n`;
-        //debugInfo += `?? Папка: ${actualData?.folderId || 'Root'}\n`;
-        debugInfo += `?? Твой ID: ${userId}\n`;
-        debugInfo += `?? ФИО: ${userName}`;
+        let debugInfo = `🔧 DEBUG INFO\n`;
+        debugInfo += `🗄 ВК-Чат онлайн\n`;
+        debugInfo += `📦 Версия: ${version}\n`;
+        debugInfo += `🔗 Статус: ${debugStatus}\n`;
+        //debugInfo += `🔗 Статус: ${hasToken ? "✅ Соединение активно" : "❌ Не подключен"}\n`;
+        //debugInfo += `☁️ Провайдер: ${actualData?.provider || '—'}\n`;
+        //debugInfo += `📁 Папка: ${actualData?.folderId || 'Root'}\n`;
+        debugInfo += `🆔 Твой ID: ${userId}\n`;
+        debugInfo += `👤 ФИО: ${userName}`;
         if (isAdmin) {
-          debugInfo += `\n?? Админ: ${isAdmin ? "Да" : "Нет"}`;
+          debugInfo += `\n👑 Админ: ${isAdmin ? "Да" : "Нет"}`;
         }
         await sendVKMessage(chatId, debugInfo, env);
         return new Response("OK");
@@ -2474,9 +2694,9 @@ async function handleVK(body, env, hostname, ctx) {
       // Обработка команды /about
       if (command === "/about") {
         let aboutText = `Приложение «Хранилка» by Leshiy\n\n`;
-        aboutText += `Одновременно работает как Telegram-бот https://t.me/leshiy_storage_bot, @leshiy_ai (vk-чат-бот), и [https://vk.com/app${VK_APP_ID}|vkMiniApp-приложение] с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.\n`;
-        aboutText += `? Что я умею: Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru, WebDAV, FTP, SFTP. Можно делиться доступом с близкими!\n`;
-        aboutText += `?? Gemini AI: Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.\n\n`;
+        aboutText += `Одновременно работает как Telegram-бот https://t.me/leshiy_storage_bot, @leshiy_ai (vk-чат-бот), и [https://vk.com/app${VK_APP_ID}|vkMiniApp-приложение] и [https://ok.ru/app/${OK_APP_ID}|okMiniApp-приложение] с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.\n`;
+        aboutText += `✨ Что я умею: Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru, WebDAV, FTP, SFTP. Можно делиться доступом с близкими!\n`;
+        aboutText += `🧠 Gemini AI: Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.\n\n`;
         aboutText += `© Автор: Огорельцев Александр Валерьевич`;
         await sendVKMessage(chatId, aboutText, env);
         return new Response("OK");
@@ -2485,31 +2705,31 @@ async function handleVK(body, env, hostname, ctx) {
       // --- КОМАНДА /SHARE ---
       if (command === "/share") {
         if (!userData?.provider) {
-          await sendVKMessage(chatId, "?? Сначала подключи диск!", env);
+          await sendVKMessage(chatId, "⚠️ Сначала подключи диск!", env);
           return new Response("OK");
         }
         const inviteToken = Math.random().toString(36).substring(2, 12);
         await env.USER_DB.put(`invite:${inviteToken}`, JSON.stringify({ inviterId: userId, token: inviteToken, provider: userData.provider, folderId: userData.folderId }), { expirationTtl: 86400 });
         const refLink = `https://vk.com/write-${VK_GROUP_ID}?ref=ref_${inviteToken}`;
-        await sendVKMessage(chatId, `?? Твоя ссылка для друга:\n${refLink}\n?? Облако: ${userData?.provider}\n?? Папка: ${userData?.folderId || "??Папка: Root"}`, env);
+        await sendVKMessage(chatId, `🚀 Твоя ссылка для друга:\n${refLink}\n☁️ Облако: ${userData?.provider}\n📁 Папка: ${userData?.folderId || "📁Папка: Root"}`, env);
         return new Response("OK");
       }
       
       // --- КОМАНДА /DISCONNECT ---
       if (command === "/disconnect") {
         await env.USER_DB.delete(userKey);
-        await sendVKMessage(chatId, "?? Диск отключен.", env);
+        await sendVKMessage(chatId, "🔌 Диск отключен.", env);
         return new Response("OK");
       }
 
       // --- КОМАНДА /FOLDER ---
       if (command === "/folder") {
         if (!userData?.access_token && !userData?.webdav_pass) {
-          await sendVKMessage(chatId, "?? Сначала подключи облако.", env);
+          await sendVKMessage(chatId, "⚠️ Сначала подключи облако.", env);
           return new Response("OK");
         }
 
-        await sendVKMessage(chatId, "?? Получаю список папок...", env);
+        await sendVKMessage(chatId, "📂 Получаю список папок...", env);
         let folders = [];
         try {
           if (userData.provider === "google") folders = await listGoogleFolders(userData.access_token);
@@ -2517,7 +2737,7 @@ async function handleVK(body, env, hostname, ctx) {
           else if (userData.provider === "dropbox") folders = await listDropboxFolders(userData.access_token);
           else if (userData.provider === "webdav") folders = await listWebDavFolders(userData); // ВОТ ОН
         } catch (e) {
-          await sendVKMessage(chatId, `? Ошибка: ${e.message}`, env);
+          await sendVKMessage(chatId, `❌ Ошибка: ${e.message}`, env);
           return new Response("OK");
         }
 
@@ -2541,7 +2761,7 @@ async function handleVK(body, env, hostname, ctx) {
           }]));
           // КНОПКА СОЗДАНИЯ ПАПКИ
           buttons.unshift([{
-            action: { type: "text", label: "?? Создать новую папку", payload: JSON.stringify({ cmd: "start_create" }) },
+            action: { type: "text", label: "🗂 Создать новую папку", payload: JSON.stringify({ cmd: "start_create" }) },
             color: "positive"
           }]);
           // Кнопка пагинации
@@ -2549,17 +2769,17 @@ async function handleVK(body, env, hostname, ctx) {
             buttons.push([{
               action: { 
                 type: "text", 
-                label: "?? Загрузить еще", 
+                label: "➡️ Загрузить еще", 
                 payload: JSON.stringify({ cmd: "next_folders", off: limit }) 
               },
               color: "default"
             }]);
           }
-          await sendVKMessageWithKeyboard(chatId, `?? Облако: ${userData.provider}. ?? Всего папок: ${folders.length}. Выбери из (1-${sliced.length})`, env, { inline: true, buttons });
+          await sendVKMessageWithKeyboard(chatId, `☁️ Облако: ${userData.provider}. 📂 Всего папок: ${folders.length}. Выбери из (1-${sliced.length})`, env, { inline: true, buttons });
         } else {
           // Если папок нет
-          const createBtn = [[{ action: { type: "text", label: "?? Создать новую папку", payload: JSON.stringify({ cmd: "start_create" }) }, color: "positive" }]];
-          await sendVKMessageWithKeyboard(chatId, "?? Папок не найдено. Хочешь создать?", env, { inline: true, buttons: createBtn });
+          const createBtn = [[{ action: { type: "text", label: "🗂 Создать новую папку", payload: JSON.stringify({ cmd: "start_create" }) }, color: "positive" }]];
+          await sendVKMessageWithKeyboard(chatId, "📁 Папок не найдено. Хочешь создать?", env, { inline: true, buttons: createBtn });
         }
         return new Response("OK");
       }
@@ -2574,7 +2794,7 @@ async function handleVK(body, env, hostname, ctx) {
         } else {
           // Если просто "/search"
           await env.USER_DB.put(`state:${userId}`, "waiting_for_search", { expirationTtl: 300 });
-          await sendVKMessage(chatId, "?? Напиши название файла:", env);
+          await sendVKMessage(chatId, "🔎 Напиши название файла:", env);
           return new Response("OK");
         }
       }
@@ -2595,7 +2815,7 @@ async function handleVK(body, env, hostname, ctx) {
       // --- ОБРАБОТКА ВЛОЖЕНИЙ (ПРЯМАЯ ПОСЛЕДОВАТЕЛЬНАЯ) ---
       if (allAttaches.length > 0) {
         // 1. Сразу отвечаем пользователю
-        await sendVKMessage(chatId, `? Начинаю загрузку в облако: ${allAttaches.length} (шт.)`, env);
+        await sendVKMessage(chatId, `⏳ Начинаю загрузку в облако: ${allAttaches.length} (шт.)`, env);
 
         // 2. Всю работу уводим в waitUntil, чтобы основной запрос к ВК завершился быстро
         ctx.waitUntil((async () => {
@@ -2613,7 +2833,7 @@ async function handleVK(body, env, hostname, ctx) {
             }
           }
           if (allAttaches.length > 1) {
-              await sendVKMessage(chatId, `?? Все файлы загружены.`, env).catch(() => {});
+              await sendVKMessage(chatId, `🏁 Все файлы загружены.`, env).catch(() => {});
           }
         })());
         // Моментально отвечаем ВК "OK", чтобы он не слал повторы
@@ -2629,7 +2849,7 @@ async function handleVK(body, env, hostname, ctx) {
             const sel = folders[num - 1];
             userData.folderId = userData.provider === "google" ? sel.id : sel.name;
             await env.USER_DB.put(userKey, JSON.stringify(userData));
-            await sendVKMessage(chatId, `? Выбрана папка: ${sel.name}`, env);
+            await sendVKMessage(chatId, `✅ Выбрана папка: ${sel.name}`, env);
             await env.USER_DB.delete(`state:${userId}`);
             return new Response("OK");
           }
@@ -2661,12 +2881,12 @@ async function handleVK(body, env, hostname, ctx) {
               // Сразу сохраняем созданную папку как активную
               userData.folderId = resultId;
               await env.USER_DB.put(userKey, JSON.stringify(userData));
-              await sendVKMessage(chatId, `? Папка "${folderName}" создана и выбрана для загрузки.`, env);
+              await sendVKMessage(chatId, `✅ Папка "${folderName}" создана и выбрана для загрузки.`, env);
             } else {
-              await sendVKMessage(chatId, "? Ошибка при создании папки. Возможно, имя недопустимо или она уже есть.", env);
+              await sendVKMessage(chatId, "❌ Ошибка при создании папки. Возможно, имя недопустимо или она уже есть.", env);
             }
           } catch (e) {
-            await sendVKMessage(chatId, `? Ошибка: ${e.message}`, env);
+            await sendVKMessage(chatId, `❌ Ошибка: ${e.message}`, env);
           }
 
           // Чистим стейт в любом случае
@@ -2690,7 +2910,7 @@ async function handleVK(body, env, hostname, ctx) {
           
           // Решаем, какой поиск запускать (как в Telegram)
           const isAIQuery = query.includes(" ") && isAdmin;
-          await sendVKMessage(chatId, isAIQuery ? "? Выполняю интеллектуальный поиск..." : `? Ищу "${query}"...`, env);
+          await sendVKMessage(chatId, isAIQuery ? "⏳ Выполняю интеллектуальный поиск..." : `⏳ Ищу "${query}"...`, env);
 
           try {
             let searchResult;
@@ -2702,7 +2922,7 @@ async function handleVK(body, env, hostname, ctx) {
             }
 
             if (!searchResult.success || !searchResult.fileIds || searchResult.fileIds.length === 0) {
-              await sendVKMessage(chatId, `? Ничего не найдено по запросу "${query}".`, env);
+              await sendVKMessage(chatId, `❌ Ничего не найдено по запросу "${query}".`, env);
               return new Response("OK");
             }
             
@@ -2712,7 +2932,7 @@ async function handleVK(body, env, hostname, ctx) {
             const currentFiles = searchResult.fileIds.slice(0, limit);
             const totalFound = searchResult.fileIds ? searchResult.fileIds.length : 0;
 
-            let resList = `?? Найдено файлов: ${totalFound}\n\n`; // Добавляем строку со счетчиком
+            let resList = `🔍 Найдено файлов: ${totalFound}\n\n`; // Добавляем строку со счетчиком
             // Итерируемся по ID из результатов поиска
             for (const id of currentFiles) {
               // Тянем данные файла из YDB
@@ -2736,23 +2956,23 @@ async function handleVK(body, env, hostname, ctx) {
                                     `&userId=${userId}`;
 
                 const ext = fName.split('.').pop().toLowerCase();
-                let emoji = '??';
-                if (['jpg', 'jpeg', 'png', 'gif'].includes(ext) || fType.includes('photo')) emoji = '???';
-                if (['mp4', 'mov', 'avi'].includes(ext) || fType.includes('video')) emoji = '??';
-                if (['mp3', 'wav', 'ogg'].includes(ext) || fType.includes('audio')) emoji = '???';
+                let emoji = '📄';
+                if (['jpg', 'jpeg', 'png', 'gif'].includes(ext) || fType.includes('photo')) emoji = '🖼️';
+                if (['mp4', 'mov', 'avi'].includes(ext) || fType.includes('video')) emoji = '🎬';
+                if (['mp3', 'wav', 'ogg'].includes(ext) || fType.includes('audio')) emoji = '🎙️';
 
                 // 3. СВЕТОФОР: Провайдер + Папка
-                let statusFile = '??'; 
+                let statusFile = '🟢'; 
                 if (fileProvider !== currentProvider) { 
                     // Чужое облако — критично
-                    statusFile = '??'; 
+                    statusFile = '🔴'; 
                 } else if (folderId !== currentFolder) {
                     // Облако то же, но папка отличается
-                    statusFile = '??'; 
+                    statusFile = '🟡'; 
                 }
 
                 resList += `${statusFile} ${emoji} ${fName}\n`;
-                const labelText = fName.length > 33 ? `${statusFile} ?? ${emoji} ${fName.substring(0, 30)}...` : `${statusFile} ?? ${emoji} ${fName}`;
+                const labelText = fName.length > 33 ? `${statusFile} 📥 ${emoji} ${fName.substring(0, 30)}...` : `${statusFile} 📥 ${emoji} ${fName}`;
 
                 buttons.push([{
                     action: {
@@ -2770,20 +2990,20 @@ async function handleVK(body, env, hostname, ctx) {
               buttons.push([{
                   action: {
                       type: "text",
-                      label: "?? Ещё...",
+                      label: "⬇️ Ещё...",
                       payload: JSON.stringify({ button: "next_page", query: query, next_page: 2 })
                   }
               }]);
             }
             resList += `\nАктивное подключение:\n`;
-            resList += `?? Провайдер: ${currentProvider} ?? Папка: ${currentFolder}\n`;
-            resList += `?? доступно | ?? не та папка | ?? не доступно для выгрузки\n`;
+            resList += `☁️ Провайдер: ${currentProvider} 📁 Папка: ${currentFolder}\n`;
+            resList += `🟢 доступно | 🟡 не та папка | 🔴 не доступно для выгрузки\n`;
             // Отправляем сообщение с инлайн-кнопками
             await sendVKMessageWithKeyboard(chatId, resList, env, { inline: true, buttons });
 
           } catch (err) {
             console.error("VK Search Error:", err);
-            await sendVKMessage(chatId, "?? Ошибка при выполнении поиска.", env);
+            await sendVKMessage(chatId, "⚠️ Ошибка при выполнении поиска.", env);
           }
           return new Response("OK");
         }
@@ -2805,7 +3025,7 @@ async function handleVK(body, env, hostname, ctx) {
                   buttons: [[{
                       action: { 
                           type: "text", 
-                          label: "? Подтвердить подключение", 
+                          label: "✅ Подтвердить подключение", 
                           payload: JSON.stringify({ cmd: "confirm_ref", token: token }) 
                       },
                       color: "positive"
@@ -2813,7 +3033,7 @@ async function handleVK(body, env, hostname, ctx) {
               };
               const inviterName = await getVKUserName(inviteData.inviterId, env);
 
-              let confirm = "?? Найдено приглашение!\n\n";
+              let confirm = "🎁 Найдено приглашение!\n\n";
               confirm += `Владелец: ${inviteData.inviterId}\n`;
               if (inviterName) {
                 confirm += `ФИО: ${inviterName}\n`;
@@ -2824,7 +3044,7 @@ async function handleVK(body, env, hostname, ctx) {
 
               await sendVKMessageWithKeyboard(chatId, confirm, env, kbConfirm);
           } else {
-              await sendVKMessage(chatId, "? Токен не найден или просрочен.", env);
+              await sendVKMessage(chatId, "❌ Токен не найден или просрочен.", env);
           }
           return new Response("OK");
         }
@@ -2862,7 +3082,7 @@ async function handleVK(body, env, hostname, ctx) {
                   pass = authPart.substring(colonIndex + 1);
                   url = `${protocol}${hostPart}`;
               } catch (e) {
-                  await sendVKMessage(chatId, `? Ошибка формата:\n${e.message}`, env);
+                  await sendVKMessage(chatId, `❌ Ошибка формата:\n${e.message}`, env);
                   return new Response("OK");
               }
           }
@@ -2884,7 +3104,7 @@ async function handleVK(body, env, hostname, ctx) {
           await env.USER_DB.put(userKey, JSON.stringify(userData));
           await env.USER_DB.delete(`state:${userId}`);
           
-          await sendVKMessage(chatId, `? ${providerName} успешно настроен!`, env);
+          await sendVKMessage(chatId, `✅ ${providerName} успешно настроен!`, env);
           return new Response("OK");
         }
 
@@ -2897,7 +3117,7 @@ async function handleVK(body, env, hostname, ctx) {
           if (ok) {
             userData.folderId = folderName;
             await env.USER_DB.put(userKey, JSON.stringify(userData));
-            await sendVKMessage(chatId, `? Папка "${folderName}" создана!`, env);
+            await sendVKMessage(chatId, `✅ Папка "${folderName}" создана!`, env);
           }
           await env.USER_DB.delete(`state:${userId}`);
           return new Response("OK");
@@ -2919,7 +3139,7 @@ async function handleVK(body, env, hostname, ctx) {
     
   } catch (e) {
     console.error("VK Error:", e);
-    if (chatId) await sendVKMessage(chatId, `? Критическая ошибка: ${e.message}`, env);
+    if (chatId) await sendVKMessage(chatId, `❌ Критическая ошибка: ${e.message}`, env);
   }
   return new Response("OK");
 }
@@ -3088,67 +3308,67 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
   <div id="app-container" class="theme-bg-page" style="position:relative; z-index:2; min-height:100vh; transition: transform 0.2s cubic-bezier(0,0,0.2,1); will-change: transform;">
     <div class="header-actions">
       <button class="action-btn" onclick="toggleLanguage()" style="background:none; border:none; cursor:pointer; padding:0;">
-        <span id="langIcon" style="font-size:16px;">????</span>
+        <span id="langIcon" style="font-size:16px;">🇷🇺</span>
       </button>
       <button id="themeToggle" class="action-btn" onclick="toggleTheme()" style="background:none; border:none; cursor:pointer; padding:0;">
-        <span id="themeIcon" style="font-size:16px;">??</span>
+        <span id="themeIcon" style="font-size:16px;">☀️</span>
       </button>
-      <div class="action-btn" id="reloadIcon" onclick="uiReload()"><b>?</b></div>
-      <div class="action-btn close-btn" onclick="closeApp()"><b>?</b></div>
+      <div class="action-btn" id="reloadIcon" onclick="uiReload()"><b>⟳</b></div>
+      <div class="action-btn close-btn" onclick="closeApp()"><b>✕</b></div>
     </div>
 
     <div id="ui-header-block" class="tg-message">
-      <div style="margin-top: 12px;"><b style="font-size: 18px;">?? Привет!</b><br> Я твоя личная Хранилка.</div>
-      <div style="margin-top: 6px; font-size: 14px; opacity: 0.9;">?? Просто пришли мне фото или видео, и я закину их на сервер.</div>
+      <div style="margin-top: 12px;"><b style="font-size: 18px;">👋 Привет!</b><br> Я твоя личная Хранилка.</div>
+      <div style="margin-top: 6px; font-size: 14px; opacity: 0.9;">📁 Просто пришли мне фото или видео, и я закину их на сервер.</div>
       <div class="status-group">
-      <div>?? Статус: ${isConnected ? `? <span style="color:#4bb34b; font-weight:bold;">Подключен ${providerName}</span>` : 'Не настроено'}</div>
-      <div id="curFolderLabel">?? Папка: ${isConnected ? `<b>${currentFolder}</b>` : 'Не выбрана'}</div>
+      <div>⚙️ Статус: ${isConnected ? `✅ <span style="color:#4bb34b; font-weight:bold;">Подключен ${providerName}</span>` : 'Не настроено'}</div>
+      <div id="curFolderLabel">📂 Папка: ${isConnected ? `<b>${currentFolder}</b>` : 'Не выбрана'}</div>
     </div>
   </div>
 
   <div id="adminPanel" class="msg-bubble" style="border-left-color: #4bb34b;">
-    <span class="close-x" onclick="togglePanel('adminPanel')">?</span>
-    <div class="msg-header">?? Панель администратора</div>
+    <span class="close-x" onclick="togglePanel('adminPanel')">×</span>
+    <div class="msg-header">⚙️ Панель администратора</div>
     <div class="msg-body">
-      <div>? Авторизовано: <b>${countUser}</b> пользователей</div>
-      <div>?? <b>Версия:</b> ${version}</div>
+      <div>✅ Авторизовано: <b>${countUser}</b> пользователей</div>
+      <div>🚀 <b>Версия:</b> ${version}</div>
       <div style="margin-top:12px;">Выбери раздел настроек:</div>
-      <div class="chat-btn" onclick="openAiSettings()">?? Настройки ИИ</div>
-      <div class="chat-btn-secondary" onclick="togglePanel('debugPanel')">?? Статистика</div>
+      <div class="chat-btn" onclick="openAiSettings()">🧠 Настройки ИИ</div>
+      <div class="chat-btn-secondary" onclick="togglePanel('debugPanel')">📊 Статистика</div>
     </div>
   </div>
 
   <div id="aiSettingsPanel" class="msg-bubble" style="border-left-color: #5181b8; display: none;">
-    <span class="close-x" onclick="togglePanel('aiSettingsPanel')">?</span>
-    <div class="msg-header">?? Настройки моделей</div>
+    <span class="close-x" onclick="togglePanel('aiSettingsPanel')">×</span>
+    <div class="msg-header">🧠 Настройки моделей</div>
     <div class="msg-body">
       <div id="modelsPanel" style="margin-top: 16px; display: none;"></div>
       <div id="aiCurrentStatus" style="font-size: 13px; background: #1a1a1a; color: #fff; padding: 10px; border-radius: 8px; margin-bottom: 12px; font-family: monospace;">
-      ?? <b>Текущие модели:</b><br>
-      ? Загрузка конфигурации...
+      📊 <b>Текущие модели:</b><br>
+      ⏳ Загрузка конфигурации...
     </div>
   </div>
   <div style="margin-bottom:10px;">---<br>Выберите сервис:</div>
-    <div class="chat-btn-secondary" id="TEXT_TO_TEXT" onclick="loadModels(this)">?? Текст > Текст</div>
-    <div class="chat-btn-secondary" id="IMAGE_TO_TEXT" onclick="loadModels(this)">??? Картинка > Текст</div>
-    <div class="chat-btn-secondary" id="AUDIO_TO_TEXT" onclick="loadModels(this)">??? Аудио > Текст</div>
-    <div class="chat-btn-secondary" id="VIDEO_TO_TEXT" onclick="loadModels(this)">?? Видео > Текст</div>
-    <div class="chat-btn-secondary" id="DOCUMENT_TO_TEXT" onclick="loadModels(this)">?? Документ > Текст</div>
-    <div class="chat-btn-secondary" id="VIDEO_TO_ANALYSIS" onclick="loadModels(this)">??? Видео > Анализ</div>
+    <div class="chat-btn-secondary" id="TEXT_TO_TEXT" onclick="loadModels(this)">📝 Текст → Текст</div>
+    <div class="chat-btn-secondary" id="IMAGE_TO_TEXT" onclick="loadModels(this)">🖼️ Картинка → Текст</div>
+    <div class="chat-btn-secondary" id="AUDIO_TO_TEXT" onclick="loadModels(this)">🎙️ Аудио → Текст</div>
+    <div class="chat-btn-secondary" id="VIDEO_TO_TEXT" onclick="loadModels(this)">🎥 Видео → Текст</div>
+    <div class="chat-btn-secondary" id="DOCUMENT_TO_TEXT" onclick="loadModels(this)">📄 Документ → Текст</div>
+    <div class="chat-btn-secondary" id="VIDEO_TO_ANALYSIS" onclick="loadModels(this)">🎞️ Видео → Анализ</div>
     <div id="modelsList" style="margin-top: 16px; display: none;"></div>
   </div>
 
   <div id="debugPanel" class="msg-bubble">
-    <span class="close-x" onclick="togglePanel('debugPanel')">?</span>
-    <div class="msg-header">?? DEBUG INFO</div>
+    <span class="close-x" onclick="togglePanel('debugPanel')">×</span>
+    <div class="msg-header">🛠 DEBUG INFO</div>
     <div id="debugContent" class="msg-body">
-      <div>?? <b>Приложение онлайн</b></div>
-      <div>?? <b>Версия:</b> ${version}</div>
-      <div>?? <b>Статус:</b> ${isConnected ? '? Соединение активно' : '? Не подключено'}</div>
-      <div>?? <b>Провайдер:</b> ${isConnected ? `${provider}` : '-'}</div>
-      <div>?? <b>Папка:</b> ${isConnected ? `${currentFolder}` : '-'}</div>
-      <div>?? <b>Твой ID:</b> ${userId}</div>
-      <div>?? <b>Админ:</b> ${isAdmin ? 'Да' : 'Нет'}</div>
+      <div>🗄 <b>Приложение онлайн</b></div>
+      <div>📦 <b>Версия:</b> ${version}</div>
+      <div>🔗 <b>Статус:</b> ${isConnected ? '✅ Соединение активно' : '❌ Не подключено'}</div>
+      <div>☁️ <b>Провайдер:</b> ${isConnected ? `${provider}` : '-'}</div>
+      <div>📂 <b>Папка:</b> ${isConnected ? `${currentFolder}` : '-'}</div>
+      <div>👤 <b>Твой ID:</b> ${userId}</div>
+      <div>👑 <b>Админ:</b> ${isAdmin ? 'Да' : 'Нет'}</div>
     </div>
   </div>
 
@@ -3162,17 +3382,17 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     </div>
   </div>
 
-  <div style="margin-top: 15px;">?? <b>Команды:</b></div>
+  <div style="margin-top: 15px;">📖 <b>Команды:</b></div>
   <div id="ui-admin-commands" style="margin-top: 5px;">
-  ${isAdmin ? `<span class="blue-link" onclick="togglePanel('adminPanel')" style="color:#4bb34b;">/admin</span> — ?? Меню админа<br>` : ''}
+  ${isAdmin ? `<span class="blue-link" onclick="togglePanel('adminPanel')" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>` : ''}
   </div>
     
   <div id="ui-commands-block" style="margin-top: 0px;">      
-    ${isConnected ? `<span class="blue-link" onclick="openFolderSelector()">/folder</span> — ?? Выбрать папку для загрузки<br>` : ''}
-    ${isConnected ? `<span class="blue-link" onclick="shareApp()">/share</span> — ?? Ссылка для друга<br>` : ''}
-    ${isConnected ? `<span class="blue-link" onclick="goToSearch()">/search</span> — ?? Поиск файлов по хранилке<br>` : ''}
-    <span class="blue-link" onclick="togglePanel('debugPanel')">/debug</span> — ??? Техническая информация<br>
-    ${isConnected ? `<span class="blue-link" onclick="disconnect()" style="color:#ff3347;">/disconnect</span> — ?? Отключить диск<br>` : ''}
+    ${isConnected ? `<span class="blue-link" onclick="openFolderSelector()">/folder</span> — 📂 Выбрать папку для загрузки<br>` : ''}
+    ${isConnected ? `<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>` : ''}
+    ${isConnected ? `<span class="blue-link" onclick="goToSearch()">/search</span> — 🔎 Поиск файлов по хранилке<br>` : ''}
+    <span class="blue-link" onclick="togglePanel('debugPanel')">/debug</span> — 🛠️ Техническая информация<br>
+    ${isConnected ? `<span class="blue-link" onclick="disconnect()" style="color:#ff3347;">/disconnect</span> — 🔌 Отключить диск<br>` : ''}
   </div>
 
   <div id="searchModal" class="modal-overlay" onclick="closeSearch()">
@@ -3205,7 +3425,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       <input type="file" id="vkFileInput" style="display: none;" onchange="uploadFileFromVK(this)" multiple>
       ${isConnected ? `
       <button class="btn-s" onclick="document.getElementById('vkFileInput').click()" id="uploadBtn" style="background: #2688eb; color: #fff; border: none; width: 100%; font-weight: 500; cursor: pointer;">
-      ?? Выбрать файлы для загрузки
+      📎 Выбрать файлы для загрузки
       </button>
       ` : ''}
     </div>
@@ -3222,37 +3442,38 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
 
   <div id="authButtons">
     <button class="btn-s ${provider === 'yandex' ? 'active' : ''}" onclick="openAuthLink('/auth/yandex')">
-      <img src="${cdn}/YandexDisk.png"> Яндекс Диск ${provider === 'yandex' ? '<span class="check-mark">?</span>' : ''}
+      <img src="${cdn}/YandexDisk.png"> Яндекс Диск ${provider === 'yandex' ? '<span class="check-mark">✅</span>' : ''}
     </button>
     <button class="btn-s ${provider === 'google' ? 'active' : ''}" onclick="openAuthLink('/auth/google')">
-      <img src="${cdn}/GoogleDrive.png"> Google Drive ${provider === 'google' ? '<span class="check-mark">?</span>' : ''}
+      <img src="${cdn}/GoogleDrive.png"> Google Drive ${provider === 'google' ? '<span class="check-mark">✅</span>' : ''}
     </button>
     <button class="btn-s ${provider === 'dropbox' ? 'active' : ''}" onclick="openAuthLink('/auth/dropbox')">
-      <img src="${cdn}/Dropbox.png"> Dropbox ${provider === 'dropbox' ? '<span class="check-mark">?</span>' : ''}
+      <img src="${cdn}/Dropbox.png"> Dropbox ${provider === 'dropbox' ? '<span class="check-mark">✅</span>' : ''}
     </button>
     <button class="btn-s ${provider === 'webdav' && userData?.webdav_host?.includes('mail.ru') ? 'active' : ''}" onclick="showMailRu()">
-      <img src="${cdn}/CloudMailRu.png"> Облако Mail.ru ${userData?.webdav_host?.includes('mail.ru') ? '<span class="check-mark">?</span>' : ''}
+      <img src="${cdn}/CloudMailRu.png"> Облако Mail.ru ${userData?.webdav_host?.includes('mail.ru') ? '<span class="check-mark">✅</span>' : ''}
     </button>
     <button class="btn-s" onclick="showCustomWD()">
-      <img src="${cdn}/network-drive.png"> Свой FTP/SFTP/WebDAV
+      <img src="${cdn}/network-drive.png"> Свой FTP/SFTP/WebDAV ${((provider === 'webdav' && !userData?.webdav_host?.includes('mail.ru')) || provider === 'ftp' || provider === 'sftp') ? '<span class="check-mark">✅</span>' : ''}
     </button>
-    <button class="btn-s" onclick="openFriendsStorage()">?? Подключить Хранилку по ссылке</button>
-    <button class="btn-s" style="margin-top: 12px; background: #2688eb; color: #fff; border: none;" onclick="goToChat()">?? Открыть чат Хранилку</button>
+    <button class="btn-s" onclick="openFriendsStorage()">🤝 Подключить Хранилку по ссылке</button>
+    <button class="btn-s" style="margin-top: 12px; background: #2688eb; color: #fff; border: none;" onclick="goToChat()">💬 Открыть чат Хранилку</button>
   </div>
 
   <div id="wdForm" class="msg-bubble" style="border-left-color: #adb5bd;">
-    <span class="close-x" onclick="togglePanel('wdForm')">?</span>
+    <span class="close-x" onclick="togglePanel('wdForm')">×</span>
     <div id="wdContent"></div>
+    <input type="hidden" id="wdFullUrl" name="fullUrl">
     <input type="text" id="wdHost" placeholder="Сервер (WebDAV URL)" oninput="parseUrl(this.value)">
     <input type="text" id="wdUser" placeholder="Логин (Email)">
     <input type="password" id="wdPass" placeholder="Пароль приложения">
     <input type="text" id="wdFolder" placeholder="Папка для сохранения">
-    <button id="saveBtn" class="chat-btn" style="width:100%; border:none;" onclick="saveWebDAV()">?? Подключиться</button>
+    <button id="saveBtn" class="chat-btn" style="width:100%; border:none;" onclick="saveWebDAV()">📥 Подключиться</button>
   </div>
 
   <div class="quota-card">
     ${isConnected ? `
-    <div style="font-size:14px; margin-bottom:4px; opacity:0.8;">?? Свободное место</div>
+    <div style="font-size:14px; margin-bottom:4px; opacity:0.8;">☁️ Свободное место</div>
     <div class="progress-bg"><div id="quotaBar" class="progress-fill"></div></div>
     <div id="quotaText" style="font-size:11px; color: #818c99;">Загрузка данных...</div>
     ` : ''}    
@@ -3264,8 +3485,8 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         <b>Выбор папки</b>
         <span onclick="closeFolders()" style="cursor:pointer; font-size:28px; padding: 0 10px;">&times;</span>
       </div>
-      <div class="btn-s" onclick="promptCreateFolder()">? Создать новую папку</div>
-      <div id="modalFolderList" style="margin-top:10px;">? Загрузка...</div>
+      <div class="btn-s" onclick="promptCreateFolder()">➕ Создать новую папку</div>
+      <div id="modalFolderList" style="margin-top:10px;">⏳ Загрузка...</div>
     </div>
   </div>
 
@@ -3307,7 +3528,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       const p = new URLSearchParams(window.location.search);
       return p.get(name);
     }
-    
+
     // Инициализация параметров (Исправлено!)
     const userId = ${JSON.stringify(userId)} || "UNKNOWN";
     const groupId = ${JSON.stringify(groupId)} || "235249123";
@@ -3445,7 +3666,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         document.documentElement.setAttribute('data-theme', theme);
         const icon = document.getElementById('themeIcon');
         if (icon) {
-            icon.innerText = theme === 'dark' ? '??' : '??';
+            icon.innerText = theme === 'dark' ? '🌙' : '☀️';
         }
         localStorage.setItem('user-theme', theme);
     }
@@ -3466,7 +3687,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       // Сначала убедимся, что флаг в HTML соответствует текущему языку
       const langBtn = document.getElementById('langToggle');
       if (langBtn) {
-          langBtn.innerText = (currentLang === 'ru' ? '????' : '????');
+          langBtn.innerText = (currentLang === 'ru' ? '🇷🇺' : '🇺🇸');
       }
       const isConn = !!data.isConnected;
       const pName = data.providerName || (currentLang === 'ru' ? 'Не настроено' : 'Not configured');
@@ -3480,11 +3701,10 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         ru: {
             hi: "Привет",
             tagline: "Приложение «Хранилка» by Leshiy",
-            shortDesc: "Одновременно работает как <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram-бот</a>, <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>vkMiniApp-приложение</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.",
-            features: "? <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru и WebDAV. Можно делиться доступом с близкими!",
-            features: "? <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru и WebDAV. Можно делиться доступом с близкими!",
-            aiNote: "?? <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.",
-            status: "?? Связь с хранилищем:",
+            shortDesc: "Одновременно работает как <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram-бот</a>, <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>vkMiniApp-приложение</a> и <a href='https://ok.ru/app/512004791160' target='_blank' style='color: #4db3ff;'>okMiniApp в одноклассниках</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.",
+            features: "✨ <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru и WebDAV. Можно делиться доступом с близкими!",
+            aiNote: "🧠 <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.",
+            status: "⚙️ Связь с хранилищем:",
             connected: "Подключено:",
             folder: "Папка",
             notSet: "Настройте подключение",
@@ -3493,10 +3713,10 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         en: {
             hi: "Hi",
             tagline: "App «Storage» by Leshiy",
-            shortDesc: "It works simultaneously as a <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram bot</a>, a <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>VK chat bot</a>, and a <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>VKMiniApp</a> application with an upload/download function and a referral access system. Serves as a «bridge» between social networks and cloud storage. Allows you to save media files (photos, videos, documents) to your personal cloud storage. 24/7 at your service.",
-            features: "? <b>Features:</b> High-quality uploads, support for Yandex, Google, Dropbox, Mail.Ru & WebDAV. Share access with your family!",
-            aiNote: "?? <b>Gemini AI:</b> Feel free to ask me anything about the bot or just chat.",
-            status: "?? Cloud Connection:",
+            shortDesc: "It works simultaneously as a <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram bot</a>, a <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>VK chat bot</a>, and a <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>VKMiniApp</a> and <a href='https://ok.ru/app/512004791160' target='_blank' style='color: #4db3ff;'>okMiniApp</a> application with an upload/download function and a referral access system. Serves as a «bridge» between social networks and cloud storage. Allows you to save media files (photos, videos, documents) to your personal cloud storage. 24/7 at your service.",
+            features: "✨ <b>Features:</b> High-quality uploads, support for Yandex, Google, Dropbox, Mail.Ru & WebDAV. Share access with your family!",
+            aiNote: "🧠 <b>Gemini AI:</b> Feel free to ask me anything about the bot or just chat.",
+            status: "⚙️ Cloud Connection:",
             connected: "Connected to",
             folder: "Folder",
             notSet: "Setup required",
@@ -3506,29 +3726,29 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       const lang = i18n[currentLang];
       // Обновляем саму иконку флага, чтобы она не сбрасывалась при рендере
       const langIcon = document.getElementById('langIcon');
-      if (langIcon) langIcon.innerText = (currentLang === 'ru' ? '????' : '????');
+      if (langIcon) langIcon.innerText = (currentLang === 'ru' ? '🇷🇺' : '🇺🇸');
       const headerBlock = document.getElementById('ui-header-block');
       if (headerBlock) {
           headerBlock.innerHTML = 
               // --- СЕКЦИЯ 1: ВСЕГДА ВИДИМАЯ (Приветствие и Статус) ---
               '<div style="margin-top: 12px;">' +
-                  '<b style="font-size: 18px;">?? ' + lang.hi + ', ' + firstName + '!</b>' +
+                  '<b style="font-size: 18px;">👋 ' + lang.hi + ', ' + firstName + '!</b>' +
               '</div>' +
               '<div style="margin-top: 6px; font-size: 14px; opacity: 0.9;">' + 
-                  (currentLang === 'ru' ? '?? Я твоя личная Хранилка. Пришли мне файлы, и я сохраню их в облако.' : '?? I your personal Storage. Send me files to save it to the cloud.') + 
+                  (currentLang === 'ru' ? '📁 Я твоя личная Хранилка. Пришли мне файлы, и я сохраню их в облако.' : '📁 I am your personal Storage. Send me files to save it to the cloud.') + 
               '</div>' +
 
               '<div class="status-group" style="border-left: 3px solid ' + (isConn ? '#4bb34b' : '#eb4242') + '; margin-top: 15px; padding-left: 15px;">' +
                   '<div style="font-size: 12px; opacity: 0.6;">' + lang.status + '</div>' +
                   '<div style="font-size: 15px; font-weight: 600; margin-top: 2px;">' + 
-                      (isConn ? '<span style="color:#4bb34b;">? ' + lang.connected + ' ' + (data.providerName || '') + '</span>' : '<span style="color:#eb4242;">0 ' + lang.notSet + '</span>') + 
+                      (isConn ? '<span style="color:#4bb34b;">✅ ' + lang.connected + ' ' + (data.providerName || '') + '</span>' : '<span style="color:#eb4242;">○ ' + lang.notSet + '</span>') + 
                   '</div>' +
-                  '<div style="font-size: 13px; margin-top: 4px; opacity: 0.8;">?? ' + lang.folder + ': ' + (isConn ? '<b>' + (data.currentFolder || '') + '</b>' : '—') + '</div>' +
+                  '<div style="font-size: 13px; margin-top: 4px; opacity: 0.8;">📂 ' + lang.folder + ': ' + (isConn ? '<b>' + (data.currentFolder || '') + '</b>' : '—') + '</div>' +
               '</div>' +
 
               // --- СЕКЦИЯ 2: РАСКРЫВАЮЩАЯСЯ (Твои тексты) ---
               '<details>' +
-                  '<summary><span class="arrow-down">Ў</span></summary>' +
+                  '<summary><span class="arrow-down">▼</span></summary>' +
                   '<div style="margin-top: 10px;">' +
                       // Твой Tagline
                       '<div style="font-size: 12px; color: #4bb34b; margin-bottom: 2px; font-weight: 500;">' + lang.tagline + '</div>' +
@@ -3543,6 +3763,14 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
                       '<div style="margin-top: 12px; font-size: 11px; opacity: 0.5; text-align: right;">© Автор: Огорельцев Александр Валерьевич</div>' +
                   '</div>' +
               '</details>';
+              
+              // --- ПОСЛЕ того как headerBlock.innerHTML обновлен, вешаем свайп: ---
+              const detailsEl = document.getElementById('header-details-about');
+              if (detailsEl && typeof makeSwipable === "function") {
+                // Вешаем свайп на раскрытый блок
+                makeSwipable(detailsEl, null, false);
+                console.log("[Header] Информация свернута свайпом");
+              }
         }
     }
     
@@ -3552,13 +3780,13 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       if (!container) return; // Защита от падения, если элемент не найден
       var html = '';
       if (data.isConnected) {
-        html += '<span class="blue-link" onclick="openFolderSelector()">/folder</span> — ?? Выбрать папку для загрузки<br>';
-        html += '<span class="blue-link" onclick="shareApp()">/share</span> — ?? Ссылка для друга<br>';
-        html += '<span class="blue-link" onclick="goToSearch()">/search</span> — ?? Поиск файлов по хранилке<br>';
+        html += '<span class="blue-link" onclick="openFolderSelector()">/folder</span> — 📂 Выбрать папку для загрузки<br>';
+        html += '<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>';
+        html += '<span class="blue-link" onclick="goToSearch()">/search</span> — 🔎 Поиск файлов по хранилке<br>';
       }
-        html += '<span class="blue-link" onclick="togglePanel(' + "'debugPanel'" + ')">/debug</span> — ??? Техническая информация<br>';    
+        html += '<span class="blue-link" onclick="togglePanel(' + "'debugPanel'" + ')">/debug</span> — 🛠️ Техническая информация<br>';    
       if (data.isConnected) {
-        html += '<span class="blue-link" onclick="disconnect()" style="color:#ff3347;">/disconnect</span> — ?? Отключить диск<br>';    
+        html += '<span class="blue-link" onclick="disconnect()" style="color:#ff3347;">/disconnect</span> — 🔌 Отключить диск<br>';    
       }
       container.innerHTML = html;
     }
@@ -3570,27 +3798,46 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       // Извлекаем данные из объекта data, который пришел с сервера
       var provider = data.provider || null;
       var isMailRu = data.webdav_host && data.webdav_host.indexOf('mail.ru') !== -1;
+      var isCustomWD = (
+        (provider === 'webdav' && !isMailRu) || 
+        provider === 'ftp' || 
+        provider === 'sftp'
+      );
       var html = '';
       // Яндекс
       html += '<button class="btn-s ' + (provider === 'yandex' ? 'active' : '') + '" onclick="openAuthLink(' + "'/auth/yandex'" + ')">';
-      html += '<img src="' + UI_CDN + '/YandexDisk.png"> Яндекс Диск ' + (provider === 'yandex' ? '<span class="check-mark">?</span>' : '') + '</button>';
+      html += '<img src="' + UI_CDN + '/YandexDisk.png"> Яндекс Диск ' + (provider === 'yandex' ? '<span class="check-mark">✅</span>' : '') + '</button>';
       // Google
       html += '<button class="btn-s ' + (provider === 'google' ? 'active' : '') + '" onclick="openAuthLink(' + "'/auth/google'" + ')">';
-      html += '<img src="' + UI_CDN + '/GoogleDrive.png"> Google Drive ' + (provider === 'google' ? '<span class="check-mark">?</span>' : '') + '</button>';
+      html += '<img src="' + UI_CDN + '/GoogleDrive.png"> Google Drive ' + (provider === 'google' ? '<span class="check-mark">✅</span>' : '') + '</button>';
       // Dropbox
       html += '<button class="btn-s ' + (provider === 'dropbox' ? 'active' : '') + '" onclick="openAuthLink(' + "'/auth/dropbox'" + ')">';
-      html += '<img src="' + UI_CDN + '/Dropbox.png"> Dropbox ' + (provider === 'dropbox' ? '<span class="check-mark">?</span>' : '') + '</button>';
+      html += '<img src="' + UI_CDN + '/Dropbox.png"> Dropbox ' + (provider === 'dropbox' ? '<span class="check-mark">✅</span>' : '') + '</button>';
       // Mail.ru
       html += '<button class="btn-s ' + (provider === 'webdav' && isMailRu ? 'active' : '') + '" onclick="showMailRu()">';
-      html += '<img src="' + UI_CDN + '/CloudMailRu.png"> Облако Mail.ru ' + (isMailRu ? '<span class="check-mark">?</span>' : '') + '</button>';
+      html += '<img src="' + UI_CDN + '/CloudMailRu.png"> Облако Mail.ru ' + (isMailRu ? '<span class="check-mark">✅</span>' : '') + '</button>';
       // Свой WebDAV
-      html += '<button class="btn-s" onclick="showCustomWD()">';
-      html += '<img src="' + UI_CDN + '/network-drive.png"> Свой FTP/SFTP/WebDAV</button>';
+      var btnText = getCustomServerButtonText(provider);
+      html += '<button class="btn-s ' + (isCustomWD ? 'active' : '') + '" onclick="showCustomWD()">';
+      html += '<img src="' + UI_CDN + '/network-drive.png">' + btnText + (isCustomWD ? '<span class="check-mark">✅</span>' : '') + '</button>';
       // Друг
-      html += '<button class="btn-s" onclick="openFriendsStorage()">?? Подключить Хранилку друга</button>';
+      html += '<button class="btn-s" onclick="openFriendsStorage()">🤝 Подключить Хранилку друга</button>';
       // Чат
-      html += '<button class="btn-s" style="margin-top: 12px; background: #2688eb; color: #fff; border: none;" onclick="goToChat()">?? Открыть чат Хранилку</button>';
+      html += '<button class="btn-s" style="margin-top: 12px; background: #2688eb; color: #fff; border: none;" onclick="goToChat()">💬 Открыть чат Хранилку</button>';
       container.innerHTML = html;
+
+      // === ПРОВЕРКА УВЕДОМЛЕНИЯ О ПОДКЛЮЧЕНИИ ДРУГА ===
+      console.log("[renderAuth] Проверка уведомлений:", data.friendConnected);
+      if (data && data.friendConnected) {
+        console.log("[renderAuth] Найдено уведомление:", data.friendConnected);
+        setTimeout(function() {
+          try {
+            showFriendConnectedNotification(data.friendConnected);
+          } catch (e) {
+            console.error("[renderAuth] Ошибка показа уведомления:", e);
+          }
+        }, 1500);
+      }
     }
 
     function renderDebug(data) {
@@ -3602,13 +3849,13 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       const dFold = isConn ? (data.currentFolder || 'Root') : '-';
       const dAdmin = data.isAdmin ? 'Да' : 'Нет';
       container.innerHTML = 
-          '<div>?? <b>Приложение онлайн</b></div>' +
-          '<div>?? <b>Версия:</b> ' + "${version}" + '</div>' +
-          '<div>?? <b>Статус:</b> ' + (isConn ? '? Соединение активно' : '? Не подключено') + '</div>' +
-          '<div>?? <b>Провайдер:</b> ' + (isConn ? (data.providerName || data.provider) : '-') + '</div>' +
-          '<div>?? <b>Папка:</b> ' + (isConn ? (data.currentFolder || 'Root') : '-') + '</div>' +
-          '<div>?? <b>Твой ID:</b> ' + userId + '</div>' + 
-          '<div>?? <b>Админ:</b> ' + (data.isAdmin ? 'Да' : 'Нет') + '</div>';
+          '<div>🗄 <b>Приложение онлайн</b></div>' +
+          '<div>📦 <b>Версия:</b> ' + "${version}" + '</div>' +
+          '<div>🔗 <b>Статус:</b> ' + (isConn ? '✅ Соединение активно' : '❌ Не подключено') + '</div>' +
+          '<div>☁️ <b>Провайдер:</b> ' + (isConn ? (data.providerName || data.provider) : '-') + '</div>' +
+          '<div>📂 <b>Папка:</b> ' + (isConn ? (data.currentFolder || 'Root') : '-') + '</div>' +
+          '<div>👤 <b>Твой ID:</b> ' + userId + '</div>' + 
+          '<div>👑 <b>Админ:</b> ' + (data.isAdmin ? 'Да' : 'Нет') + '</div>';
     }
 
     function closeApp() {
@@ -3619,7 +3866,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       const icon = document.getElementById('reloadIcon');
       if (icon) {
         icon.classList.add('loading');
-        icon.innerText = '??'; // Меняем символ ? на сон
+        icon.innerText = '💤'; // Меняем символ ⟳ на сон
       }
       refreshData();
     }
@@ -3632,7 +3879,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       // ВАЖНО: проверяем, что здесь именно ЭМОДЗИ, а не буквы
       const langIcon = document.getElementById('langIcon');
       if (langIcon) {
-          langIcon.innerHTML = (currentLang === 'ru' ? '????' : '????');
+          langIcon.innerHTML = (currentLang === 'ru' ? '🇷🇺' : '🇺🇸');
       }
   
       if (window.lastHeaderData) renderHeader(window.lastHeaderData);
@@ -3641,7 +3888,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     function updateLanguageUI() {
       const langBtn = document.getElementById('langToggle');
       if (langBtn) {
-          langBtn.innerText = (currentLang === 'ru' ? '????' : '????');
+          langBtn.innerText = (currentLang === 'ru' ? '🇷🇺' : '🇺🇸');
       }
   
       // Если данные хедера уже были загружены, перерисовываем его
@@ -3715,7 +3962,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           if (icon) {
               setTimeout(() => {
                   icon.classList.remove('loading');
-                  icon.innerText = '?'; // Возвращаем стрелочку
+                  icon.innerText = '⟳'; // Возвращаем стрелочку
               }, 500);
           }
       }
@@ -3751,7 +3998,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       const loader = document.createElement('div');
       loader.className = 'loading-msg';
       loader.id = 'temp-loader';
-      loader.innerHTML = '<span>?</span> Запрос отправлен...';
+      loader.innerHTML = '<span>⌛</span> Запрос отправлен...';
       aiHistory.appendChild(loader);
       
       aiHistory.scrollTop = aiHistory.scrollHeight;
@@ -3800,27 +4047,30 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
 
     function showCustomWD() {
       document.getElementById('wdContent').innerHTML = \`
-        <div class="msg-header">?? Подключение своего сервера</div>
-        <div class="wd-info-box">
-          <b>Поддерживаются следующие протоколы:</b><br>
-          ? WebDAV (рекомендуется) — работает в Cloudflare Workers<br><br>
-          ?? <b>Формат для WebDAV:</b><br>
-          https://user:pass@ваш-сервер.ru<br><br>
-          ? FTP / SFTP — НЕ работают в Cloudflare Workers<br>
-          ?? Используйте <a href="https://github.com/leshiy-ai/leshiy-storage-bot" target="_blank">Python-версию бота</a> для FTP/SFTP (на Render/VPS).<br>
-          Это полноценный продукт для личного хостинга.<br><br>
-          Укажи ссылку в формате:
-        </div>
-        <div style="font-size:11px; margin-bottom:12px; word-break:break-all; color:#2688eb;">https://ваша@почта:пароль_для_внешнего_приложения@webdav.yandex.ru</div>
+      <div class="msg-header">🔗 Подключение своего сервера</div>
+      <div class="wd-info-box">
+      <b>Поддерживаются протоколы:</b><br>
+      🌐 <b>WebDAV</b> — для Облако Mail.ru, Yandex Disk, и т.д.<br>
+      🔒 <b>FTP</b> — для FTP-серверов (порт 21)<br>
+      🔐 <b>SFTP</b> — для SFTP-серверов (порт 22, SSH)<br><br>
+      <b>Формат ввода:</b><br>
+      • WebDAV: <code>https://user:pass@сервер</code><br>
+      • FTP: <code>ftp://user:pass@хост:порт</code><br>
+      • SFTP: <code>sftp://user:pass@хост:порт</code><br><br>
+      </div>
+        <div style="font-size:11px; margin-bottom:12px; word-break:break-all; color:#2688eb;">
+      Укажите данные в формате ссылки для быстрой настройки.<br>
+      Или заполните поля ниже вручную — система сама определит протокол!
+      </div>
       \`;
       togglePanel('wdForm');
     }
 
     function showMailRu() {
       document.getElementById('wdContent').innerHTML = \`
-        <div class="msg-header">?? Облако Mail.ru через WebDAV</div>
+        <div class="msg-header">✉️ Облако Mail.ru через WebDAV</div>
         <div class="wd-info-box">
-          1. Перейди в Настройки > «Пароли для внешних приложений»<br>
+          1. Перейди в Настройки → «Пароли для внешних приложений»<br>
           2. Создай пароль для WebDAV<br>
           3. Укажи ссылку в формате ниже:
         </div>
@@ -3920,16 +4170,56 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       }
     }
     
-    function parseUrl(v) {
+    function parseUrl(inputValue) {
       try {
-        if (v.includes('://')) {
-          const u = new URL(v);
-          if(u.username) document.getElementById('wdUser').value = decodeURIComponent(u.username);
-          if(u.password) document.getElementById('wdPass').value = decodeURIComponent(u.password);
-          document.getElementById('wdHost').value = u.hostname;
-          document.getElementById('wdFolder').value = "Storage";
+        var fullUrlField = document.getElementById('wdFullUrl');
+        if (fullUrlField) {
+          fullUrlField.value = inputValue;
         }
-      } catch(e) {}
+        
+        if (inputValue.includes('://') && inputValue.includes('@')) {
+          var protocolEndIndex = inputValue.indexOf('://');
+          var protocol = inputValue.substring(0, protocolEndIndex);
+          
+          var rest = inputValue.substring(protocolEndIndex + 3);
+          var lastAtIndex = rest.lastIndexOf('@');
+          
+          if (lastAtIndex === -1) return;
+          
+          var authPart = rest.substring(0, lastAtIndex);
+          var hostPart = rest.substring(lastAtIndex + 1);
+          
+          var colonIndex = authPart.indexOf(':');
+          var username = '';
+          var password = '';
+          
+          if (colonIndex !== -1) {
+            username = decodeURIComponent(authPart.substring(0, colonIndex));
+            password = decodeURIComponent(authPart.substring(colonIndex + 1));
+          } else {
+            username = decodeURIComponent(authPart);
+          }
+          
+          document.getElementById('wdUser').value = username;
+          document.getElementById('wdPass').value = password;
+          
+          document.getElementById('wdHost').value = protocol + '://' + hostPart;
+          
+          var pathStart = hostPart.indexOf('/');
+          if (pathStart !== -1) {
+            var path = hostPart.substring(pathStart + 1);
+            // Удаляем слеши в конце вручную (без регулярки)
+            while (path.length > 0 && path.charAt(path.length - 1) === '/') {
+              path = path.substring(0, path.length - 1);
+            }
+            document.getElementById('wdFolder').value = path || 'Storage';
+          } else {
+            document.getElementById('wdFolder').value = 'Storage';
+          }
+        }
+      } catch (error) {
+        console.error('Ошибка парсинга URL:', error);
+      }
     }
 
     function setupMailRu() {
@@ -3946,57 +4236,90 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     }
 
     async function saveWebDAV() {
-      const b = document.getElementById('saveBtn');
-      const panel = document.getElementById('wdForm');
-      let h = document.getElementById('wdHost').value.trim();
-      if (!h.startsWith('http://') && !h.startsWith('https://')) {
-        h = 'https://' + h;
+      var saveButton = document.getElementById('saveBtn');
+      var formPanel = document.getElementById('wdForm');
+      
+      var hostValue = document.getElementById('wdHost').value.trim();
+      var usernameValue = document.getElementById('wdUser').value.trim();
+      var passwordValue = document.getElementById('wdPass').value.trim();
+      var folderValue = document.getElementById('wdFolder').value.trim();
+      
+      var fullUrlField = document.getElementById('wdFullUrl');
+      var fullUrlValue = fullUrlField ? fullUrlField.value.trim() : '';
+      
+      if (!hostValue || !usernameValue || !passwordValue || !folderValue) {
+        alert('Заполните все поля');
+        return;
       }
-      const u = document.getElementById('wdUser').value; 
-      const p = document.getElementById('wdPass').value;
-      const f = document.getElementById('wdFolder').value;
-      if(!h || !u || !p || !f) return alert("Заполните все поля");
-      b.disabled = true; b.innerText = "?? Сохраняю и подключаю...";
+      
+      saveButton.disabled = true;
+      saveButton.innerText = '💾 Сохраняю и подключаю...';
+      
       try {
-        console.log("Отправка данных WebDAV на сервер...");
-        const res = await fetch('/api/setup-webdav', {
+        console.log('Отправка данных на сервер...');
+        var response = await fetch('/api/setup-webdav', {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ userId, host: h, user: u, pass: p, folderId: f })
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: userId,
+            host: hostValue,
+            user: usernameValue,
+            pass: passwordValue,
+            folderId: folderValue,
+            fullUrl: fullUrlValue
+          })
         });
-        if(res.ok) {
-          // 1. Сразу закрываем панель настройки (чтобы не висела)
-            if (panel) {
-                panel.style.display = 'none'; // Скрываем блок формы
-            }
-          
-          // 2. Обновляем локальные данные, чтобы не ждать ответа сервера
+        
+        if (response.ok) {
+          if (formPanel) formPanel.style.display = 'none';
           window.currentProvider = 'webdav';
-          window.currentFolder = f;
-
-          // 2. Если нужно сразу показать папки (без фокуса)
+          window.currentFolder = folderValue;
+          
           if (typeof openFolderSelector === 'function') {
-              openFolderSelector(); 
+            openFolderSelector();
           }
-          // 3. Сбрасываем состояние кнопки для следующего раза
-          const b = document.getElementById('saveBtn');
-          b.disabled = false;
-          b.innerText = "?? Подключиться";
-
-          // 4. И только потом делаем тихий рефреш данных в фоне
-          refreshData(); 
+          // === ОБНОВЛЕНИЕ КНОПКИ С ГАЛОЧКОЙ И ПОДСВЕТКОЙ ===
+          var customBtn = document.querySelector('button[onclick="showCustomWD()"]');
+          if (customBtn) {
+            // Определяем провайдер из хоста
+            var provider = 'webdav';
+            if (hostValue.startsWith('ftp://')) {
+              provider = hostValue.startsWith('sftp://') ? 'sftp' : 'ftp';
+            }
+            
+            var btnText = getCustomServerButtonText(provider);
+            customBtn.innerHTML = btnText + ' ✅';
+          }
+          saveButton.disabled = false;
+          saveButton.innerText = '📥 Подключиться';
+          refreshData();
         } else {
-          b.disabled = false;
-          b.innerText = "?? Подключиться";
+          var errorData = await response.json().catch(function() { return {}; });
+          alert('Ошибка: ' + (errorData.error || 'Неизвестная ошибка'));
+          saveButton.disabled = false;
+          saveButton.innerText = '📥 Подключиться';
         }
-      } catch(e) {
-        b.disabled = false;
-        b.innerText = "?? Подключиться";
+      } catch (error) {
+        console.error('Ошибка подключения:', error);
+        alert('Ошибка сети: ' + error.message);
+        saveButton.disabled = false;
+        saveButton.innerText = '📥 Подключиться';
       }
     }
 
-    let searchDebounce;
+    function getCustomServerButtonText(provider) {
+      if (!provider) provider = 'webdav';
+      if (provider === 'webdav') {
+        return 'Свой FTP/SFTP/<b><span style="color:#4CAF50">WebDAV</span></b>';
+      } else if (provider === 'ftp') {
+        return 'Свой <b><span style="color:#4CAF50">FTP</span></b>/SFTP/WebDAV';
+      } else if (provider === 'sftp') {
+        return 'Свой FTP/<b><span style="color:#4CAF50">SFTP</span></b>/WebDAV';
+      }
+      return 'Свой FTP/SFTP/WebDAV';
+    }
 
+    let searchDebounce;
     // Открываем поиск
     function goToSearch() {
         document.getElementById('searchModal').style.display = 'flex';
@@ -4019,7 +4342,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       }
   
       searchDebounce = setTimeout(async function() {
-          list.innerHTML = '<div style="text-align:center; color:#818c99; margin-top:20px;">?? Ищу...</div>';
+          list.innerHTML = '<div style="text-align:center; color:#818c99; margin-top:20px;">🔍 Ищу...</div>';
           
           try {
               // Определяем, какие данные использовать: 
@@ -4054,20 +4377,20 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
                 // 1. Сначала подправим базовый стиль (В светлой он будет черным/темным, в темной — белым/светлым.)
                 var badgeStyle = 'font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 800; color: var(--text-color) !important; border: 1px solid ';
                 if (isSameProvider && isSameFolder) {
-                  statusText = '? Доступен';
+                  statusText = '● Доступен';
                   statusColor = '#4bb34b';
                   // Добавляем прозрачность фону, чтобы текст на нем читался в обеих темах
                   var providerBadge = badgeStyle + statusColor + '; background: ' + statusColor + '33;';
                   var folderBadge = badgeStyle + statusColor + '; background: ' + statusColor + '33;';
                   canDownload = true;
                 } else if (isSameProvider && !isSameFolder) {
-                  statusText = '? Не доступен (Другая папка)';
+                  statusText = '● Не доступен (Другая папка)';
                   statusColor = '#ffc107'; 
                   var providerBadge = badgeStyle + '#4bb34b; background: #4bb34b33;';
                   var folderBadge = badgeStyle + statusColor + '; background: ' + statusColor + '33;';
                   canDownload = true;
                 } else {
-                  statusText = '? Не доступен (Другой диск)';
+                  statusText = '● Не доступен (Другой диск)';
                   statusColor = '#99a2ad';
                   // Для нейтральных бейджей используем вторичный цвет текста
                   var providerBadge = badgeStyle + 'var(--border-color); background: var(--bubble-bg); color: var(--text-secondary) !important;';
@@ -4077,11 +4400,11 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
  
                 // Определяем иконку по расширению
                 var ext = file.fileName.split('.').pop().toLowerCase();
-                var icon = '??';
-                if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) icon = '???';
-                if (['mp4', 'mov', 'avi', 'wmv'].includes(ext)) icon = '??';
-                if (['mp3', 'wav'].includes(ext)) icon = '??';
-                if (['ogg', 'oga'].includes(ext)) icon = '???';
+                var icon = '📄';
+                if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) icon = '🖼️';
+                if (['mp4', 'mov', 'avi', 'wmv'].includes(ext)) icon = '🎬';
+                if (['mp3', 'wav'].includes(ext)) icon = '🎵';
+                if (['ogg', 'oga'].includes(ext)) icon = '🎙️';
 
                 // Ссылка на скачивание
                 var downloadUrl = '/api/download' +
@@ -4103,7 +4426,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
                                 '</div>' +
                             '</div>' +
                             
-                            '<a href="' + downloadUrl + '" target="_blank" class="download-link" style="border-radius: 6px; margin-left: 10px;">' + '?? Скачать' + '</a>' +
+                            '<a href="' + downloadUrl + '" target="_blank" class="download-link" style="border-radius: 6px; margin-left: 10px;">' + '⬇️ Скачать' + '</a>' +
                         '</div>';
               }
               list.innerHTML = html;
@@ -4127,7 +4450,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
 
     function openAiSettings() {
       togglePanel("aiSettingsPanel");
-      // ? ВСЕГДА ОБНОВЛЯЙ СТАТУС ПРИ ОТКРЫТИИ ПАНЕЛИ
+      // ✅ ВСЕГДА ОБНОВЛЯЙ СТАТУС ПРИ ОТКРЫТИИ ПАНЕЛИ
       updateCurrentAiStatus();
     }
     
@@ -4137,7 +4460,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       fetch("/api/admin/get-ai-settings?vk_user_id=" + userId + "&t=" + Date.now())
         .then(r => r.json())
         .then(d => {
-          let txt = "?? <b>Текущие модели:</b><br>";
+          let txt = "📊 <b>Текущие модели:</b><br>";
           for (const k in d.services) {
             const s = d.services[k];
             txt += "• " + s.name + ": " + s.currentModelName + "<br>";
@@ -4145,7 +4468,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           st.innerHTML = txt;
         })
         .catch(e => {
-          st.innerHTML = "? Ошибка загрузки";
+          st.innerHTML = "❌ Ошибка загрузки";
           console.error(e);
         });
     }
@@ -4182,7 +4505,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       const originalText = el.innerText; // Сохраняем имя (например, Gemini)
     
       // 1. Включаем индикацию загрузки
-      el.innerText = "? Сохранение...";
+      el.innerText = "⏳ Сохранение...";
       el.style.pointerEvents = "none";
       statusBox.style.opacity = "0.5";
     
@@ -4199,7 +4522,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           const modelName = allAiModels[modelId] ? allAiModels[modelId].MODEL : modelId;
           console.log("Модель успешно изменена на:", modelName);
           
-          alert("? Установлено!");
+          alert("✅ Установлено!");
           
           // Скрываем список и обновляем статус
           document.getElementById("modelsList").style.display = "none";
@@ -4260,7 +4583,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           // ТВОЙ СТАБИЛЬНЫЙ ВАРИАНТ (без onclick внутри строки)
           row.innerHTML = 
             '<div class="info" style="font-size:12px; display:flex; justify-content:space-between;">' +
-                '<span>? В очереди: <b>' + file.name + '</b></span>' +
+                '<span>⌛ В очереди: <b>' + file.name + '</b></span>' +
                 '<span class="cancel-btn" style="color:#ff4d4f; cursor:pointer; font-size:11px; text-decoration:underline;">Отмена</span>' +
             '</div>' +
             // Высота 6px и убрали внутренний блок pct
@@ -4311,7 +4634,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       row.setAttribute('data-status', 'cancelled');
       row.style.opacity = '0.5';
       var infoSpan = row.querySelector('.info span');
-      if (infoSpan) infoSpan.innerHTML = '?? Отменено: <b>' + task.fileName + '</b>';
+      if (infoSpan) infoSpan.innerHTML = '🔘 Отменено: <b>' + task.fileName + '</b>';
   
       // Меняем кнопку на "Вернуть"
       var btn = row.querySelector('.cancel-btn');
@@ -4338,7 +4661,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       row.setAttribute('data-status', 'waiting');
       row.style.opacity = '1';
       var infoSpan = row.querySelector('.info span');
-      if (infoSpan) infoSpan.innerHTML = '? В очереди: <b>' + task.fileName + '</b>';
+      if (infoSpan) infoSpan.innerHTML = '⌛ В очереди: <b>' + task.fileName + '</b>';
   
       // Возвращаем кнопку "Отмена"
       var btn = row.querySelector('.cancel-btn');
@@ -4367,7 +4690,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       if (infoSpan) {
           var fileNameTag = infoSpan.querySelector('b');
           var fileName = fileNameTag ? fileNameTag.innerText : "Файл";
-          infoSpan.innerHTML = '?? Отменено: <b>' + fileName + '</b>';
+          infoSpan.innerHTML = '🔘 Отменено: <b>' + fileName + '</b>';
       }
       var btn = row.querySelector('.cancel-btn');
       if (btn) btn.style.display = 'none';
@@ -4377,7 +4700,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       var btn = task.row.querySelector('.cancel-btn');
       if (btn) btn.style.display = 'none'; // Прячем кнопку на время попытки
       
-      task.info.innerHTML = '?? Перезапись... Файл: <b>' + task.fileName + '</b>';
+      task.info.innerHTML = '🔄 Перезапись... Файл: <b>' + task.fileName + '</b>';
   
       try {
           const confResponse = await fetch('/api/confirm-upload', {
@@ -4396,11 +4719,11 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
   
           // Если получилось
           task.row.setAttribute('data-status', 'done');
-          task.info.innerHTML = '? Готово! Файл: <b>' + task.fileName + '</b>';
+          task.info.innerHTML = '✅ Готово! Файл: <b>' + task.fileName + '</b>';
           if (task.bar) task.bar.style.background = '#28a745';
       } catch (e) {
           // Если опять не вышло — возвращаем кнопку "Повторить"
-          task.info.innerHTML = '?? Снова ошибка базы! Файл: <b>' + task.fileName + '</b>';
+          task.info.innerHTML = '⚠️ Снова ошибка базы! Файл: <b>' + task.fileName + '</b>';
           if (btn) {
               btn.style.display = 'inline';
               btn.innerHTML = 'Повторить';
@@ -4439,7 +4762,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     
           // Успех
           task.row.setAttribute('data-status', 'done');
-          task.info.innerHTML = '? Готово! ' + fileNameHTML;
+          task.info.innerHTML = '✅ Готово! ' + fileNameHTML;
           if (task.bar) { task.bar.style.background = '#28a745'; task.bar.style.width = '100%'; }
           var btn = task.row.querySelector('.cancel-btn');
           if (btn) btn.style.display = 'none';
@@ -4463,7 +4786,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           }
         
           task.row.setAttribute('data-status', 'done');
-          task.info.innerHTML = '? Готово! ' + fileNameHTML;
+          task.info.innerHTML = '✅ Готово! ' + fileNameHTML;
           if (task.bar) { task.bar.style.background = '#28a745'; task.bar.style.width = '100%'; }
           var btn = task.row.querySelector('.cancel-btn');
           if (btn) btn.style.display = 'none';
@@ -4507,7 +4830,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
             if (e.lengthComputable && task.info) {
               var pct = (e.loaded / e.total) * 100;
               if (task.bar) task.bar.style.width = pct + '%';
-              task.info.innerHTML = '?? ' + Math.floor(pct) + '%' + fileNameHTML;
+              task.info.innerHTML = '📤 ' + Math.floor(pct) + '%' + fileNameHTML;
             }
           };
     
@@ -4528,14 +4851,14 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
                 await confResponse.json();
     
                 task.row.setAttribute('data-status', 'done');
-                task.info.innerHTML = '? Готово! ' + fileNameHTML;
+                task.info.innerHTML = '✅ Готово! ' + fileNameHTML;
                 if (task.bar) { task.bar.style.background = '#28a745'; task.bar.style.width = '100%'; }
                 var btn = task.row.querySelector('.cancel-btn');
                 if (btn) btn.style.display = 'none';
               } catch (e) {
                 console.error("Ошибка подтверждения:", e);
                 task.row.setAttribute('data-status', 'warning');
-                task.info.innerHTML = '?? Ошибка базы! ' + fileNameHTML;
+                task.info.innerHTML = '⚠️ Ошибка базы! ' + fileNameHTML;
                 if (task.bar) { task.bar.style.background = '#ffc107'; task.bar.style.width = '100%'; }
                 var btn = task.row.querySelector('.cancel-btn');
                 if (btn) {
@@ -4546,14 +4869,14 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
               }
             } else {
               task.row.setAttribute('data-status', 'error');
-              task.info.innerHTML = '? Ошибка облака: ' + xhr.status + fileNameHTML;
+              task.info.innerHTML = '❌ Ошибка облака: ' + xhr.status + fileNameHTML;
             }
             finish();
           };
     
           xhr.onerror = function() {
             task.row.setAttribute('data-status', 'error');
-            task.info.innerHTML = '? Ошибка сети. Файл: <b>' + task.fileName + '</b>';
+            task.info.innerHTML = '❌ Ошибка сети. Файл: <b>' + task.fileName + '</b>';
             finish();
           };
     
@@ -4564,7 +4887,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         console.error("Ошибка в очереди:", e);
         if (task && task.row) {
           task.row.setAttribute('data-status', 'error');
-          task.info.innerHTML = '? Ошибка: ' + e.message + '. Файл: <b>' + task.fileName + '</b>';
+          task.info.innerHTML = '❌ Ошибка: ' + e.message + '. Файл: <b>' + task.fileName + '</b>';
           if (task.bar) task.bar.style.background = '#ff4d4f';
         }
       } finally {
@@ -4618,7 +4941,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       panel.style.opacity = "1";
       // Возвращаем панель в центр (учитывай свои стили top/left)
       panel.style.transform = "translate(-50%, -50%)"; // Если у тебя top: 50%
-      content.innerHTML = "<span class='loader'>? Генерация инвайт-кода...</span>";
+      content.innerHTML = "<span class='loader'>⏳ Генерация инвайт-кода...</span>";
 
       try {
         const response = await fetch('/api/create-invite?userId=' + userId);
@@ -4629,11 +4952,13 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           window.pendingInviteLink = 'https://vk.com/app' + appId + '#ref=' + data.inviteCode;
           // Словарь имен провайдеров
           const providerNames = {
-              'yandex': 'Яндекс Диск',
-              'google': 'Google Drive',
-              'mailru': 'Облако Mail.ru',
-              'dropbox': 'Dropbox',
-              'webdav': 'WebDAV'
+              'yandex': '☁️ Яндекс Диск',
+              'google': '☁️ Google Drive',
+              'mailru': '🌐 Облако Mail.ru',
+              'dropbox': '☁️ Dropbox',
+              'webdav': '🌐 WebDAV Сервер',
+              'ftp': '🔒 FTP Сервер',
+              'sftp': '🔐 SFTP Сервер'
           };
           
           // Берем данные для предпросмотра
@@ -4647,28 +4972,28 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           const inviteUrl = 'https://vk.com/app' + appId + '#ref=' + data.inviteCode;
           content.innerHTML =
           "<div class='modal-content-styled'>" +
-            "<span>?? <b>Что происходит?</b> Вы формируете приглашение на доступ в свою Хранилку. Ваш друг сможет загружать файлы в выбранную Вами в данный момент папку.</span><br><br>" +
+            "<span>👋 <b>Что происходит?</b> Вы формируете приглашение на доступ в свою Хранилку. Ваш друг сможет загружать файлы в выбранную Вами в данный момент папку.</span><br><br>" +
             
             "<b>Куда даем доступ:</b><br>" +
-            "?? <b>Провайдер:</b> " + pDisplay + "<br>" +
-            "?? <b>Папка:</b> " + fName + "<br>" +
-            "??? <b>Токен:</b> " + data.inviteCode + "<br><br>" +
+            "☁️ <b>Провайдер:</b> " + pDisplay + "<br>" +
+            "📁 <b>Папка:</b> " + fName + "<br>" +
+            "🎟️ <b>Токен:</b> " + data.inviteCode + "<br><br>" +
             
-            "?? <b>Ваша ссылка (клик для копирования):</b><br>" +
+            "🔗 <b>Ваша ссылка (клик для копирования):</b><br>" +
             "<code onclick='copyToClipboard(this)' class='modal-code-block'>" + inviteUrl + "</code>" +
             "<small class='modal-small-text'>Эта ссылка будет на кнопке <b>Открыть</b> в сообщении.</small><br><br>" +
 
             "<div class='modal-info-note'>" +
-                "?? <b>Текст сообщения (клик для копирования):</b><br>" +
+                "📝 <b>Текст сообщения (клик для копирования):</b><br>" +
                 "<span onclick='copyToClipboard(this)' style='cursor:pointer; display:block; margin-top:5px; font-style:italic;'>" +
                   "Я предоставил тебе доступ к своей Хранилке. Провайдер: " + pName + ". Папка: " + fName + ". Жми Открыть и подключайся!" + 
                 "</span>" +
             "</div><br>" +
             
             "<b>Что дальше?</b><br>" +
-            "1?? Нажмите кнопку <b>Отправить</b> ниже.<br>" +
-            "2?? Выберите друга в открывшемся списке ВК.<br>" +
-            "3?? Если вы на ПК — вставьте скопированный текст в поле сообщения, а на мобильном телефоне он вставится автоматически." +
+            "1️⃣ Нажмите кнопку <b>Отправить</b> ниже.<br>" +
+            "2️⃣ Выберите друга в открывшемся списке ВК.<br>" +
+            "3️⃣ Если вы на ПК — вставьте скопированный текст в поле сообщения, а на мобильном телефоне он вставится автоматически." +
           "</div>";
             // Показываем твою панель
           document.getElementById("sharePanel").style.display = "block";
@@ -4704,7 +5029,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
               const oldColor = element.style.color;
               const oldText = element.innerHTML;
               element.style.color = "#28a745";
-              element.innerText = "? Скопировано!";
+              element.innerText = "✅ Скопировано!";
               
               setTimeout(function() {
                   element.style.color = oldColor;
@@ -4744,7 +5069,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       modal.style.display = 'flex';
       
       // Очищаем или пишем "Загрузка...", чтобы юзер видел активность
-      listCont.innerText = '? Загрузка...';
+      listCont.innerText = '⏳ Загрузка...';
   
       if (window.foldersCache) renderMyList(window.foldersCache);
       
@@ -4754,7 +5079,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         
         // Если бэкенд вернул ошибку в формате {error: "..."}
         if (folders.error) {
-            listCont.innerText = '? Ошибка: ' + folders.error;
+            listCont.innerText = '❌ Ошибка: ' + folders.error;
             return;
         }
 
@@ -4762,7 +5087,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         renderMyList(folders);
       } catch (e) { 
         console.error(e);
-        listCont.innerText = '? Ошибка загрузки'; 
+        listCont.innerText = '❌ Ошибка загрузки'; 
       }
     }
 
@@ -4787,7 +5112,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
                   'data-id="' + id + '" ' +
                   'data-name="' + name + '" ' +
                   'onclick="handleFolderClick(this)">' +
-                  '?? ' + name + '</div>';
+                  '📁 ' + name + '</div>';
       }
       listCont.innerHTML = html || 'Папки пусты';
     }
@@ -4802,7 +5127,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
 
     async function selectFolder(id, name) {
       const label = document.querySelector('#curFolderLabel b');
-      if (label) label.innerText = "? " + name;
+      if (label) label.innerText = "⏳ " + name;
       
       closeFolders();
   
@@ -4887,35 +5212,67 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       try {
         const urlParameters = new URLSearchParams(window.location.search);
         const hashParameters = new URLSearchParams((window.location.hash || '').replace('#', '?'));
+
+        // ОПРЕДЕЛЯЕМ USER_ID (чтобы не слать пустоту в БД)
+        let currentUserId = urlParameters.get('vk_user_id') || urlParameters.get('logged_user_id');
+        if (!currentUserId && !userId) {
+            console.warn("ID пользователя не найден");
+            return; // Выходим, если ID нет ни в URL, ни в глобальной переменной
+        }
+
+        // --- ЛОГИКА ПРИОРИТЕТОВ И ИСТОЧНИКОВ ---
+        // 1. Сначала пробуем вытащить токен из хэша (там наш чистый код)
+        // 2. Затем из параметров URL (стандартный ref или vk_ref)
+        // 3. Затем из custom_args (специфика Одноклассников)
+        let rawReferrer = hashParameters.get('ref') || urlParameters.get('ref') || urlParameters.get('vk_ref') || urlParameters.get('app_param');;
         
-        // Собираем потенциальный ID из всех возможных источников
-        let rawReferrer = urlParameters.get('ref') || hashParameters.get('ref') || urlParameters.get('vk_ref');
+        if (!rawReferrer) {
+          const customArgs = urlParameters.get('custom_args');
+          if (customArgs) {
+            // В ОК может быть "ref=token" или просто "token"
+            const okMatch = customArgs.match(/ref=([^&]+)/);
+            rawReferrer = okMatch ? okMatch[1] : customArgs;
+          }
+        }
         
         if (!rawReferrer) return; // Если параметра нет вообще — выходим
 
-        // Очищаем от префиксов
-        let referrerId = String(rawReferrer).replace('ref_', '').trim();
+        // Очищаем от префиксов и отрезаем хвосты (ВК любит клеить параметры через &)
+        let referrerId = String(rawReferrer).split('&')[0].replace('ref_', '').trim();
 
         // ФИЛЬТРАЦИЯ: баннер не покажется, если:
         // - В ref передана системная строка (меню группы, реклама и т.д.)
         // - Это твой собственный ID
         // - ID отрицательный (метка сообщества)
-        const systemTags = ['group_menu', 'none', 'ads', 'snippet_im', 'catalog', 'story', 'left_nav', 'right_nav'];
-        const isSystemTag = systemTags.includes(referrerId);
-        //const isYourself = referrerId === String(userId);
-        const isGroup = referrerId.startsWith('-');
+        const systemTags = ['group_menu', 'none', 'ads', 'snippet_im', 'catalog', 'story', 'left_nav', 'bookmarks_all_section', 'right_nav', 'group_apps_block'];
         
-        // Самая важная проверка: если это не текстовый код (как из ТГ/чата), 
-        // то это должен быть либо чистый числовой ID, либо мы это игнорируем
-        // (Проверка на !isNaN помогает отсечь мусор вроде "group_menu")
-        const isNumeric = !isNaN(referrerId);
+        // Самая важная проверка: числовой ID или текстовый код
+        const isNumeric = !isNaN(referrerId) && referrerId !== "";
         const isShortCode = referrerId.length >= 8; // Твои инвайты обычно длинные строки
 
-        //if (isSystemTag || isYourself || isGroup || (!isNumeric && !isShortCode)) {
-        if (isSystemTag || isGroup || (!isNumeric && !isShortCode)) {
+        // НОВОЕ: Проверка на системный "мусор" ВК (содержит подчеркивания, чего нет в твоих токенах)
+        const isVkTrash = !isNumeric && referrerId.includes('_');
+        const isSystemTag = systemTags.includes(referrerId);
+        const isGroup = referrerId.startsWith('-');
+
+        // Если это мусор из URL, но у нас есть шанс найти нормальный код в хэше — пробуем переключиться
+        if ((isSystemTag || isVkTrash) && hashParameters.get('ref')) {
+            const secondaryRef = hashParameters.get('ref').split('&')[0].replace('ref_', '').trim();
+            if (!systemTags.includes(secondaryRef) && !secondaryRef.includes('_')) {
+                referrerId = secondaryRef;
+                // Сбрасываем флаги для нового ID
+                console.log("Системный тег проигнорирован, взят токен из хэша:", referrerId);
+            }
+        }
+
+        // Финальная проверка фильтров
+        // Если это всё еще системный тег, группа или не подходит под формат
+        if (systemTags.includes(referrerId) || isGroup || isVkTrash || (!isNumeric && !isShortCode)) {
           console.log("Вход без приглашения друга или системная метка:", referrerId);
           return;
         }
+
+        console.log("Валидный реферал определен:", referrerId);
 
         // --- БЛОК ПРОВЕРКИ ИНВАЙТА ---
         let finalFriendId = referrerId;
@@ -4980,7 +5337,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           '</div>' +
         '</div>' +
         '<button id="confirm-ref-button" style="background:#4caf50; color:white; border:none; padding:12px 20px; border-radius:25px; cursor:pointer; font-weight:bold; box-shadow:0 3px 8px rgba(76,175,80,0.3); width:100%; transition:0.2s;">' +
-        '?? Подключить Хранилку друга</button>';
+        '🤝 Подключить Хранилку друга</button>';
       
       zone.appendChild(panel);
     
@@ -4997,12 +5354,89 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       });
     }
 
+    function showFriendConnectedNotification(friendData) {
+      var container = document.getElementById("inviterZone");
+      if (!container || !friendData) return;
+      if (document.getElementById("friend-connected-banner")) return;
+
+      var banner = document.createElement("div");
+      banner.id = "friend-connected-banner";
+      
+      // Используем var(--bubble-bg) и var(--text-color) для поддержки темной темы
+      banner.style.cssText = "position:relative; margin:10px 0; padding:15px; background: var(--bubble-bg); border-radius:12px; border:2px dashed #ff9800; text-align:center; display:flex; flex-direction:column; align-items:center; gap:12px; transition: transform 0.2s ease-out, opacity 0.2s ease-out; touch-action: pan-x; overflow: hidden; color: var(--text-color);";
+
+      var photoUrl = friendData.photo || friendData.userPhoto || "https://vk.com/images/camera_50.png";
+      var name = friendData.userName || "Кто-то";
+
+      banner.innerHTML = 
+        '<div id="close-friend-banner" style="position:absolute; top:8px; right:12px; cursor:pointer; color:#ff9800; font-size:22px; line-height:1; opacity:0.5; padding: 5px;">&times;</div>' +
+        '<div style="display:flex; align-items:center; justify-content: center; gap:12px; pointer-events: none; width:100%;">' +
+          '<img src="' + photoUrl + '" style="width:45px; height:45px; border-radius:50%; border:2px solid #ff9800; object-fit:cover;">' +
+          '<div style="text-align:left;">' +
+            '<span style="font-size:13px; color:#ef6c00; display:block;">Друг в Хранилке!</span>' +
+            '<b style="font-weight:bold; font-size:16px;">' + name + '</b>' +
+          '</div>' +
+        '</div>' +
+        '<div style="background:#ff9800; color:white; padding:10px; border-radius:25px; font-weight:bold; width:100%; font-size:13px;">' +
+        '🤝 Использует ваше облако</div>';
+
+      if (container.firstChild) {
+        container.insertBefore(banner, container.firstChild);
+      } else {
+        container.appendChild(banner);
+      }
+
+      // Функция для пометки уведомления как прочитанного
+      function markAsRead() {
+        if (friendData.notificationIndex !== undefined) {
+          fetch('/api/mark-notification-read?vk_user_id=' + userId + '&index=' + friendData.notificationIndex)
+            .then(function() {
+              console.log("[showFriendConnectedNotification] Уведомление помечено как прочитанное");
+            })
+            .catch(function(e) {
+              console.error("[showFriendConnectedNotification] Ошибка пометки:", e);
+            });
+        }
+      }
+        
+      // Закрытие
+      document.getElementById("close-friend-banner").onclick = function() {
+        banner.style.opacity = "0";
+        markAsRead();
+        console.log("[showFriendConnectedNotification] Баннер закрыт");
+        setTimeout(function() { banner.remove(); }, 200);
+      };
+
+      // Включаем свайп (раз в реф-баннере он есть, тут тоже будет)
+      if (typeof makeSwipable === "function") {
+        // Передаем markAsRead внутрь, чтобы она сработала ТОЛЬКО после завершения свайпа
+        makeSwipable(banner, function() {
+          markAsRead(); 
+          console.log("[showFriendConnectedNotification] Баннер удален свайпом и помечен прочитанным");
+        });
+      }
+
+      // === ЗАКОММЕНТИРОВАНО ДЛЯ НАСТРОЙКИ ===
+      // Авто-удаление через 15 секунд (когда будет готово — раскомментировать)
+      /*
+      // Авто-удаление
+      setTimeout(function() {
+        if (banner.parentNode) {
+          banner.style.opacity = "0";
+          setTimeout(function() { banner.remove(); }, 300);
+          markAsRead();
+          console.log("[showFriendConnectedNotification] Баннер удалён автоматически");
+        }
+      }, 15000);
+      */
+    }
+
     // Функция записи связи в базу
     async function confirmFriendConnection(friendId) {
       const btn = document.getElementById('confirm-ref-button');
       if (btn) {
         btn.disabled = true;
-        btn.innerHTML = '? Подключаем...';
+        btn.innerHTML = '⌛ Подключаем...';
         btn.style.opacity = '0.7';
       }
       try {
@@ -5014,7 +5448,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           sessionStorage.setItem('hideInviterBanner', 'true');
           const panel = document.getElementById('inviter-panel');
           if (panel) {
-            panel.innerHTML = '<b style="color:#1a5c1a;font-weight:bold;">? Хранилка друга успешно подключена!</b>';
+            panel.innerHTML = '<b style="color:#1a5c1a;font-weight:bold;">✅ Хранилка друга успешно подключена!</b>';
           }
           // Перезагружаем через секунду, чтобы интерфейс обновился
           setTimeout(function() {
@@ -5142,8 +5576,8 @@ async function handleVkUpload(request, env, ctx, userId, corsHeaders) {
     }
 
     // --- 5. AI АНАЛИТИКА (В ФОНЕ) ---
-    // ? УДАЛЕНО: const aiData = await file.arrayBuffer(); — это ломало всё
-    // ? Временно отключено, чтобы не вызывать arrayBuffer()
+    // ❌ УДАЛЕНО: const aiData = await file.arrayBuffer(); — это ломало всё
+    // ✅ Временно отключено, чтобы не вызывать arrayBuffer()
 
     return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
   } catch (e) {
@@ -5581,7 +6015,7 @@ async function handleDownloadTelegram(data, chatId, userId, env) {
     const searchData = (typeof dataRaw === 'object') ? dataRaw : JSON.parse(dataRaw);
     const toDl = searchData.ids.slice(parseInt(offset), parseInt(offset) + 5);
 
-    await sendMessage(chatId, `? Начинаю выгрузку ${toDl.length} файл(ов)...`, null, env);
+    await sendMessage(chatId, `⏳ Начинаю выгрузку ${toDl.length} файл(ов)...`, null, env);
 
     for (const fileId of toDl) {
       try {
@@ -5701,7 +6135,7 @@ async function handleDownloadTelegram(data, chatId, userId, env) {
         console.error(`[TG-DL] Ошибка на файле ${fileId}:`, e);
       }
     }
-    await sendMessage(chatId, "? Готово!", null, env);
+    await sendMessage(chatId, "✅ Готово!", null, env);
   } catch (err) {
     console.error("[TG-DL] Критическая ошибка:", err);
   }
@@ -5752,7 +6186,7 @@ function renderSuccessPage() {
       </head>
       <body>
         <div class="card">
-          <h2>? Успешно подключено!</h2>
+          <h2>✅ Успешно подключено!</h2>
           <p>Теперь вы можете закрыть это окно и вернуться назад.<br>Окно закроется автоматически через 3 секунды.</p>
           <button class="btn" onclick="handleClose()">Закрыть окно</button>
         </div>
@@ -5796,17 +6230,17 @@ function renderSuccessPage() {
  */
 async function handleChatRequest(userPrompt, modelConfig, env) {
   // --- 1. ФОРМИРУЕМ ЧАТОВУЮ ИНСТРУКЦИЮ (та же, что и в функциях) ---
-  const CHAT_INSTRUCTION = `?? ТЫ — многофункциональный AI-ассистент "Gemini AI" от Leshiy, отвечающий на русском языке.
+  const CHAT_INSTRUCTION = `🤖 ТЫ — многофункциональный AI-ассистент "Gemini AI" от Leshiy, отвечающий на русском языке.
 Твоя задача — вести диалог, отвечать на вопросы, соблюдая контекст и используя информацию о твоих функциях.
 
 СТРОГОЕ ПРАВИЛО: НИКОГДА НЕ УПОМИНАЙ LLaMA, Meta AI или Austin.
 
 Твои ключевые функции:
-? Основные функции: Автоматическая загрузка фото и видео на облачные платформы (Google, Яндекс.Диск, Облако Mail.Ru WebDAV и др.) прямо через телеграмм. 
+✨ Основные функции: Автоматическая загрузка фото и видео на облачные платформы (Google, Яндекс.Диск, Облако Mail.Ru WebDAV и др.) прямо через телеграмм. 
 Возможность предоставления доступа к Вашему хранилищу друзьям и близким просто отправив им реферальную ссылку (команда /share) формирует ссылку с токеном.
 Универсальность: Поддержка облачного хранилища с авторизацией OAuth (Google, Яндекс.Диск, DropBox) и WebDAV (Облако Mail.Ru и др.)
 Умное именование: Сохраняет исходные имена для файлов без сжатия и генерирует имена по дате/времени для сжатых фото/видео/аудио/документов.
-?? Чат: Ты ведешь диалог, отвечаешь на вопросы, ? помогаешь по менюшкам и окнам и сохраняешь контекст беседы.
+💬 Чат: Ты ведешь диалог, отвечаешь на вопросы, ❔ помогаешь по менюшкам и окнам и сохраняешь контекст беседы.
 
 Когда пользователь спрашивает, что ты умеешь, обязательно упомяни о своих навыках.
 Ответы должны быть информативными и доброжелательными и по возможности компактными, старайся построить диалог понятно и не сильно рассуждая.`.trim();
@@ -5870,15 +6304,15 @@ function getStartKeyboard(userId, hostname, env, inviteData = null) {
 
   // 1-я строка: Яндекс
   const yAuth = `https://oauth.yandex.ru/authorize?response_type=code&client_id=${env.YANDEX_CLIENT_ID}&state=${userId}`;
-  keyboard.push([{ text: "?? Подключить Яндекс.Диск", url: yAuth }]);
+  keyboard.push([{ text: "🔗 Подключить Яндекс.Диск", url: yAuth }]);
 
   // 2-я строка: Google
   const gAuth = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${env.GOOGLE_CLIENT_ID}&redirect_uri=https://${domain}/auth/google/callback&response_type=code&scope=${encodeURIComponent("https://www.googleapis.com/auth/drive.file")}&state=${userId}&access_type=offline&prompt=consent`;
-  keyboard.push([{ text: "?? Подключить Google Drive", url: gAuth }]);
+  keyboard.push([{ text: "🔗 Подключить Google Drive", url: gAuth }]);
 
   // 3-я строка: DropBox
   const dbxAuth = `https://www.dropbox.com/oauth2/authorize?client_id=${env.DROPBOX_CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(`https://${domain}/auth/dropbox/callback`)}&token_access_type=offline&state=${userId}`;
-  keyboard.push([{ text: "?? Подключить Dropbox", url: dbxAuth }]);
+  keyboard.push([{ text: "🔗 Подключить Dropbox", url: dbxAuth }]);
 
   // 4-я строка: Mail.Ru
   const mailruClientId = env.MAILRU_CLIENT_ID;
@@ -5889,20 +6323,20 @@ function getStartKeyboard(userId, hostname, env, inviteData = null) {
   const mAuth = `https://connect.mail.ru/oauth/authorize?client_id=${mailruClientId}&response_type=code&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(mailruRedirectUri)}&state=${userId}`;
 
   keyboard.push([{ 
-    text: "?? Подключить Облако Mail.ru (WebDAV)", callback_data: "ask_mailru_webdav" }]);
+    text: "🔗 Подключить Облако Mail.ru (WebDAV)", callback_data: "ask_mailru_webdav" }]);
   
   // 5-я строка: Свои FTP/SFTP/WebDAV серверы
-  keyboard.push([{ text: "??? Подключить свой FTP/SFTP/WebDAV", callback_data: "ask_custom_server_info" }]);
+  keyboard.push([{ text: "🖥️ Подключить свой FTP/SFTP/WebDAV", callback_data: "ask_custom_server_info" }]);
 
   // 6-я строка: Условие по рефу
   if (inviteData) {
       keyboard.push([{ 
-          text: "?? Подтвердить подключение к другу", 
+          text: "🤝 Подтвердить подключение к другу", 
           callback_data: `confirm_ref:${inviteData.token}` 
       }]);
   } else {
       keyboard.push([{ 
-          text: "?? Подключить Хранилку друга", 
+          text: "🤝 Подключить Хранилку друга", 
           callback_data: "ask_ref_url" 
       }]);
   }
@@ -5923,14 +6357,14 @@ async function getModelMenuKeyboard(env, serviceType) {
   const currentModelKey = await env.USER_DB.get(service.kvKey) || Object.keys(service.models)[0];
   const buttons = Object.entries(service.models).map(([key, name]) => [
     {
-      text: (key === currentModelKey ? "? " : "") + name,
+      text: (key === currentModelKey ? "✅ " : "") + name,
       callback_data: `admin_model_set_${serviceType};${key}`
     }
   ]);
 
   // Кнопки переключения сервиса
   const switchButtons = Object.entries(SERVICE_TYPE_MAP).map(([type, info]) => ({
-    text: type === serviceType ? `? ${info.name}` : `0 ${info.name}`,
+    text: type === serviceType ? `● ${info.name}` : `○ ${info.name}`,
     callback_data: `admin_model_show_${type}`
   }));
 
@@ -5940,7 +6374,7 @@ async function getModelMenuKeyboard(env, serviceType) {
     groupedSwitch.push(switchButtons.slice(i, i + 2));
   }
 
-  return [...groupedSwitch, ...buttons, [{ text: "?? Назад", callback_data: "ai_menu_main" }]];
+  return [...groupedSwitch, ...buttons, [{ text: "⬅️ Назад", callback_data: "ai_menu_main" }]];
 }
 
 /**
@@ -5955,7 +6389,7 @@ function getAIServiceMenuKeyboard() {
 
 async function renderSearchPage(searchKey, offset, env, userId) {
   const dataRaw = await env.USER_DB.get(searchKey);
-  if (!dataRaw) return { text: "? Поиск устарел или не найден.", kb: null };
+  if (!dataRaw) return { text: "❌ Поиск устарел или не найден.", kb: null };
   
   const searchData = (typeof dataRaw === 'string') ? JSON.parse(dataRaw) : dataRaw;
   const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
@@ -5963,7 +6397,7 @@ async function renderSearchPage(searchKey, offset, env, userId) {
   const total = searchData.ids.length;
   const pageIds = searchData.ids.slice(offset, offset + 5);
   
-  let list = `?? <b>Найдено всего: ${total}</b> (Страница ${Math.floor(offset/5) + 1})\n\n`;
+  let list = `🔍 <b>Найдено всего: ${total}</b> (Страница ${Math.floor(offset/5) + 1})\n\n`;
   const userFolder = userData?.folderId || "/";
 
   for (const id of pageIds) {
@@ -5977,40 +6411,40 @@ async function renderSearchPage(searchKey, offset, env, userId) {
         const userPath = (userData?.folderId || "").toLowerCase().replace(/^\/|\/$/g, '');
 
         // ЛОГИКА СВЕТОФОРА
-        let status = '??'; 
+        let status = '🟢'; 
         if (dbProv !== userProv) {
             // Совсем другой диск/провайдер
-            status = '??';
+            status = '🔴';
         } else if (dbPath !== userPath) {
             // Диск тот же, но папка не совпадает
-            status = '??';
+            status = '🟡';
         }
         list += `${status} <code>${f.fileName || 'Без имени'}</code>\n`;
     } else {
         // Если попали сюда — значит адаптер не нашел ID в базе
-        list += `?? <code>Файл ${id} (ID не найден)</code>\n`;
+        list += `🔴 <code>Файл ${id} (ID не найден)</code>\n`;
     }
   }
 
   list += `\nАктивное подключение:`;
-  list += `\n<b>?? Провайдер: ${userData?.provider}</b> ?? Папка: ${userData?.folderId}`;
-  list += `\n<b>?? доступно</b> | <b>?? не та папка</b> | <b>?? не доступно</b> для выгрузки`;
+  list += `\n<b>☁️ Провайдер: ${userData?.provider}</b> 📁 Папка: ${userData?.folderId}`;
+  list += `\n<b>🟢 доступно</b> | <b>🟡 не та папка</b> | <b>🔴 не доступно</b> для выгрузки`;
 
   // Формат кнопок сокращаем до предела: pg:KEY:OFFSET и dl:KEY:OFFSET
   const kb = { inline_keyboard: [
-    [{ text: "?? Выгрузить эти файлы", callback_data: `dl:${searchKey}:${offset}` },
-    { text: "?? Изменить поиск", callback_data: "search_retry" }],
+    [{ text: "📥 Выгрузить эти файлы", callback_data: `dl:${searchKey}:${offset}` },
+    { text: "🔎 Изменить поиск", callback_data: "search_retry" }],
     [] 
   ]};
 
   if (offset > 0) {
-    kb.inline_keyboard[1].push({ text: `?? стр. ${Math.floor(offset/5) + 0}`, callback_data: `pg:${searchKey}:${offset - 5}` });
+    kb.inline_keyboard[1].push({ text: `⬅️ стр. ${Math.floor(offset/5) + 0}`, callback_data: `pg:${searchKey}:${offset - 5}` });
   }
   if (offset + 5 < total) {
-    kb.inline_keyboard[1].push({ text: `?? стр. ${Math.floor(offset/5) + 1}`, callback_data: `dummy_ignore` });
+    kb.inline_keyboard[1].push({ text: `⬆️ стр. ${Math.floor(offset/5) + 1}`, callback_data: `dummy_ignore` });
   }
   if (offset + 5 < total) {
-    kb.inline_keyboard[1].push({ text: `стр. ${Math.floor(offset/5) + 2} ??`, callback_data: `pg:${searchKey}:${offset + 5}` });
+    kb.inline_keyboard[1].push({ text: `стр. ${Math.floor(offset/5) + 2} ➡️`, callback_data: `pg:${searchKey}:${offset + 5}` });
   }
   return { text: list, kb };
 }
@@ -6074,24 +6508,15 @@ async function handleCallbackQuery(query, env, ctx) {
         body: JSON.stringify({ callback_query_id: data.id, text: `Инвайт ${code} удален` })
     });
     
-    await sendMessage(chatId, `? Инвайт <code>${code}</code> успешно удален.`, null, env);
+    await sendMessage(chatId, `✅ Инвайт <code>${code}</code> успешно удален.`, null, env);
     return new Response("OK");
-    }
-
-    if (data === "del_inv_all") {
-        const list = await env.USER_DB.list({ prefix: "invite:" });
-        for (const key of list.keys) {
-            await env.USER_DB.delete(key.name);
-        }
-        await sendMessage(chatId, "??? Все инвайты были очищены.", null, env);
-        return new Response("OK");
     }
 
     if (data === "search_retry") {
       // Ставим стейт ожидания заново
       await env.USER_DB.put(`state:${userId}`, "waiting_for_search", { expirationTtl: 300 });
     
-      const retryMsg = `?? <b>Новый поиск</b>\n\nВведите название файла или тег:`;
+      const retryMsg = `🔎 <b>Новый поиск</b>\n\nВведите название файла или тег:`;
       
       // Отвечаем на колбэк и отправляем новое сообщение (или редактируем старое)
       await sendMessage(chatId, retryMsg, null, env);
@@ -6101,7 +6526,7 @@ async function handleCallbackQuery(query, env, ctx) {
     if (action === "manual_folder") {
       const targetUserId = parts[1] || userId;
       await env.USER_DB.put(`state:${userId}`, "wait_manual_folder");
-      await sendMessage(chatId, "?? Напиши название папки (например: <code>Storage</code>):", null, env);
+      await sendMessage(chatId, "🔤 Напиши название папки (например: <code>Storage</code>):", null, env);
       return new Response("OK");
     }
 
@@ -6134,9 +6559,9 @@ async function handleCallbackQuery(query, env, ctx) {
       if (success) {
         userData.folderId = folderIdOrName;
         await env.USER_DB.put(`user:${targetUserId}`, JSON.stringify(userData));
-        await sendMessage(chatId, `? Папка <b>${folderIdOrName}</b> создана и выбрана!`, null, env);
+        await sendMessage(chatId, `✅ Папка <b>${folderIdOrName}</b> создана и выбрана!`, null, env);
       } else {
-        await sendMessage(chatId, "? Не удалось создать папку. Попробуйте позже.", null, env);
+        await sendMessage(chatId, "❌ Не удалось создать папку. Попробуйте позже.", null, env);
       }
     } else if (action === "set_folder") {
       // В данных было set_folder::STORAGE, значит parts будет ["set_folder", "", "STORAGE"]
@@ -6151,7 +6576,7 @@ async function handleCallbackQuery(query, env, ctx) {
       if (!userData) {
           console.error(`[WORKER] ОШИБКА: Данные юзера user:${targetUserId} не найдены в базе!`);
           // Вместо тихого выхода, давай ответим в ТГ, чтобы увидеть ошибку
-          await sendMessage(chatId, `?? Ошибка: профиль не найден в базе. Попробуйте заново /start`, null, env);
+          await sendMessage(chatId, `⚠️ Ошибка: профиль не найден в базе. Попробуйте заново /start`, null, env);
           return new Response("OK");
       }
 
@@ -6164,79 +6589,425 @@ async function handleCallbackQuery(query, env, ctx) {
       // Сохраняем (адаптер сам переведет в строку)
       await env.USER_DB.put(`user:${targetUserId}`, updatedData);
       
-      await sendMessage(chatId, `?? Папка выбрана: <b>${folderIdOrName}</b>`, null, env);
+      await sendMessage(chatId, `📂 Папка выбрана: <b>${folderIdOrName}</b>`, null, env);
     }
     
     if (action === "admin_exit") {
-      return await sendMessage(chatId, `?? <b>Вы вышли из режима администратора.</b>\n\nНажмите /admin для возврата.`, null, env);
+      return await sendMessage(chatId, `🚪 <b>Вы вышли из режима администратора.</b>\n\nНажмите /admin для возврата.`, null, env);
     }
 
-    if (action === "admin_user_menu") {
-      const list = await env.USER_DB.list({ prefix: "user:" });
-      await env.USER_DB.delete(`state:${userId}`);
-      const authIds = list.keys.map(k => k.name.split(":")[1]);
-      
-      let report = `?? <b>Управление пользователями</b>\n\n?? Всего пользователей: (${authIds.length})\n\n`;
-      
-      if (authIds.length > 0) {
-        for (let i = 0; i < authIds.length; i++) {
-          const id = authIds[i];
-          const uData = await env.USER_DB.get(`user:${id}`, { type: "json" });
-          
-          const name = uData?.name || "Аноним";
-          const provider = uData?.provider ? `<b>${uData.provider}</b>` : "<i>Не подключен</i>";
-          const folder = uData?.folderId ? `<code>${uData.folderId}</code>` : "Не указана";
-          const username = uData?.username && uData.username !== 'нет' ? `@${uData.username}` : "отсутствует";
+    if (action.startsWith("admin_managed_menu")) {
+      // 1. Вычисляем офсет из data
+      const offset = data.includes(":") ? parseInt(data.split(":")[1]) : 0;
+      const limit = 5;
 
-          report += `?? <b>ID:</b> <code>${id}</code>\n` +
-                    `?? <b>ФИО:</b> <code>${name}</code>\n` +
-                    `?? <b>Username:</b> ${username}\n` +
-                    `?? <b>Провайдер:</b> ${provider}\n` +
-                    `?? <b>Папка:</b> ${folder}\n` +
-                    `--------------------\n`;
-        }
+      const list = await env.USER_DB.list({ prefix: "user:" });
+      const allKeys = list.keys; 
+      const totalUsers = allKeys.length;
+      const keysPage = allKeys.slice(offset, offset + limit);
+
+      // 2. Инициализируем переменные для сборки ОДНОГО сообщения
+      let report = `👥 <b>Управление пользователями</b>\n\n` +
+                   `❇️ Всего в базе: <b>(${totalUsers})</b>\n\n`;
+
+      const inline_keyboard = [];
+      inline_keyboard.push([{ text: "➕ Добавить пользователя", callback_data: "admin_user_add" }]);
+      // 4. Цикл сборки текста и кнопок удаления
+      if (keysPage.length > 0) {
+          for (const key of keysPage) {
+              const id = key.name.split(":")[1];
+              const uData = await env.USER_DB.get(`user:${id}`, { type: "json" });
+
+              const name = uData?.name || "Аноним";
+              const provider = uData?.provider ? `<b>${uData.provider}</b>` : "<i>Не подключен</i>";
+              const folder = uData?.folderId ? `<code>${uData.folderId}</code>` : "Не указана";
+              const username = uData?.username && uData.username !== 'нет' ? `@${uData.username}` : "отсутствует";
+
+              // Добавляем данные текущего юзера в общий текст сообщения
+              report += `🆔 <b>ID:</b> <code>${id}</code>\n` +
+                        `👤 <b>ФИО:</b> <code>${name}</code>\n` +
+                        `🔗 <b>Username:</b> ${username}\n` +
+                        `🌐 <b>Провайдер:</b> ${provider}\n` +
+                        `📂 <b>Папка:</b> ${folder}\n` +
+                        `────────────────────\n`;
+
+              // Добавляем кнопку удаления для этого юзера (каждая в своей строке)
+              inline_keyboard.push([{ text: `🗑 Удалить ${name} (${id})`, callback_data: `admin_user_delete:${id}:${offset}` }]);
+          }
       } else {
-        report += "Пользователей в базе пока нет.";
+          report += "Пользователей в базе нет.";
       }
-      const statButtons = [
-      [{ text: "? Добавить пользователя", callback_data: "admin_user_add" }],
-      [{ text: "?? Назад в меню", callback_data: "admin_back" }]
-      ];
-      return await editMessageWithKeyboard(chatId, query.message.message_id, report, env, statButtons);
+      
+      inline_keyboard.push([{ text: "⬅️ Назад в меню", callback_data: "admin_back" }]);
+
+      // Кнопка "НАЗАД" (появляется, если мы не на первой странице)
+      if (offset > 0) {
+          const prevOffset = Math.max(0, offset - limit);
+          inline_keyboard.push([{ 
+              text: "⏪ Предыдущие", 
+              callback_data: `admin_managed_menu:${prevOffset}` 
+          }]);
+      }
+      // 5. Кнопка "ЕЩЁ" (в самом низу клавиатуры)
+      const nextOffset = offset + limit; 
+      if (nextOffset < totalUsers) {
+          inline_keyboard.push([{ 
+              text: `⏩ Следующие (осталось ${totalUsers - nextOffset})`, 
+              callback_data: `admin_managed_menu:${nextOffset}` 
+          }]);
+      }
+
+      // 6. ОТПРАВЛЯЕМ ВСЁ ОДНИМ ПАКЕТОМ
+      // Если это первый вызов (offset 0) — шлем новое сообщение. 
+      // Если нажали "Еще" — редактируем текущее.
+      if (offset === 0) {
+          return await sendMessage(chatId, report, { inline_keyboard }, env);
+      } else {
+          return await editMessageWithKeyboard(chatId, query.message.message_id, report, env, inline_keyboard);
+      }
+  }
+
+  // И ОБРАБОТЧИК УДАЛЕНИЯ (поправлен под твою структуру parts)
+  if (action === "admin_user_delete") {
+      const targetId = parts[1];
+      await env.USER_DB.delete(`user:${targetId}`);
+      // После удаления просто вызываем уведомление и обновляем текущее меню
+      await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/answerCallbackQuery`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ callback_query_id: query.id, text: "✅ Удалено" })
+      });
+      // Здесь логика должна пойти в блок admin_managed_menu
+      await sendMessage(chatId, `🗑 <b>Пользователь <code>${targetId}</code> удалён из базы.</b>`, null, env);
+    }
+
+    // ВАЖНО: Условие должно быть startsWith, иначе "admin_user_menu:5" не зайдет сюда
+    if (action.startsWith("admin_user_menu")) {
+      // Берем офсет из ОРИГИНАЛЬНОЙ строки data, где еще есть двоеточие
+      const offset = data.includes(":") ? parseInt(data.split(":")[1]) : 0;
+      const limit = 5;
+
+      // ПОЛУЧЕНИЕ ДАННЫХ
+      // Важно: list() возвращает список имен ключей
+      const list = await env.USER_DB.list({ prefix: "user:" });
+      const allKeys = list.keys; 
+      const totalUsers = allKeys.length;
+
+      // ОТРЕЗАЕМ НУЖНУЮ ПОРЦИЮ
+      // Если offset = 5, limit = 5 -> берем элементы с 5-го по 9-й
+      const keysPage = allKeys.slice(offset, offset + limit);
+
+      // --- ОТЛАДКА В ТЕКСТ (увидишь прямо в боте) ---
+      // await sendMessage(chatId, `DEBUG: Текущий action: ${action}, Понял offset как: ${offset}`, null, env);
+
+      // ШАПКА (только в самом начале)
+      if (offset === 0) {
+        await sendMessage(chatId, `👥 <b>Удаление пользователей</b>\n❇️ Всего: <b>${totalUsers}</b>`, {
+          inline_keyboard: [
+            //[{ text: "➕ Добавить пользователя", callback_data: "admin_user_add" }],
+            [{ text: "⬅️ В меню", callback_data: "admin_back" }]
+          ]
+        }, env);
+      }
+
+      // ВЫВОД КАРТОЧЕК
+      for (const key of keysPage) {
+        const id = key.name.split(":")[1];
+        const uData = await env.USER_DB.get(`user:${id}`, { type: "json" });
+
+        const name = uData?.name || "Аноним";
+        const provider = uData?.provider ? `<b>${uData.provider}</b>` : "<i>Не подключен</i>";
+        const folder = uData?.folderId ? `<code>${uData.folderId}</code>` : "Не указана";
+        const username = uData?.username && uData.username !== 'нет' ? `@${uData.username}` : "отсутствует";
+
+        const cardText = `🆔 <b>ID:</b> <code>${id}</code>\n` +
+                        `👤 <b>ФИО:</b> <code>${name}</code>\n` +
+                        `🔗 <b>Username:</b> ${username}\n` +
+                        `🌐 <b>Провайдер:</b> ${provider}\n` +
+                        `📂 <b>Папка:</b> ${folder}`;
+
+        await sendMessage(chatId, cardText, {
+          inline_keyboard: [[{ text: `🗑 Удалить ${name}`, callback_data: `admin_user_del:${id}:${offset}` }]]
+        }, env);
+      }
+
+      // КНОПКА ЕЩЁ (Генерируем НОВЫЙ offset)
+      const nextOffset = offset + limit; 
+
+      if (nextOffset < totalUsers) {
+        // В callback_data СТРОГО передаем число
+        const moreButtons = {
+          inline_keyboard: [[{ 
+            text: `⏬ Показать еще (осталось ${totalUsers - nextOffset})`, 
+            callback_data: `admin_user_menu:${nextOffset}` 
+          }]]
+        };
+        await sendMessage(chatId, `<i>Показано ${nextOffset} из ${totalUsers}</i>`, moreButtons, env);
+      } else {
+        await sendMessage(chatId, "✅ Все пользователи выведены", null, env);
+      }
+
+      return new Response("OK", { status: 200 });
     }
 
     if (action === "admin_user_add") {
       // Устанавливаем стейт ожидания ID
       await env.USER_DB.put(`state:${userId}`, "wait_admin_add_id");
-      const msgText = `? <b>Добавление нового пользователя</b>\n\n` +
+      const msgText = `➕ <b>Добавление нового пользователя</b>\n\n` +
                   `Пришли мне ID пользователя, которому хочешь дать доступ к своему диску.\n\n` +
                   `<i>Пример: 12345678</i>`;
   
       // Отправляем новое сообщение, чтобы админ мог просто прислать цифры в ответ
       return await sendMessage(chatId, msgText, { 
-        inline_keyboard: [[{ text: "? Отмена", callback_data: "admin_user_menu" }]] 
+        inline_keyboard: [[{ text: "❌ Отмена", callback_data: "admin_managed_menu" }]] 
       }, env);
     }
     
+    // ОБРАБОТЧИК УДАЛЕНИЯ
+    if (action === "admin_user_del") {
+        const targetId = parts[1];
+        const currentOffset = parts[2] || "0";
+
+        if (targetId) {
+            // 1. Удаляем из базы
+            await env.USER_DB.delete(`user:${targetId}`);
+            // 2. Посылаем всплывающее уведомление (Toast)
+            await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/answerCallbackQuery`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ 
+                    callback_query_id: query.id,
+                    text: `✅ Пользователь ${targetId} удалён`, // Текст уведомления
+                    show_alert: false // Если поставить true, выскочит окно с кнопкой ОК
+                })
+            });
+            // 3. Редактируем сообщение, на которое нажали, чтобы было видно — оно удалено
+            await editMessageWithKeyboard(
+                chatId, 
+                query.message.message_id, 
+                `🗑 <b>Пользователь <code>${targetId}</code> удалён из базы.</b>`, 
+                env, 
+                [] // Убираем кнопку "Удалить", чтобы не жали второй раз
+            );
+            // Дальше код может либо остановиться, либо ты можешь вызвать 
+            // перерисовку меню, но лучше оставить как есть, чтобы лента не прыгала
+            return new Response("OK", { status: 200 });
+        }
+    }
+
+    if (data.startsWith("show_invites")) {
+      try {
+        const list = await env.USER_DB.list({ prefix: "invite:" });
+        
+        if (list.keys.length === 0) {
+          await sendMessage(chatId, "📭 <b>Список инвайтов пуст.</b>", null, env);
+          return new Response("OK");
+        }
+
+        // === ПАГИНАЦИЯ ===
+        const page = 1; // Всегда первая страница при первом открытии
+        const maxDisplay = 10;
+        const startIndex = (page - 1) * maxDisplay;
+        const endIndex = startIndex + maxDisplay;
+        const keysToShow = list.keys.slice(startIndex, endIndex);
+        const totalPages = Math.ceil(list.keys.length / maxDisplay);
+        // === КОНЕЦ ПАГИНАЦИИ ===
+
+        let msg = `🎫 <b>Список инвайтов (Всего: ${list.keys.length})</b>\n\n`;
+        msg += `📄 Страница ${page}/${totalPages}\n\n`;
+        
+        const inline_keyboard = [];
+
+        for (let i = 0; i < keysToShow.length; i++) {
+          const keyName = keysToShow[i].name;
+          const code = keyName.split(":")[1] || "???";
+          
+          const rawData = await env.USER_DB.get(keyName);
+          let inviteInfo = { 
+            provider: "unknown", 
+            inviterId: "unknown", 
+            folderId: "unknown",
+            timestamp: 0 
+          };
+          
+          if (rawData) {
+            if (typeof rawData === 'object') {
+              inviteInfo = { ...inviteInfo, ...rawData };
+            } else if (typeof rawData === 'string') {
+              try { inviteInfo = { ...inviteInfo, ...JSON.parse(rawData) }; } catch(e) {}
+            }
+          }
+          
+          const ownerData = await env.USER_DB.get(`user:${inviteInfo.inviterId}`, { type: "json" });
+          const ownerName = ownerData?.name || "Аноним";
+
+          msg += `🎟️ Токен №${startIndex + i + 1}: <code>${code}</code>\n`;
+          msg += `🆔 От кого (ID): <code>${inviteInfo.inviterId}</code>\n`;
+          msg += `👤 ФИО: <code>${ownerName}</code>\n`;
+          msg += `🌐 Провайдер: <b>${inviteInfo.provider}</b>\n`;
+          msg += `📂 Папка: <b>${inviteInfo.folderId}</b>\n`;
+          if (inviteInfo.timestamp) {
+            const date = new Date(inviteInfo.timestamp).toLocaleString('ru-RU', { timeZone: 'Asia/Yekaterinburg' });
+            msg += `📅 Создан: ${date}\n`;
+          }
+          msg += `────────────────────\n`;
+
+          if (i % 2 === 0) {
+            inline_keyboard.push([{ text: `❌ Удалить №${startIndex + i + 1}. ${code}`, callback_data: `del_inv:${code}` }]);
+          } else {
+            inline_keyboard[inline_keyboard.length - 1].push({ text: `❌ Удалить №${startIndex + i + 1}. ${code}`, callback_data: `del_inv:${code}` });
+          }
+        }
+
+        // === КНОПКИ НАВИГАЦИИ ===
+        const navButtons = [];
+        // Кнопка "Назад" если не первая страница
+        if (page > 1) {
+          navButtons.push({ text: "⏪ Предыдущие", callback_data: `invites_page:${page - 1}` });
+        }
+        if (page < totalPages) {
+          navButtons.push({ text: "⏩ Следующие", callback_data: `invites_page:${page + 1}` });
+        }
+        
+        if (navButtons.length > 0) {
+          inline_keyboard.push(navButtons);
+        }
+        // === КОНЕЦ КНОПОК НАВИГАЦИИ ===
+
+        // Кнопка очистки — всегда отдельной строкой внизу
+        inline_keyboard.push([{ text: "⬅️ Назад в меню", callback_data: "admin_back" }]);
+        
+        await sendMessage(chatId, msg, { inline_keyboard }, env);
+        
+      } catch (e) {
+        console.error("Invites Error:", e);
+        await sendMessage(chatId, "❌ Ошибка при формировании списка инвайтов", null, env);
+      }
+      
+      return new Response("OK");
+    }
+
+    // === ОБРАБОТЧИК ПАГИНАЦИИ ИНВАЙТОВ ===
+    if (data.startsWith("invites_page:")) {
+      try {
+        // Правильно получаем номер страницы из данных
+        const page = parseInt(data.split(":")[1]);
+        
+        if (!page || page < 1) {
+          await sendMessage(chatId, "❌ Некорректный номер страницы", null, env);
+          return new Response("OK");
+        }
+
+        const list = await env.USER_DB.list({ prefix: "invite:" });
+        
+        if (list.keys.length === 0) {
+          await sendMessage(chatId, "📭 <b>Список инвайтов пуст.</b>", null, env);
+          return new Response("OK");
+        }
+
+        const maxDisplay = 10;
+        const startIndex = (page - 1) * maxDisplay;
+        const endIndex = startIndex + maxDisplay;
+        const keysToShow = list.keys.slice(startIndex, endIndex);
+        const totalPages = Math.ceil(list.keys.length / maxDisplay);
+
+        let msg = `🎫 <b>Список инвайтов (Всего: ${list.keys.length})</b>\n\n`;
+        msg += `📄 Страница ${page}/${totalPages}\n\n`;
+        
+        const inline_keyboard = [];
+
+        for (let i = 0; i < keysToShow.length; i++) {
+          const keyName = keysToShow[i].name;
+          const code = keyName.split(":")[1] || "???";
+          
+          const rawData = await env.USER_DB.get(keyName);
+          let inviteInfo = { 
+            provider: "unknown", 
+            inviterId: "unknown", 
+            folderId: "unknown",
+            timestamp: 0 
+          };
+          
+          if (rawData) {
+            if (typeof rawData === 'object') {
+              inviteInfo = { ...inviteInfo, ...rawData };
+            } else if (typeof rawData === 'string') {
+              try { inviteInfo = { ...inviteInfo, ...JSON.parse(rawData) }; } catch(e) {}
+            }
+          }
+          
+          const ownerData = await env.USER_DB.get(`user:${inviteInfo.inviterId}`, { type: "json" });
+          const ownerName = ownerData?.name || "Аноним";
+
+          msg += `🎟️ Токен №${startIndex + i + 1}: <code>${code}</code>\n`;
+          msg += `🆔 От кого (ID): <code>${inviteInfo.inviterId}</code>\n`;
+          msg += `👤 ФИО: <code>${ownerName}</code>\n`;
+          msg += `🌐 Провайдер: <b>${inviteInfo.provider}</b>\n`;
+          msg += `📂 Папка: <b>${inviteInfo.folderId}</b>\n`;
+          if (inviteInfo.timestamp) {
+            const date = new Date(inviteInfo.timestamp).toLocaleString('ru-RU', { timeZone: 'Asia/Yekaterinburg' });
+            msg += `📅 Создан: ${date}\n`;
+          }
+          msg += `────────────────────\n`;
+
+          if (i % 2 === 0) {
+            inline_keyboard.push([{ text: `❌ Удалить №${startIndex + i + 1}. ${code}`, callback_data: `del_inv:${code}` }]);
+          } else {
+            inline_keyboard[inline_keyboard.length - 1].push({ text: `❌ Удалить №${startIndex + i + 1}. ${code}`, callback_data: `del_inv:${code}` });
+          }
+        }
+
+        // Кнопки навигации
+        const navButtons = [];
+        
+        // Кнопка "Предыдущие" если не первая страница
+        if (page > 1) {
+          navButtons.push({ text: "⏪ Предыдущие", callback_data: `invites_page:${page - 1}` });
+        }
+        // Кнопка "Следующие" если есть следующая страница
+        if (page < totalPages) {
+          navButtons.push({ text: "⏩ Следующие", callback_data: `invites_page:${page + 1}` });
+        }
+        
+        if (navButtons.length > 0) {
+          inline_keyboard.push(navButtons);
+        }
+
+        inline_keyboard.push([{ text: "⬅️ Назад в меню", callback_data: "admin_back" }]);
+
+        // Редактируем существующее сообщение
+        await editMessageWithKeyboard(chatId, query.message.message_id, msg, env, inline_keyboard);
+        
+      } catch (e) {
+        console.error("Pagination Error:", e);
+        await sendMessage(chatId, "❌ Ошибка при переключении страницы", null, env);
+      }
+      
+      return new Response("OK");
+    }
+    // === КОНЕЦ ОБРАБОТЧИКА ПАГИНАЦИИ ===
+
     // Обработка кнопки "Назад" в админке
     if (action === "admin_back") {
       const list = await env.USER_DB.list({ prefix: "user:" });
       const userCount = list.keys.length;
 
-      const adminMsg = `?? <b>Панель администратора</b>\n\n` +
-        `?? Админ ID: <code>${userId}</code>\n\n` +
-        `?? Авторизовано: <b>${userCount}</b> пользователей\n\n` +
-        `?? Версия: ${version}\n\n` +
-        `?? <b>Команды админа:</b>\n` +
+      const adminMsg = `⚙️ <b>Панель администратора</b>\n\n` +
+        `🆔 Админ ID: <code>${userId}</code>\n\n` +
+        `👥 Авторизовано: <b>${userCount}</b> пользователей\n\n` +
+        `🚀 Версия: ${version}\n\n` +
+        `📖 <b>Команды админа:</b>\n` +
         `/add — Добавить юзера с облаком\n` +
+        `/clean_db — Чистка запросов поиска\n` +
         `/invites — Список инвайтов\n` +
         `/ai_settings — Настройки ИИ\n` +
         `/ai_search — Интеллектуальный поиск`;
 
       const adminButtons = [
-        [{ text: "?? Управление пользователями", callback_data: "admin_user_menu" }],
-        [{ text: "?? Настройки ИИ", callback_data: "ai_menu_main" }],
-        [{ text: "?? Выход из режима админа", callback_data: "admin_exit" }]
+        [{ text: "👥 Управление пользователями", callback_data: "admin_managed_menu" }],
+        [{ text: "🎫 Список инвайтов", callback_data: "show_invites" }],
+        [{ text: "🧠 Настройки ИИ", callback_data: "ai_menu_main" }],
+        [{ text: "🚪 Выход из режима админа", callback_data: "admin_exit" }]
       ];
 
       // Используем твою функцию редактирования
@@ -6248,7 +7019,7 @@ async function handleCallbackQuery(query, env, ctx) {
       const serviceType = data.substring("admin_model_show_".length);
       
       if (!SERVICE_TYPE_MAP[serviceType]) {
-        await sendMessage(chatId, "? Сервис не найден.", null, env);
+        await sendMessage(chatId, "❌ Сервис не найден.", null, env);
         return;
       }
 
@@ -6259,7 +7030,7 @@ async function handleCallbackQuery(query, env, ctx) {
       await editMessageWithKeyboard(
         chatId,
         query.message.message_id,
-        `?? <b>НАСТРОЙКА AI-МОДЕЛЕЙ</b>\n\n${statusTable}\n---\nВыберите модель для: ${serviceName}`,
+        `🧠 <b>НАСТРОЙКА AI-МОДЕЛЕЙ</b>\n\n${statusTable}\n---\nВыберите модель для: ${serviceName}`,
         env,
         buttons
       );
@@ -6270,14 +7041,14 @@ async function handleCallbackQuery(query, env, ctx) {
       const payload = data.substring("admin_model_set_".length);
       const separatorIndex = payload.indexOf(";");
       if (separatorIndex === -1) {
-        await logDebug("? Ошибка парсинга callback_data: нет разделителя ';'", env);
+        await logDebug("❌ Ошибка парсинга callback_data: нет разделителя ';'", env);
         return;
       }
       const serviceType = payload.substring(0, separatorIndex);
       const modelKey = payload.substring(separatorIndex + 1);
     
       if (!SERVICE_TYPE_MAP[serviceType] || !AI_MODELS[modelKey]) {
-        await logDebug(`? Неверная модель: ${serviceType} / ${modelKey}`, env);
+        await logDebug(`❌ Неверная модель: ${serviceType} / ${modelKey}`, env);
         return;
       }
     
@@ -6292,7 +7063,7 @@ async function handleCallbackQuery(query, env, ctx) {
       await editMessageWithKeyboard(
         chatId,
         query.message.message_id,
-        `?? <b>НАСТРОЙКА AI-МОДЕЛЕЙ</b>\n\n${statusTable}\n---\n? Установлена модель: <code>${modelName}</code>`,
+        `🧠 <b>НАСТРОЙКА AI-МОДЕЛЕЙ</b>\n\n${statusTable}\n---\n✅ Установлена модель: <code>${modelName}</code>`,
         env,
         buttons
       );
@@ -6302,7 +7073,7 @@ async function handleCallbackQuery(query, env, ctx) {
     if (action === "ai_menu") {
       const serviceType = parts[1];
       if (!SERVICE_TYPE_MAP[serviceType]) {
-        await sendMessage(chatId, "? Сервис не найден.", null, env);
+        await sendMessage(chatId, "❌ Сервис не найден.", null, env);
         return;
       }
       const statusTable = await generateModelStatusTable(env);
@@ -6311,7 +7082,7 @@ async function handleCallbackQuery(query, env, ctx) {
       await editMessageWithKeyboard(
         chatId,
         query.message.message_id,
-        `?? <b>НАСТРОЙКА AI-МОДЕЛЕЙ</b>\n\n${statusTable}\n---\nВыберите модель для: ${serviceName}`,
+        `🧠 <b>НАСТРОЙКА AI-МОДЕЛЕЙ</b>\n\n${statusTable}\n---\nВыберите модель для: ${serviceName}`,
         env,
         buttons
       );
@@ -6320,15 +7091,15 @@ async function handleCallbackQuery(query, env, ctx) {
 
     if (action === "ai_menu_main") {
       const statusTable = await generateModelStatusTable(env);
-      const buttons = getAIServiceMenuKeyboard(); // < это список сервисов
+      const buttons = getAIServiceMenuKeyboard(); // ← это список сервисов
       
-      // ? Добавляем кнопку "Назад" в самый конец списка
-      buttons.push([{ text: "?? Назад в админку", callback_data: "admin_back" }]);
+      // ✅ Добавляем кнопку "Назад" в самый конец списка
+      buttons.push([{ text: "⬅️ Назад в админку", callback_data: "admin_back" }]);
 
       await editMessageWithKeyboard(
         chatId,
         query.message.message_id,
-        `?? <b>НАСТРОЙКА AI-МОДЕЛЕЙ</b>\n\n${statusTable}\n---\nВыберите сервис:`,
+        `🧠 <b>НАСТРОЙКА AI-МОДЕЛЕЙ</b>\n\n${statusTable}\n---\nВыберите сервис:`,
         env,
         buttons
       );
@@ -6342,7 +7113,7 @@ async function handleCallbackQuery(query, env, ctx) {
       return await editMessageWithKeyboard(
         chatId,
         query.message.message_id,
-        `?? <b>Выберите тип ИИ-сервиса:</b>`,
+        `🧠 <b>Выберите тип ИИ-сервиса:</b>`,
         env,
         buttons
       );
@@ -6350,7 +7121,7 @@ async function handleCallbackQuery(query, env, ctx) {
 
     if (action === "ask_ref_url") {
       // Если рефа нет, просто шлем инструкцию и просим прислать ссылку текстом
-      const instruction = `?? <b>Как подключить хранилку друга:</b>\n\n` +
+      const instruction = `📥 <b>Как подключить хранилку друга:</b>\n\n` +
                           `1. Попроси друга прислать тебе реф-ссылку (он может создать её командой /share).\n` +
                           `2. Либо просто скопируй и <b>пришли мне токен</b> (например: <code>${Math.random().toString(36).substring(2, 10)}</code>) прямо в этот чат.`;
       return await sendMessage(chatId, instruction, null, env);
@@ -6359,8 +7130,8 @@ async function handleCallbackQuery(query, env, ctx) {
     if (action === "ask_mailru_webdav") {
       await env.USER_DB.put(`state:${userId}`, "wait_webdav_url");
       return await sendMessage(chatId, 
-        "?? <b>Облако Mail.ru через WebDAV</b>\n\n" +
-        "1. Перейди в Настройки Облака Mail.ru > «Пароли для внешних приложений»\n" +
+        "✉️ <b>Облако Mail.ru через WebDAV</b>\n\n" +
+        "1. Перейди в Настройки Облака Mail.ru → «Пароли для внешних приложений»\n" +
         "2. Создай пароль для WebDAV\n" +
         "3. Пришли мне ссылку в формате:\n<code>https://ваша-почта@mail.ru:пароль_для_внешнего_приложения@webdav.cloud.mail.ru</code>\n\n" +
         "<i>Я сразу удалю это сообщение из чата!</i>", 
@@ -6370,18 +7141,18 @@ async function handleCallbackQuery(query, env, ctx) {
     
     if (action === "ask_custom_server_info") {
       const customServerGuide = 
-        `?? <b>Подключение своего сервера</b>\n\n` +
+        `📁 <b>Подключение своего сервера</b>\n\n` +
         `Вы можете подключить личное хранилище напрямую. Мы поддерживаем:\n\n` +
-        `? <b>?? WebDAV</b> — стандарт для облаков (Yandex, Mail.ru).\n` +
-        `? <b>?? FTP</b> / <b>?? SFTP</b> — для личных серверов и NAS.\n\n` +
+        `✅ <b>🌐 WebDAV</b> — стандарт для облаков (Yandex, Mail.ru).\n` +
+        `✅ <b>🔒 FTP</b> / <b>🔐 SFTP</b> — для личных серверов и NAS.\n\n` +
         `Укажите данные в формате ссылки для быстрой настройки.\n` +
         `<i>Ваше сообщение будет удалено сразу после обработки.</i>`;
     
       return await sendMessage(chatId, customServerGuide, { 
         inline_keyboard: [
-          [{ text: "?? Подключить WebDAV", callback_data: "ask_custom_server:webdav" }],
-          [{ text: "?? Подключить FTP", callback_data: "ask_custom_server:ftp" }],
-          [{ text: "?? Подключить SFTP", callback_data: "ask_custom_server:sftp" }]
+          [{ text: "🌐 Подключить WebDAV", callback_data: "ask_custom_server:webdav" }],
+          [{ text: "🔒 Подключить FTP", callback_data: "ask_custom_server:ftp" }],
+          [{ text: "🔐 Подключить SFTP", callback_data: "ask_custom_server:sftp" }]
         ] 
       }, env);
     }
@@ -6398,7 +7169,7 @@ async function handleCallbackQuery(query, env, ctx) {
         sftp: "sftp://user:pass@my-server.com:22"
       };
 
-      const text = `?? <b>Подключение ${proto.toUpperCase()}</b>\n\n` +
+      const text = `🌐 <b>Подключение ${proto.toUpperCase()}</b>\n\n` +
                    `Отправь мне данные в формате ссылки:\n<code>${examples[proto]}</code>\n\n` +
                    `<i>После получения я удалю твое сообщение из чата.</i>`;
 
@@ -6420,18 +7191,18 @@ async function handleCallbackQuery(query, env, ctx) {
           };
           await env.USER_DB.put(`user:${userId}`, JSON.stringify(newUserContext));
           
-          await sendMessage(chatId, `?? <b>Связь установлена!</b>\nТеперь ты используешь облако друга (${invite.provider}).`, null, env);
-          await logDebug(`? Юзер <code>${userId}</code> подтвердил подключение к <code>${invite.inviterId}</code>`, env);
+          await sendMessage(chatId, `🤝 <b>Связь установлена!</b>\nТеперь ты используешь облако друга (${invite.provider}).`, null, env);
+          await logDebug(`✅ Юзер <code>${userId}</code> подтвердил подключение к <code>${invite.inviterId}</code>`, env);
           
           // Обновляем меню /start
           return await handleTelegramUpdate({ message: { chat: { id: chatId }, from: { id: userId }, text: "/start" } }, env, "hostname_placeholder", ctx);
         }
       } else {
-        return await sendMessage(chatId, "? Ссылка просрочена или неверна.", null, env);
+        return await sendMessage(chatId, "❌ Ссылка просрочена или неверна.", null, env);
       }
     }
   } catch (e) {
-    await sendMessage(chatId, `? Ошибка: ${e.message}`, null, env);
+    await sendMessage(chatId, `❌ Ошибка: ${e.message}`, null, env);
   }
   return;
 }
@@ -6623,7 +7394,7 @@ async function processOneAttachment(attach, userData, userId, chatId, env) {
     }
 
     if (uploadOk) {
-      await sendVKMessage(chatId, `? Сохранен: ${name}`, env);
+      await sendVKMessage(chatId, `✅ Сохранен: ${name}`, env);
 
       // --- 6. AI АНАЛИТИКА (ПОЛНАЯ) ---
       try {
@@ -6792,7 +7563,7 @@ async function processOneAttachmentStream(attach, userData, userId, chatId, env,
       }
 
       if (uploadOk) {
-          await sendVKMessage(chatId, `? Сохранен: ${name}`, env);
+          await sendVKMessage(chatId, `✅ Сохранен: ${name}`, env);
           
           // --- 6. AI АНАЛИТИКА (В ФОНЕ) ---
           if (ctx && ctx.waitUntil) {
@@ -6895,7 +7666,7 @@ async function getFileStream(fileId, env) {
     throw new Error(`Failed to download file: ${response.status} ${response.statusText}`);
   }
 
-  return await response.arrayBuffer(); // < ВСЁ! Только ArrayBuffer
+  return await response.arrayBuffer(); // ← ВСЁ! Только ArrayBuffer
 }
 
 async function showFolderSelector(chatId, userData, env) {
@@ -6926,7 +7697,7 @@ async function showFolderSelector(chatId, userData, env) {
         folders = await listRemoteFolders(userData); 
         break;
       default:
-        await logDebug(`?? Неизвестный провайдер: ${provider}`, env);
+        await logDebug(`⚠️ Неизвестный провайдер: ${provider}`, env);
     }
 
     // Собираем кнопки
@@ -6938,23 +7709,23 @@ async function showFolderSelector(chatId, userData, env) {
       const folderValue = (userData.provider === 'google') ? (f.id || f.name) : f.name;
 
       return [{ 
-        text: `?? ${f.name}`, 
+        text: `📁 ${f.name}`, 
         callback_data: `set_folder:${chatId}:${folderValue}` 
       }];
     }).filter(Boolean);
 
     // Кнопка для ручного ввода (теперь одна для всех провайдеров)
-    buttons.unshift([{ text: "? Создать папку", callback_data: `manual_folder:${chatId}:prompt` }]); 
+    buttons.unshift([{ text: "➕ Создать папку", callback_data: `manual_folder:${chatId}:prompt` }]); 
 
     const text = buttons.length > 1 
-      ? `?? <b>Папки на ${provider}:</b>\nВыбери ту, которую бот будет использовать.` 
-      : `?? <b>На ${provider} нет папок.</b>\nНажми кнопку ниже для создания.`;
+      ? `📂 <b>Папки на ${provider}:</b>\nВыбери ту, которую бот будет использовать.` 
+      : `📂 <b>На ${provider} нет папок.</b>\nНажми кнопку ниже для создания.`;
 
     return await sendMessage(chatId, text, { inline_keyboard: buttons }, env);
 
   } catch (e) {
-    await logDebug(`? Ошибка селектора (${userData.provider}): ${e.message}`, env);
-    return await sendMessage(chatId, `? Ошибка загрузки папок: ${e.message}`, null, env);
+    await logDebug(`❌ Ошибка селектора (${userData.provider}): ${e.message}`, env);
+    return await sendMessage(chatId, `❌ Ошибка загрузки папок: ${e.message}`, null, env);
   }
 }
 
@@ -7064,7 +7835,7 @@ function getMimeTypeFromExtension(fileName) {
  * @returns {Promise<string>} HTML-таблица.
  */
 async function generateModelStatusTable(env) {
-  let table = "?? <b>Текущие модели:</b>\n";
+  let table = "📊 <b>Текущие модели:</b>\n";
   for (const [type, config] of Object.entries(SERVICE_TYPE_MAP)) {
     const modelKey = await env.USER_DB.get(config.kvKey) || Object.keys(AI_MODEL_MENU_CONFIG[type]?.models || {})[0];
     const modelName = AI_MODEL_MENU_CONFIG[type]?.models[modelKey] || "—";
@@ -7073,13 +7844,13 @@ async function generateModelStatusTable(env) {
   return table;
 }
 
-// ? logDebug - Сообщения только АДМИНУ в общем чате
+// ✅ logDebug - Сообщения только АДМИНУ в общем чате
 async function logDebug(text, env) {
   try {
     const adminCfg = await env.USER_DB.get("admin:config", { type: "json" });
     if (adminCfg && adminCfg.id) {
       // Используем parse_mode HTML для красоты (ID в code)
-      await sendMessage(adminCfg.id, `?? <b>ADMIN LOG:</b>\n${text}`, null, env);
+      await sendMessage(adminCfg.id, `🔔 <b>ADMIN LOG:</b>\n${text}`, null, env);
     }
   } catch (e) {
     console.error("Ошибка логирования админу:", e.message);
@@ -7113,7 +7884,7 @@ async function handleYandexCallback(req, env) {
     await env.USER_DB.put(`user:${uid}`, JSON.stringify(userData));
 
     // СООБЩЕНИЕ 1: Подтверждение (быстро улетает в ТГ)
-    await sendMessage(uid, "?? <b>Яндекс.Диск подключен!</b>", null, env);
+    await sendMessage(uid, "🎉 <b>Яндекс.Диск подключен!</b>", null, env);
 
     // СООБЩЕНИЕ 2: Список папок (отдельным вызовом)
     // Используем setTimeout или просто await, так как это JS в Воркере
@@ -7210,7 +7981,7 @@ async function handleGoogleCallback(req, env) {
         expires_at: Date.now() + (data.expires_in * 1000)
     };
     await env.USER_DB.put(`user:${uid}`, JSON.stringify(userToSave));
-    await sendMessage(uid, "? <b>Google Drive подключен!</b>", null, env);
+    await sendMessage(uid, "✅ <b>Google Drive подключен!</b>", null, env);
     await showFolderSelector(uid, userToSave, env); // Один метод на всех
     return renderSuccessPage();
   }
@@ -7373,7 +8144,7 @@ async function handleMailruCallback(request, env) {
   const code = url.searchParams.get("code");
   const userId = url.searchParams.get("state");
 
-  if (!code) return new Response("? Ошибка: code не получен");
+  if (!code) return new Response("❌ Ошибка: code не получен");
   const clientId = env.MAILRU_CLIENT_ID.trim();
   const clientSecret = env.MAILRU_CLIENT_SECRET.trim();
   const domain = env.APP_DOMAIN || url.hostname;
@@ -7408,15 +8179,15 @@ async function handleMailruCallback(request, env) {
         expires_at: Date.now() + (data.expires_in * 1000)
       }));
 
-      await sendMessage(userId, "? <b>Облако Mail.ru (Внешнее) подключено!</b>", null, env);
+      await sendMessage(userId, "✅ <b>Облако Mail.ru (Внешнее) подключено!</b>", null, env);
       await showFolderSelector(userId, data, env);
-      return new Response("? Успешно! Можете вернуться в Telegram.");
+      return new Response("✅ Успешно! Можете вернуться в Telegram.");
     }
 
     // Если всё еще CLIENT_SECRET_FAIL, выводим детали для отладки
-    return new Response(`? Ошибка обмена: ${JSON.stringify(data)}`);
+    return new Response(`❌ Ошибка обмена: ${JSON.stringify(data)}`);
   } catch (e) {
-    return new Response(`? Ошибка сети: ${e.message}`);
+    return new Response(`❌ Ошибка сети: ${e.message}`);
   }
 }
 
@@ -7429,7 +8200,7 @@ async function listMailRuFolders(accessToken, env) {
     const data = await res.json();
 
     if (data.status !== 200) {
-      await logDebug(`? Mailru List Error: ${JSON.stringify(data)}`, env);
+      await logDebug(`❌ Mailru List Error: ${JSON.stringify(data)}`, env);
       return [];
     }
 
@@ -7444,7 +8215,7 @@ async function listMailRuFolders(accessToken, env) {
 
     return folders;
   } catch (e) {
-    await logDebug(`? Mailru List Catch: ${e.message}`, env);
+    await logDebug(`❌ Mailru List Catch: ${e.message}`, env);
     return [];
   }
 }
@@ -7464,11 +8235,11 @@ async function createMailruFolder(folderName, accessToken, env) {
 
     const data = await res.json();
     // Логируем результат, чтобы понять, пробита ли 403-я
-    await logDebug(`?? Mailru Folder Create (${folderName}): ${JSON.stringify(data)}`, env);
+    await logDebug(`📁 Mailru Folder Create (${folderName}): ${JSON.stringify(data)}`, env);
     
     return data.status === 200 || data.status === 409; // 409 значит папка уже есть
   } catch (e) {
-    await logDebug(`? Folder Create Error: ${e.message}`, env);
+    await logDebug(`❌ Folder Create Error: ${e.message}`, env);
     return false;
   }
 }
@@ -7603,11 +8374,11 @@ async function createWebDavFolder(folderName, userData) {
   // Убеждаемся, что хост не заканчивается на слэш, чтобы не было двойного //
   if (host.endsWith('/')) host = host.slice(0, -1);
   
-  const url = `${host}/${encodeURIComponent(folderName)}/`; // < Обязательно с /
+  const url = `${host}/${encodeURIComponent(folderName)}/`; // ← Обязательно с /
   const auth = btoa(`${user}:${pass}`);
 
   const res = await fetch(url, {
-    method: "MKCOL", // < Ключевое изменение!
+    method: "MKCOL", // ← Ключевое изменение!
     headers: {
       "Authorization": `Basic ${auth}`
     }
@@ -7644,7 +8415,7 @@ async function handleDropboxCallback(request, env) {
       account_id: data.account_id
     };
     await env.USER_DB.put(`user:${userId}`, JSON.stringify(userData));
-    await sendMessage(userId, "?? <b>Dropbox успешно подключен!</b>", null, env);
+    await sendMessage(userId, "🎉 <b>Dropbox успешно подключен!</b>", null, env);
     await showFolderSelector(userId, userData, env);
     return renderSuccessPage();
   }
@@ -7988,7 +8759,7 @@ async function searchAIFilesByQuery(userId, isAdmin, query, env) {
     }));
 
   } catch (e) {
-    await logDebug(`?? [AI Search] Ошибка SQL: ${e.message}`, env);
+    await logDebug(`⚠️ [AI Search] Ошибка SQL: ${e.message}`, env);
     return { success: true, fileIds: [] };
   }
 
@@ -8039,14 +8810,14 @@ ${candidatesList}
     throw new Error("ИИ не вернул ID");
 
   } catch (e) {
-    await logDebug(`? [AI Search] Сбой ИИ. Используем всех кандидатов.`, env);
+    await logDebug(`❌ [AI Search] Сбой ИИ. Используем всех кандидатов.`, env);
     // Фоллбэк тоже на чистых строках
     const fallbackIds = candidates.map(f => String(f.id));
     return { success: true, fileIds: fallbackIds };
   }
 }
 
-// ? *** Gemini Chat API (для текстового общения) ***
+// ✅ *** Gemini Chat API (для текстового общения) ***
 /**
  * Вызывает модель Gemini через Google Generative Language API, используя унифицированную конфигурацию.
  * @param {string} prompt - Текстовый промт.
@@ -8062,6 +8833,8 @@ async function callGeminiChat(prompt, config, env, userMessageText) {
   const API_KEY_ENV_NAME = config.API_KEY; 
   const API_KEY = env[API_KEY_ENV_NAME]; 
   const BASE_URL = config.BASE_URL; 
+  const PROXY_KEY_ENV_NAME = config.PROXY_KEY; 
+  const PROXY_KEY = env[PROXY_KEY_ENV_NAME]; 
   const MODEL = config.MODEL; 
   
   // --- УНИФИЦИРОВАННАЯ СБОРКА URL ---
@@ -8070,20 +8843,20 @@ async function callGeminiChat(prompt, config, env, userMessageText) {
   // ------------------------------------
 
   if (!API_KEY) {
-      throw new Error(`GemINI API key is missing. Expected env var: ${API_KEY_ENV_NAME}`);
+      throw new Error(`GemINI API key is missing. Expected env var: ${API_KEY}`);
   }
 
   // 2. СИСТЕМНАЯ ИНСТРУКЦИЯ 
   const systemInstructionText = `
-  ?? ТЫ — многофункциональный AI-ассистент "Gemini AI" от Leshiy, отвечающий на русском языке.
+  🤖 ТЫ — многофункциональный AI-ассистент "Gemini AI" от Leshiy, отвечающий на русском языке.
   Твоя задача — вести диалог, отвечать на вопросы, соблюдая контекст и используя информацию о твоих функциях.
   
   Твои ключевые функции:
-  ? Основные функции: Автоматическая загрузка фото и видео на облачные платформы (Google, Яндекс.Диск, Облако Mail.Ru WebDAV и др.) прямо через телеграмм. 
+  ✨ Основные функции: Автоматическая загрузка фото и видео на облачные платформы (Google, Яндекс.Диск, Облако Mail.Ru WebDAV и др.) прямо через телеграмм. 
   Возможность предоставления доступа к Вашему хранилищу друзьям и близким просто отправив им реферальную ссылку (команда /share) формирует ссылку с токеном.
   Универсальность: Поддержка облачного хранилища с авторизацией OAuth (Google, Яндекс.Диск, DropBox) и WebDAV (Облако Mail.Ru и др.)
   Умное именование: Сохраняет исходные имена для файлов без сжатия и генерирует имена по дате/времени для сжатых фото/видео/аудио/документов.
-  ?? Чат: Ты ведешь диалог, отвечаешь на вопросы, ? помогаешь по менюшкам и окнам и сохраняешь контекст беседы.
+  💬 Чат: Ты ведешь диалог, отвечаешь на вопросы, ❔ помогаешь по менюшкам и окнам и сохраняешь контекст беседы.
   
   Когда пользователь спрашивает, что ты умеешь, обязательно упомяни о своих навыках.
   Ответы должны быть информативными и доброжелательными и по возможности компактными, старайся построить диалог понятно и не сильно рассуждая.
@@ -8098,7 +8871,10 @@ async function callGeminiChat(prompt, config, env, userMessageText) {
 
   const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+          'Content-Type': 'application/json',
+          'X-Proxy-Secret': PROXY_KEY // <--- ДОБАВЛЯЕМ для GEMENY-PROXY
+      },
       body: JSON.stringify(body),
   });
 
@@ -8115,7 +8891,7 @@ async function callGeminiChat(prompt, config, env, userMessageText) {
   return textResult.trim();
 }
 
-// ? *** Gemini Speech-to-Text (STT - голосовое сообщение) - УНИФИЦИРОВАНО ***
+// ✅ *** Gemini Speech-to-Text (STT - голосовое сообщение) - УНИФИЦИРОВАНО ***
 /**
  * Транскрибирует аудиофайл (ArrayBuffer) через Gemini API.
  * @param {Object} config - Объект активной конфигурации (AI_MODELS.AUDIO_TO_TEXT_GEMINI).
@@ -8173,7 +8949,7 @@ async function callGeminiSpeechToText(config, audioBuffer, env) { // <-- УНИ�
   return textResult.trim();
 }
 
-// ? *** Gemini Vision (компьютерное зрение) - ИСПРАВЛЕНО ***
+// ✅ *** Gemini Vision (компьютерное зрение) - ИСПРАВЛЕНО ***
 /**
  * Генерирует описание файла через Gemini Vision.
  * @param {Object} config - Конфигурация модели (из AI_MODELS).
@@ -8225,7 +9001,7 @@ async function callGeminiVision(config, imageBuffer, env) {
   return textResult.trim();
 }
 
-// ? *** Исправленная функция для Gemini Document Analysis ***
+// ✅ *** Исправленная функция для Gemini Document Analysis ***
 /**
  * Анализирует документ (PDF, изображение) с помощью Gemini API.
  * @param {Object} config - Конфигурация модели из AI_MODELS.
@@ -8257,7 +9033,7 @@ async function callGeminiDocument(config, arrayBuffer, env, mimeType) {
                   {
                     inlineData: {
                           mimeType: mimeType,
-                          data: base64Data // < Тут будет base64
+                          data: base64Data // ← Тут будет base64
                       }
                   }
               ]
@@ -8270,7 +9046,7 @@ async function callGeminiDocument(config, arrayBuffer, env, mimeType) {
   return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
 }
 
-// ? *** Gemini Video Vision (видео аналитика) - ИСПРАВЛЕНО ***
+// ✅ *** Gemini Video Vision (видео аналитика) - ИСПРАВЛЕНО ***
 /**
 * Выполняет анализ видеоконтента (Video Captioning) с помощью Gemini 2.5 Flash.
 * @param {Object} config - Объект активной конфигурации (AI_MODELS.VIDEO_TO_ANALYSIS_GEMINI).
@@ -8338,7 +9114,7 @@ async function callYandexGPTChat(prompt, config, env, userMessageText) {
   }
 
   const systemInstructionText = `
-    ?? ТЫ — ИИ-ассистент "Алиса" в боте "Хранилка" от Leshiy.
+    🤖 ТЫ — ИИ-ассистент "Алиса" в боте "Хранилка" от Leshiy.
     Твоя задача — помогать с загрузкой файлов в облака и просто общаться. 
     Отвечай на русском языке, будь вежливой и краткой.
   `;
@@ -8418,7 +9194,7 @@ async function callYandexSpeechKit(config, audioBuffer, env) {
   return data.result;
 }
 
-// ? *** Workers AI Chat API (для текстового общения с историей) ***
+// ✅ *** Workers AI Chat API (для текстового общения с историей) ***
 async function callWorkersAIChat(systemPrompt, config, env, userPrompt) {
   // Получаем учетные данные из окружения (process.env в Яндекс.Облаке)
   const CLOUDFLARE_ACCOUNT_ID = env.CLOUDFLARE_ACCOUNT_ID || process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -8470,7 +9246,7 @@ async function callWorkersAIChat(systemPrompt, config, env, userPrompt) {
   }
 }
 
-// ? *** Workers AI Speech-to-Text (Whisper - голосовые сообщения) ***
+// ✅ *** Workers AI Speech-to-Text (Whisper - голосовые сообщения) ***
 /**
  * Транскрибирует аудиофайл (ArrayBuffer), используя Workers AI (Whisper).
  * @param {Object} config - Объект активной конфигурации (AI_MODELS.AUDIO_TO_TEXT_WORKERS_AI).
@@ -8478,9 +9254,9 @@ async function callWorkersAIChat(systemPrompt, config, env, userPrompt) {
  * @param {Object} env - Объект окружения, содержащий привязку AI.
  * @returns {Promise<string>} Транскрибированный текст.
  */
-async function callWorkersAISpeechToText(config, audioBuffer, envData) {
-    const CLOUDFLARE_ACCOUNT_ID = envData.CLOUDFLARE_ACCOUNT_ID || process.env.CLOUDFLARE_ACCOUNT_ID;
-    const CLOUDFLARE_API_TOKEN = envData.CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
+async function callWorkersAISpeechToText(config, audioBuffer, env) {
+    const CLOUDFLARE_ACCOUNT_ID = env.CLOUDFLARE_ACCOUNT_ID || process.env.CLOUDFLARE_ACCOUNT_ID;
+    const CLOUDFLARE_API_TOKEN = env.CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
     const WHISPER_MODEL = config.MODEL; 
     const URL = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${WHISPER_MODEL}`;
 
@@ -8511,7 +9287,7 @@ async function callWorkersAISpeechToText(config, audioBuffer, envData) {
     }
 }
 
-// ? *** Workers AI Vision (Uform-Gen2 для генерации промпта из фото) - УНИФИЦИРОВАНО ***
+// ✅ *** Workers AI Vision (Uform-Gen2 для генерации промпта из фото) - УНИФИЦИРОВАНО ***
 /**
  * Генерирует детальный промпт для Stable Diffusion, используя изображение и текстовую инструкцию, через Workers AI (Uform).
  * @param {Object} config - Объект активной конфигурации (AI_MODELS.IMAGE_TO_TEXT_WORKERS_AI).
@@ -8570,7 +9346,7 @@ async function callWorkersAIVision(config, imageBuffer, env) { // <-- ИЗМЕН
   }
 }
 
-// ? *** callBotHubTextChat - Обработчик для текстовых чат-запросов BotHub
+// ✅ *** callBotHubTextChat - Обработчик для текстовых чат-запросов BotHub
 /**
  * @description Отправляет запрос на генерацию текста через BotHub API.
  * @param {string} prompt - Текстовый промт.
@@ -8583,15 +9359,15 @@ async function callWorkersAIVision(config, imageBuffer, env) { // <-- ИЗМЕН
 async function callBotHubTextChat(prompt, config, env, messageText) {
   // 1. ОПРЕДЕЛЕНИЕ СИСТЕМНОГО КОНТЕКСТА (ГЛОБАЛЬНАЯ КОНСТАНТА)
   const SYSTEM_PROMPT = `
-?? ТЫ — многофункциональный AI-ассистент "Gemini AI" от Leshiy, отвечающий на русском языке.
+🤖 ТЫ — многофункциональный AI-ассистент "Gemini AI" от Leshiy, отвечающий на русском языке.
 Твоя задача — вести диалог, отвечать на вопросы, соблюдая контекст и используя информацию о твоих функциях.
 
 Твои ключевые функции:
-? Основные функции: Автоматическая загрузка фото и видео на облачные платформы (Google, Яндекс.Диск, Облако Mail.Ru WebDAV и др.) прямо через телеграмм. 
+✨ Основные функции: Автоматическая загрузка фото и видео на облачные платформы (Google, Яндекс.Диск, Облако Mail.Ru WebDAV и др.) прямо через телеграмм. 
 Возможность предоставления доступа к Вашему хранилищу друзьям и близким просто отправив им реферальную ссылку (команда /share) формирует ссылку с токеном.
 Универсальность: Поддержка облачного хранилища с авторизацией OAuth (Google, Яндекс.Диск, DropBox) и WebDAV (Облако Mail.Ru и др.)
 Умное именование: Сохраняет исходные имена для файлов без сжатия и генерирует имена по дате/времени для сжатых фото/видео/аудио/документов.
-?? Чат: Ты ведешь диалог, отвечаешь на вопросы, ? помогаешь по менюшкам и окнам и сохраняешь контекст беседы.
+💬 Чат: Ты ведешь диалог, отвечаешь на вопросы, ❔ помогаешь по менюшкам и окнам и сохраняешь контекст беседы.
   
 Когда пользователь спрашивает, что ты умеешь, обязательно упомяни о своих навыках.
 Ответы должны быть информативными и доброжелательными и по возможности компактными, старайся построить диалог понятно и не сильно рассуждая.
@@ -8659,7 +9435,7 @@ async function callBotHubTextChat(prompt, config, env, messageText) {
   }
 }
 
-// ? *** callBotHubAudioToText - Транскрипция речи (BotHub/Whisper) ***
+// ✅ *** callBotHubAudioToText - Транскрипция речи (BotHub/Whisper) ***
 /**
  * Преобразует аудиофайл в текст через BotHub (Whisper).
  * Требует multipart/form-data.
@@ -8736,7 +9512,7 @@ async function callBotHubAudioToText(config, audioData, env) { // МЕНЬШЕ �
   }
 }
 
-// ? *** callBotHubVisionChat - Обработчик для Vision API (BotHub)
+// ✅ *** callBotHubVisionChat - Обработчик для Vision API (BotHub)
 /**
  * @description Отправляет запрос на анализ изображения через Vision API (BotHub).
  * @param {Object} config - Объект активной конфигурации (AI_MODELS.IMAGE_TO_TEXT_BOTHUB).
@@ -8812,7 +9588,7 @@ async function callBotHubVisionChat(config, imageData, env) {
   }
 }
 
-// ? *** callBothubVideoVision - Обработчик для Video Analysis (BotHub/Gemini)
+// ✅ *** callBothubVideoVision - Обработчик для Video Analysis (BotHub/Gemini)
 /**
  * @description Отправляет запрос на анализ видеоконтента (Video Captioning) через Bothub (Gemini 2.5 Flash).
  * @param {Object} config - Объект активной конфигурации (напр., AI_MODELS.VIDEO_TO_ANALYSIS_BOTHUB).
@@ -8898,7 +9674,7 @@ async function callBothubVideoVision(config, videoData, env, videoMimeType) {
   }
 }
 
-// ? *** callBothubDocumentVision - Обработчик для Document Analysis (BotHub/Gemini)
+// ✅ *** callBothubDocumentVision - Обработчик для Document Analysis (BotHub/Gemini)
 /**
  * @description Отправляет запрос на анализ документов через Bothub (Gemini 2.5 Flash).
  * @param {Object} config - Объект активной конфигурации
@@ -8987,7 +9763,7 @@ const AI_MODELS = {
 
   // --- WORKERS AI (БЕСПЛАТНЫЕ, РАБОЧИЕ) ---
 
-  // ? [Текст в Текст]
+  // ✅ [Текст в Текст]
   TEXT_TO_TEXT_WORKERS_AI: { 
       SERVICE: 'WORKERS_AI', 
       FUNCTION: callWorkersAIChat, 
@@ -8997,7 +9773,7 @@ const AI_MODELS = {
       API_KEY: 'CLOUDFLARE_API_TOKEN', 
       BASE_URL: 'AI_RUN' // Вызов через env.AI.run
   },
-  // ? [Изображение в Текст (Видение)]
+  // ✅ [Изображение в Текст (Видение)]
   IMAGE_TO_TEXT_WORKERS_AI: { 
     SERVICE: 'WORKERS_AI', 
     FUNCTION: callWorkersAIVision,
@@ -9005,7 +9781,7 @@ const AI_MODELS = {
     API_KEY: 'CLOUDFLARE_API_TOKEN', 
     BASE_URL: 'AI_RUN'
   },
-  // ? [Аудио в Текст]
+  // ✅ [Аудио в Текст]
   AUDIO_TO_TEXT_WORKERS_AI: { 
     SERVICE: 'WORKERS_AI', 
     FUNCTION: callWorkersAISpeechToText, 
@@ -9013,7 +9789,7 @@ const AI_MODELS = {
     API_KEY: 'CLOUDFLARE_API_TOKEN', 
     BASE_URL: 'AI_RUN' // Исправлено для консистентности
   },
-  // ? [Видео в Текст]
+  // ✅ [Видео в Текст]
   VIDEO_TO_TEXT_WORKERS_AI: { 
     SERVICE: 'WORKERS_AI', 
     FUNCTION: callWorkersAISpeechToText, 
@@ -9025,16 +9801,20 @@ const AI_MODELS = {
   // --- СЕРВИСЫ GOOGLE ---
 
   // --- GEMINI ---
-  // ? Прекрасно работает текстовый чат
+  // ✅ Теперь работает через прокси на Cloudflare
   TEXT_TO_TEXT_GEMINI: { 
     SERVICE: 'GEMINI', 
     FUNCTION: callGeminiChat, 
     MODEL: 'gemini-2.5-flash',
     //MODEL: 'gemini-2.5-flash-lite', 
     API_KEY: 'GEMINI_API_KEY', 
-    BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
+    //BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
+    // Заменяем оригинальный хост на воркер gemini-proxy
+    BASE_URL: 'https://gemini-proxy.leshiyalex.workers.dev/v1beta',
+    // Добавляем ключ прокси (само значение лучше тоже тянуть из env Яндекса)
+    PROXY_KEY: 'GEMINI_PROXY_KEY'
   },
-  // ? Работает распознавание голоса
+  // ✅ Работает распознавание голоса
   AUDIO_TO_TEXT_GEMINI: { 
     SERVICE: 'GEMINI', 
     FUNCTION: callGeminiSpeechToText,
@@ -9043,7 +9823,7 @@ const AI_MODELS = {
     API_KEY: 'GEMINI_API_KEY', 
     BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
   },
-  // ? Работает распознавание голоса
+  // ✅ Работает распознавание голоса
   VIDEO_TO_TEXT_GEMINI: { 
     SERVICE: 'GEMINI', 
     FUNCTION: callGeminiSpeechToText,
@@ -9052,7 +9832,7 @@ const AI_MODELS = {
     API_KEY: 'GEMINI_API_KEY', 
     BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
   },
-  // ? Работает распознавание фото
+  // ✅ Работает распознавание фото
   IMAGE_TO_TEXT_GEMINI: { 
     SERVICE: 'GEMINI', 
     FUNCTION: callGeminiVision, 
@@ -9061,7 +9841,7 @@ const AI_MODELS = {
     API_KEY: 'GEMINI_API_KEY', 
     BASE_URL: 'https://generativelanguage.googleapis.com/v1beta'
   },
-  // ? Работает распознавание видео
+  // ✅ Работает распознавание видео
   VIDEO_TO_ANALYSIS_GEMINI: { 
     SERVICE: 'GEMINI', 
     FUNCTION: callGeminiVideoVision, 
@@ -9169,12 +9949,12 @@ const AI_MODELS = {
 };
 // --- КАРТА СЕРВИСОВ ДЛЯ АДМИН-МЕНЮ ---
 const SERVICE_TYPE_MAP = {
-  'TEXT_TO_TEXT': { name: '?? Text > Text', kvKey: 'ai_config:ACTIVE_MODEL_TEXT_TO_TEXT' },
-  'AUDIO_TO_TEXT': { name: '?? Audio > Text', kvKey: 'ai_config:ACTIVE_MODEL_AUDIO_TO_TEXT' },
-  'VIDEO_TO_TEXT': { name: '?? Video > Text', kvKey: 'ai_config:ACTIVE_MODEL_VIDEO_TO_TEXT' },
-  'IMAGE_TO_TEXT': { name: '??? Image > Text', kvKey: 'ai_config:ACTIVE_MODEL_IMAGE_TO_TEXT' },
-  'DOCUMENT_TO_TEXT': { name: '?? Document > Text', kvKey: 'ai_config:ACTIVE_MODEL_DOCUMENT_TO_TEXT' },
-  'VIDEO_TO_ANALYSIS': { name: '?? Video > Analysis', kvKey: 'ai_config:ACTIVE_MODEL_VIDEO_TO_ANALYSIS' }
+  'TEXT_TO_TEXT': { name: '✍️ Text → Text', kvKey: 'ai_config:ACTIVE_MODEL_TEXT_TO_TEXT' },
+  'AUDIO_TO_TEXT': { name: '🎤 Audio → Text', kvKey: 'ai_config:ACTIVE_MODEL_AUDIO_TO_TEXT' },
+  'VIDEO_TO_TEXT': { name: '🎧 Video → Text', kvKey: 'ai_config:ACTIVE_MODEL_VIDEO_TO_TEXT' },
+  'IMAGE_TO_TEXT': { name: '👁️ Image → Text', kvKey: 'ai_config:ACTIVE_MODEL_IMAGE_TO_TEXT' },
+  'DOCUMENT_TO_TEXT': { name: '📄 Document → Text', kvKey: 'ai_config:ACTIVE_MODEL_DOCUMENT_TO_TEXT' },
+  'VIDEO_TO_ANALYSIS': { name: '👀 Video → Analysis', kvKey: 'ai_config:ACTIVE_MODEL_VIDEO_TO_ANALYSIS' }
 
 };
 // !!! ВАЖНО: Определите эту константу после AI_MODELS !!!
@@ -9236,7 +10016,7 @@ async function loadActiveConfig(serviceType, env) {
     throw new Error(`Модель ${activeModelKey} не найдена в AI_MODELS`);
   }
 
-  await logDebug(`?? AI-Модель для режима ${serviceType}:\nСервис <code>${activeModelKey}</code> модель <code>${modelName}</code>`, env);
+  await logDebug(`🧠 AI-Модель для режима ${serviceType}:\nСервис <code>${activeModelKey}</code> модель <code>${modelName}</code>`, env);
   return modelConfig;
 }
 
