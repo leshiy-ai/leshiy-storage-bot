@@ -6,10 +6,10 @@ compatibility_date = "2024-03-12"
 # Переменные окружения (заглушки)
 # Секреты нужно настраивать в панели Cloudflare, а не здесь
 [vars]
-ADMIN_ID = ""
-BOT_USERNAME = ""
-VK_GROUP_ID = ""
-VK_APP_ID = ""
+ADMIN_ID = "235663624, 5300581414"
+BOT_USERNAME = "leshiy_testbot"
+VK_GROUP_ID = "228491873"
+VK_APP_ID = "54419010"
 
 [secrets]
 # Здесь Wrangler будет искать СЕКРЕТЫ, которые вы настроили
@@ -17,6 +17,8 @@ VK_APP_ID = ""
 # API-ключи из секретных переменных
 TELEGRAM_TOKEN = ""
 GEMINI_API_KEY = ""
+CLOUDFLARE_ACCOUNT_ID = ""
+CLOUDFLARE_API_TOKEN = ""
 YANDEX_CLIENT_ID = ""
 YANDEX_CLIENT_SECRET = ""
 GOOGLE_CLIENT_ID = ""
@@ -24,6 +26,7 @@ GOOGLE_CLIENT_SECRET = ""
 DROPBOX_CLIENT_ID = ""
 DROPBOX_CLIENT_SECRET = ""
 BOTHUB_API_KEY = ""
+DEEPSEEK_API_KEY = ""
 VK_GROUP_TOKEN = ""
 VK_TOKEN = ""
 VK_SECURE_KEY = ""
