@@ -13,8 +13,9 @@
 Поддержка WEBM: Возможность сохранять видеофайлы в современных форматах без потери качества и размера.
 Диагностика: Команда /debug для проверки статуса подключения к хранилищу в реальном времени.
 */
+
 // Глобальные константы
-const version = "v2.5.1 от 30.01.2026"; // актуальная версия
+const version = "v2.5.1 от 30.01.2026 (Cloudflare)"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -1769,7 +1770,7 @@ async function handleVK(body, env, hostname, ctx) {
       }
 
       // --- КОМАНДА /AI_SETTINGS (ЗЕРКАЛО ТЕЛЕГРАМА) ---
-      if (command === ("/ai_settings" || message.ref === '/ai_settings') && isAdmin) {
+      if (command === "/ai_settings" && isAdmin) {
         const type = payloadData?.type;
 
         if (!type) {
@@ -2286,6 +2287,27 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
     .modal-small-text { color: var(--text-secondary) !important; display: block; margin-top: 5px; }
     .modal-title-bright { margin: 0 0 15px 0; font-size: 18px; font-weight: 800; color: #222222 !important; text-shadow: 0 0 10px rgba(255, 255, 255, 0.2); letter-spacing: 0.5px; text-align: center; }
     [data-theme="dark"] .modal-title-bright { color: #ffffff !important; text-shadow: 0 0 10px rgba(255, 255, 255, 0.3) !important; }
+    details summary {
+      list-style: none;
+      outline: none;
+      cursor: pointer;
+      text-align: center;
+      padding: 4px 0;
+      margin-top: 8px;
+      opacity: 0.5;
+      transition: opacity 0.3s;
+  }
+  details summary::-webkit-details-marker { display: none; }
+  details summary:hover { opacity: 1; }
+  
+  .arrow-down {
+      display: inline-block;
+      font-size: 12px;
+      transition: transform 0.3s ease;
+  }
+  details[open] .arrow-down {
+      transform: rotate(180deg);
+  }
   </style>
 </head>
 <body class="theme-bg-page">
@@ -2683,35 +2705,72 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
   
       // Словарь текстов
       const i18n = {
-          ru: {
-              hi: "Привет",
-              desc: "Я твоя личная Хранилка. Просто пришли мне фото или видео, и я закину их на сервер.",
-              status: "Статус",
-              connected: "Подключен",
-              folder: "Папка",
-              notSet: "Не настроено"
-          },
-          en: {
-              hi: "Hi",
-              desc: "I'm your personal Storage. Just send me photos or videos, and I'll upload them to the server.",
-              status: "Status",
-              connected: "Connected to",
-              folder: "Folder",
-              notSet: "Not configured"
-          }
+        ru: {
+            hi: "Привет",
+            tagline: "«Хранилка» by Leshiy",
+            shortDesc: "Я твоя личная Хранилка. Удобный «мост» для твоих файлов. Сохраняй фото и видео из соцсетей напрямую в личное облако. 24/7 под рукой.",
+            features: "✨ <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru и WebDAV. Можно делиться доступом с близкими!",
+            aiNote: "🧠 <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.",
+            status: "⚙️ Связь с хранилищем:",
+            connected: "Подключено:",
+            folder: "Папка",
+            notSet: "Настройте подключение",
+            notSelected: "Не выбрана"
+        },
+        en: {
+            hi: "Hi",
+            tagline: "«Storage» by Leshiy",
+            shortDesc: "I'm your personal Storage. A smart bridge for your files. Save media from social apps directly to your cloud. 24/7 at your service.",
+            features: "✨ <b>Features:</b> High-quality uploads, support for Yandex, Google, Dropbox, Mail.Ru & WebDAV. Share access with your family!",
+            aiNote: "🧠 <b>Gemini AI:</b> Feel free to ask me anything about the bot or just chat.",
+            status: "⚙️ Cloud Connection:",
+            connected: "Connected to",
+            folder: "Folder",
+            notSet: "Setup required",
+            notSelected: "Not selected"
+        }
       };
       const lang = i18n[currentLang];
       // Обновляем саму иконку флага, чтобы она не сбрасывалась при рендере
       const langIcon = document.getElementById('langIcon');
+      if (langIcon) langIcon.innerText = (currentLang === 'ru' ? '🇷🇺' : '🇺🇸');
+      const headerBlock = document.getElementById('ui-header-block');
+      if (headerBlock) {
+          headerBlock.innerHTML = 
+              // --- СЕКЦИЯ 1: ВСЕГДА ВИДИМАЯ (Приветствие и Статус) ---
+              '<div style="margin-top: 12px;">' +
+                  '<b style="font-size: 18px;">👋 ' + lang.hi + ', ' + firstName + '!</b>' +
+              '</div>' +
+              '<div style="margin-top: 6px; font-size: 14px; opacity: 0.9;">' + 
+                  (currentLang === 'ru' ? '📁 Пришли мне медиа, и я сохраню их в облако.' : '📁 Send me media to save it to the cloud.') + 
+              '</div>' +
 
-      // Твой HTML хедера (обновляем только тексты)
-      document.getElementById('ui-header-block').innerHTML = 
-          '<div><br>👋 <b>' + lang.hi + ', ' + firstName + '!</b></div>' +
-          '<div style="margin-top:8px; font-size:13px; color:var(--text-secondary);">' + lang.desc + '</div>' +
-          '<div class="status-group" style="border-left-color: ' + (data.isConnected ? '#4bb34b' : '#eb4242') + '; margin-top:15px;">' +
-              '<div>⚙️ ' + lang.status + ': ' + (data.isConnected ? '✅ <span style="color:#4bb34b; font-weight:bold;">' + lang.connected + ' ' + (data.providerName || '') + '</span>' : lang.notSet) + '</div>' +
-              '<div id="curFolderLabel">📂 ' + lang.folder + ': ' + (data.isConnected ? '<b>' + (data.currentFolder || '') + '</b>' : lang.notSelected) + '</div>' +
-          '</div>';
+              '<div class="status-group" style="border-left: 3px solid ' + (isConn ? '#4bb34b' : '#eb4242') + '; margin-top: 15px; padding-left: 15px;">' +
+                  '<div style="font-size: 12px; opacity: 0.6;">' + lang.status + '</div>' +
+                  '<div style="font-size: 15px; font-weight: 600; margin-top: 2px;">' + 
+                      (isConn ? '<span style="color:#4bb34b;">✅ ' + lang.connected + ' ' + (data.providerName || '') + '</span>' : '<span style="color:#eb4242;">○ ' + lang.notSet + '</span>') + 
+                  '</div>' +
+                  '<div style="font-size: 13px; margin-top: 4px; opacity: 0.8;">📂 ' + lang.folder + ': ' + (isConn ? '<b>' + (data.currentFolder || '') + '</b>' : '—') + '</div>' +
+              '</div>' +
+
+              // --- СЕКЦИЯ 2: РАСКРЫВАЮЩАЯСЯ (Твои тексты) ---
+              '<details>' +
+                  '<summary><span class="arrow-down">▼</span></summary>' +
+                  '<div style="margin-top: 10px;">' +
+                      // Твой Tagline
+                      '<div style="font-size: 12px; color: #4bb34b; margin-bottom: 2px; font-weight: 500;">' + lang.tagline + '</div>' +
+                      // Твой shortDesc
+                      '<div style="font-size:14px; line-height: 1.5; opacity: 0.9;">' + lang.shortDesc + '</div>' +
+                      // Блок фишек
+                      '<div style="margin-top: 12px; padding: 12px; background: rgba(128,128,128,0.05); border-radius: 12px; border: 1px solid rgba(128,128,128,0.15);">' +
+                          '<div style="font-size: 13px; color: var(--text-secondary);">' + lang.features + '</div>' +
+                          '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px;">' + lang.aiNote + '</div>' +
+                      '</div>' +
+                      // Автор
+                      '<div style="margin-top: 12px; font-size: 11px; opacity: 0.5; text-align: right;">© Автор: Огорельцев Александр Валерьевич</div>' +
+                  '</div>' +
+              '</details>';
+        }
     }
     
     function renderCommands(data) {
