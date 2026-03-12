@@ -1,6 +1,6 @@
 name = "leshiy-storage-bot"
 main = "worker.js"
-version = "2.4.0"
+version = "2.4.1"
 compatibility_date = "2024-03-12"
 
 # Переменные окружения (заглушки)

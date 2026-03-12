@@ -10,7 +10,7 @@ Telegram-бот для автоматической загрузки фото и
 Скрытая функция: Команда /search для поиска и возможность достать файлы с хранилки.
 */
 // Глобальные константы
-const version = "v2.4.0 от 17.01.2026"; // актуальная версия
+const version = "v2.4.1 от 19.01.2026"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -2005,7 +2005,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
     <div class="upload-container" id="dropZone" style="margin: 10px; padding: 15px; border: 2px dashed #3f8ae0; border-radius: 12px; background: #ebf2fa; text-align: center; transition: all 0.2s;">
     <input type="file" id="vkFileInput" style="display: none;" onchange="uploadFileFromVK(this)" multiple>
     <button class="btn-s" onclick="document.getElementById('vkFileInput').click()" id="uploadBtn" style="background: #2688eb; color: #fff; border: none; width: 100%; font-weight: 500; cursor: pointer;">
-        📁 Выбрать файл для загрузки
+        📁 Выбрать файлы для загрузки
     </button>
     <div id="uploadProgress" style="margin-top: 10px; font-size: 13px; color: #555; display: none;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -2473,7 +2473,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
       var oldRows = container.querySelectorAll('.upload-row');
       oldRows.forEach(function(r) {
           var status = r.getAttribute('data-status');
-          if (status === 'done' || status === 'error' || status === 'cancelled') {
+          if (status === 'done' || status === 'error' || status === 'cancelled' || status === 'warning') {
               r.remove();
           }
       });
@@ -2488,7 +2488,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
           row.setAttribute('data-status', 'waiting');
           row.style.cssText = 'margin-top:10px; padding:10px; background:#fff; border-radius:8px; border:1px solid #dce1e6; text-align:left; position:relative;';
   
-          // СТАБИЛЬНЫЙ ВАРИАНТ (без onclick внутри строки)
+          // ТВОЙ СТАБИЛЬНЫЙ ВАРЯНТ (без onclick внутри строки)
           row.innerHTML = 
             '<div class="info" style="font-size:12px; display:flex; justify-content:space-between;">' +
                 '<span>⌛ В очереди: <b>' + file.name + '</b></span>' +
@@ -2538,17 +2538,51 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
   
       if (task.xhr) task.xhr.abort();
   
-      // ПЕРЕД ТЕМ КАК УДАЛИТЬ ИЗ МАССИВА:
-      applyCancelledStyle(row); // Сразу серим и ставим статус 'cancelled'
-      
-      uploadQueue.splice(taskIndex, 1); // Теперь удаляем
+      // Визуальное оформление отмены
+      row.setAttribute('data-status', 'cancelled');
+      row.style.opacity = '0.5';
+      var infoSpan = row.querySelector('.info span');
+      if (infoSpan) infoSpan.innerHTML = '🔘 Отменено: <b>' + task.fileName + '</b>';
   
-      if (wasUploading) {
-          isUploading = false; // Освобождаем поток
+      // Меняем кнопку на "Вернуть"
+      var btn = row.querySelector('.cancel-btn');
+      if (btn) {
+          btn.innerHTML = 'Вернуть';
+          btn.style.color = '#2688eb';
+          btn.onclick = function() {
+              restoreUploadTask(id);
+          };
       }
   
-      // Тот самый "пинок" очереди, чтобы она не заснула
-      setTimeout(processQueue, 100); 
+      if (wasUploading) {
+          isUploading = false;
+          setTimeout(processQueue, 100);
+      }
+    }
+
+    function restoreUploadTask(id) {
+      var row = document.getElementById(id);
+      var task = uploadQueue.find(t => t.id === id);
+      if (!task) return;
+  
+      // Возвращаем исходный вид
+      row.setAttribute('data-status', 'waiting');
+      row.style.opacity = '1';
+      var infoSpan = row.querySelector('.info span');
+      if (infoSpan) infoSpan.innerHTML = '⌛ В очереди: <b>' + task.fileName + '</b>';
+  
+      // Возвращаем кнопку "Отмена"
+      var btn = row.querySelector('.cancel-btn');
+      if (btn) {
+          btn.innerHTML = 'Отмена';
+          btn.style.color = '#ff4d4f';
+          btn.onclick = function() {
+              cancelUploadTask(id);
+          };
+      }
+  
+      // Если ничего не грузится — запускаем
+      if (!isUploading) processQueue();
     }
     
     function applyCancelledStyle(row) {
@@ -2568,6 +2602,41 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
       }
       var btn = row.querySelector('.cancel-btn');
       if (btn) btn.style.display = 'none';
+    }
+
+    async function retryConfirm(task) {
+      var btn = task.row.querySelector('.cancel-btn');
+      if (btn) btn.style.display = 'none'; // Прячем кнопку на время попытки
+      
+      task.info.innerHTML = '🔄 Перезапись... Файл: <b>' + task.fileName + '</b>';
+  
+      try {
+          const confResponse = await fetch('https://leshiy-storage-bot.leshiyalex.workers.dev/api/confirm-upload', {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'x-vk-user-id': window.userId || userId
+              },
+              body: JSON.stringify({
+                  fileName: task.fileName,
+                  fileSize: task.file.size
+              })
+          });
+          
+          await confResponse.json();
+  
+          // Если получилось
+          task.row.setAttribute('data-status', 'done');
+          task.info.innerHTML = '✅ Готово! Файл: <b>' + task.fileName + '</b>';
+          if (task.bar) task.bar.style.background = '#28a745';
+      } catch (e) {
+          // Если опять не вышло — возвращаем кнопку "Повторить"
+          task.info.innerHTML = '⚠️ Снова ошибка базы! Файл: <b>' + task.fileName + '</b>';
+          if (btn) {
+              btn.style.display = 'inline';
+              btn.innerHTML = 'Повторить';
+          }
+      }
     }
 
     // Основная функция обработки (ЕДИНСТВЕННАЯ)
@@ -2609,56 +2678,86 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
           }
   
           xhr.upload.onprogress = function(e) {
-              if (e.lengthComputable && task.info) {
-                  var pct = Math.round((e.loaded / e.total) * 100);
-                  task.info.innerHTML = '📤 ' + pct + '%' + fileNameHTML;
-                  if (task.bar) task.bar.style.width = pct + '%';
-              }
+            if (e.lengthComputable && task.info) {
+                // Считаем точный процент
+                var pct = (e.loaded / e.total) * 100;
+                
+                // Для полоски оставляем как есть (плавность за счет CSS transition)
+                if (task.bar) task.bar.style.width = pct + '%';
+                
+                // Для текста используем целое число, но обновляем его 
+                // в связке с fileNameHTML, как у тебя в эталоне
+                task.info.innerHTML = '📤 ' + Math.floor(pct) + '%' + fileNameHTML;
+            }
           };
   
           xhr.onload = async function() {
-              if (xhr.status >= 200 && xhr.status <= 204) {
-                  // ШАГ 3: Подтверждение — теперь на свой отдельный эндпоинт
-                  fetch('https://leshiy-storage-bot.leshiyalex.workers.dev/api/confirm-upload', {
-                      method: 'POST',
-                      headers: {
-                          'Content-Type': 'application/json',
-                          'x-vk-user-id': window.userId || userId
-                      },
-                      body: JSON.stringify({
-                          fileName: task.fileName,
-                          fileSize: task.file.size
-                      })
-                  });
-  
-                  task.row.setAttribute('data-status', 'done');
-                  task.info.innerHTML = '✅ Готово!' + fileNameHTML;
-                  if (task.bar) { task.bar.style.background = '#28a745'; task.bar.style.width = '100%'; }
-              } else {
-                  task.row.setAttribute('data-status', 'error');
-                  task.info.innerHTML = '❌ Ошибка облака: ' + xhr.status;
-              }
-              finish();
+            if (xhr.status >= 200 && xhr.status <= 204) {
+                try {
+                    // ОБЯЗАТЕЛЬНО добавляем await и читаем ответ!
+                    const confResponse = await fetch('https://leshiy-storage-bot.leshiyalex.workers.dev/api/confirm-upload', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-vk-user-id': window.userId || userId
+                        },
+                        body: JSON.stringify({
+                            fileName: task.fileName,
+                            fileSize: task.file.size
+                        })
+                    });
+                    
+                    // Это заставит браузер дождаться закрытия HTTP-потока
+                    await confResponse.json(); 
+        
+                    task.row.setAttribute('data-status', 'done');
+                    task.info.innerHTML = '✅ Готово! ' + fileNameHTML;
+                    if (task.bar) { task.bar.style.background = '#28a745'; task.bar.style.width = '100%'; }
+
+                    // СКРЫВАЕМ КНОПКУ, чтобы нельзя было случайно отменить готовое
+                    var btn = task.row.querySelector('.cancel-btn');
+                    if (btn) btn.style.display = 'none';
+                } catch (e) {
+                    console.error("Ошибка подтверждения:", e);
+                    task.row.setAttribute('data-status', 'warning');
+                    task.info.innerHTML = '⚠️ Ошибка базы! ' + fileNameHTML;
+                    if (task.bar) { task.bar.style.background = '#ffc107'; task.bar.style.width = '100%'; }
+                    
+                    // МЕНЯЕМ КНОПКУ: Отмена -> Повторить
+                    var btn = task.row.querySelector('.cancel-btn');
+                    if (btn) {
+                        btn.innerHTML = 'Повторить';
+                        btn.style.color = '#2688eb'; // Синий цвет для действия
+                        btn.onclick = function() {
+                            retryConfirm(task); // Вызываем новую функцию дозаписи
+                        };
+                    }
+                }
+            } else {
+                task.row.setAttribute('data-status', 'error');
+                task.info.innerHTML = '❌ Ошибка облака: ' + xhr.status + fileNameHTML;
+            }
+            finish(); // Теперь finish вызовется только ПОСЛЕ того, как подтверждение реально завершилось
           };
   
           xhr.onerror = function() {
               task.row.setAttribute('data-status', 'error');
-              task.info.innerHTML = '❌ Ошибка сети';
+              task.info.innerHTML = '❌ Ошибка сети. Файл: <b>' + task.fileName + '</b>';
               finish();
           };
   
           xhr.send(task.file); // Шлем бинарник
   
-        } catch (e) {
-          console.error("Ошибка в очереди:", e);
-          if (task && task.row) {
-              task.row.setAttribute('data-status', 'error');
-              // Сохраняем имя файла в выводе ошибки
-              task.info.innerHTML = '❌ Ошибка: ' + e.message + ' Файл: <b>' + task.fileName + '</b>';
-              if (task.bar) task.bar.style.background = '#ff4d4f';
-          }
-          finish();
-      }
+      } catch (e) {
+        console.error("Ошибка в очереди:", e);
+        if (task && task.row) {
+            task.row.setAttribute('data-status', 'error');
+            // Сохраняем имя файла в выводе ошибки
+            task.info.innerHTML = '❌ Ошибка: ' + e.message + '. Файл: <b>' + task.fileName + '</b>';
+            if (task.bar) task.bar.style.background = '#ff4d4f';
+        }
+        finish();
+    }
   
       function finish() {
           isUploading = false;
