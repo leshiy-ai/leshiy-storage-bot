@@ -1,4 +1,4 @@
-/* 🗄 Приложение "Хранилка" by Leshiy
+/* 🗄Приложение "Хранилка" by Leshiy
 
 Чат-бот и приложение для автоматической загрузки фото и видео в облачное хранилище с реферальной системой доступа.
 
@@ -17,7 +17,7 @@
 */
 
 // Глобальные константы
-const version = "v3.0.6 от 08.02.2026"; // актуальная версия
+const version = "v3.0.7 от 05.03.2026"; // актуальная версия
 
 const providerNames = {
     'yandex': '☁️ Яндекс Диск',
@@ -148,23 +148,18 @@ async function worker_code_fetch(request, env, ctx) {
         let dataChanged = false;
     
         // ОБНОВЛЕНИЕ ПРОФИЛЯ: если имя или фото пришли и они новые — сохраняем
-        if (nameFromUrl && user.name !== nameFromUrl) {
+        if (nameFromUrl && nameFromUrl !== "null" && user.name !== nameFromUrl) {
             user.name = nameFromUrl;
             dataChanged = true;
         }
-        if (photoFromUrl && user.photo !== photoFromUrl) {
+        if (photoFromUrl && photoFromUrl !== "null" && user.photo !== photoFromUrl) {
             user.photo = photoFromUrl;
             dataChanged = true;
         }
     
         // Если данные изменились, перезаписываем JSON в KV
-        if (dataChanged) {
-          // ПРЕДОХРАНИТЕЛЬ: не пишем в базу, если ID битый
-          if (vkUserId && vkUserId !== "null" && vkUserId !== "undefined") {
-              await env.USER_DB.put(`user:${vkUserId}`, JSON.stringify(user));
-          } else {
-              console.warn("Попытка записи с битым ID:", vkUserId);
-          }
+        if (dataChanged && vkUserId && vkUserId !== "null" && vkUserId !== "undefined") {
+            await env.USER_DB.put(`user:${vkUserId}`, JSON.stringify(user));
         }
     
         // 2. Проверяем админа
@@ -203,7 +198,7 @@ async function worker_code_fetch(request, env, ctx) {
               friendConnected = {
                 userId: recent.userId,
                 userName: recent.userName || 'Друг',
-                userPhoto: recent.userPhoto || recent.photo || 'https://vk.com/images/camera_50.png',
+                userPhoto: recent.userPhoto || recent.photo,
                 provider: recent.provider,
                 notificationIndex: recentIndex  // ← ДОБАВЛЕНО: индекс для последующей пометки
               };
@@ -229,10 +224,10 @@ async function worker_code_fetch(request, env, ctx) {
             friendId: friendOf,
             isConnected: isConnected,
             provider: user.provider || null,
-            providerName: providerName,
-            currentFolder: user.folderId || "Root",
-            userName: user.name || "Пользователь", // Отдаем имя обратно на фронт
-            userPhoto: user.photo || "https://vk.com/images/camera_50.png",           // И фото тоже
+            providerName: providerName || null,
+            currentFolder: user.folderId || null,
+            userName: user.name || null, // Отдаем имя обратно на фронт
+            userPhoto: user.photo || null, // И фото тоже
             webdav_host: user.webdav_host || "",
             shared_from: user.shared_from || null,
             friendConnected: friendConnected
@@ -285,6 +280,107 @@ async function worker_code_fetch(request, env, ctx) {
         }
       } // === КОНЕЦ ЭНДПОИНТА ===
       
+      // --- ПОЛУЧЕНИЕ СОДЕРЖИМОГО ЧАТА ---
+      if (url.pathname === "/api/get-history") {
+          const vkUserId = url.searchParams.get("userId");
+          const chatId = url.searchParams.get("chatId");
+
+          if (!vkUserId || !chatId) {
+              return new Response(JSON.stringify({ error: "No userId or chatId" }), { status: 400, headers: corsHeaders });
+          }
+
+          try {
+              const AWS = require('aws-sdk');
+              const s3 = new AWS.S3({
+                  endpoint: 'https://storage.yandexcloud.net',
+                  accessKeyId: env.YANDEX_S3_KEY_ID,
+                  secretAccessKey: env.YANDEX_S3_SECRET,
+                  region: 'ru-central1',
+                  s3ForcePathStyle: true,
+              });
+
+              const data = await s3.getObject({
+                  Bucket: 'leshiy-storage-history',
+                  Key: `users/${vkUserId}/chats/${chatId}.json`
+              }).promise();
+
+              return new Response(data.Body.toString(), { 
+                  headers: { "Content-Type": "application/json; charset=UTF-8", ...corsHeaders } 
+              });
+          } catch (e) {
+              // Если файла нет — значит чат новый, отдаем пустой массив
+              return new Response(JSON.stringify([]), { headers: corsHeaders });
+          }
+      }
+
+      // --- API СПИСКА ЧАТОВ (СКАНЕР S3 С ЧТЕНИЕМ МЕТАДАННЫХ) ---
+      if (url.pathname === "/api/list-chats") {
+          const userId = url.searchParams.get("userId");
+          if (!userId) return new Response("No userId", { status: 400, headers: corsHeaders });
+
+          const AWS = require('aws-sdk');
+          const s3 = new AWS.S3({
+              endpoint: 'https://storage.yandexcloud.net',
+              accessKeyId: env.YANDEX_S3_KEY_ID, 
+              secretAccessKey: env.YANDEX_S3_SECRET,
+              region: 'ru-central1',
+              s3ForcePathStyle: true,
+          });
+
+          const BUCKET_NAME = 'leshiy-storage-history';
+
+          try {
+              const data = await s3.listObjectsV2({
+                  Bucket: BUCKET_NAME,
+                  Prefix: `users/${userId}/chats/`
+              }).promise();
+
+              const contents = data.Contents || [];
+              
+              // Запускаем параллельный опрос метаданных для всех найденных файлов
+              const chatList = await Promise.all(contents
+                  .filter(file => file.Key.endsWith('.json'))
+                  .map(async (file) => {
+                      const fileName = file.Key.split('/').pop();
+                      const chatId = fileName.replace('.json', '');
+
+                      try {
+                          // Запрашиваем только заголовки (метаданные), не скачивая весь файл
+                          const head = await s3.headObject({
+                              Bucket: BUCKET_NAME,
+                              Key: file.Key
+                          }).promise();
+
+                          // Достаем наш заголовок. Если его нет в метаданных — фолбек на дату.
+                          const encodedTitle = head.Metadata['chat-title'];
+                          const title = encodedTitle 
+                              ? decodeURIComponent(encodedTitle) 
+                              : `Чат от ${new Date(file.LastModified).toLocaleDateString()}`;
+
+                          return {
+                              id: chatId,
+                              lastUpdate: file.LastModified,
+                              title: title
+                          };
+                      } catch (e) {
+                          // Если вдруг файл недоступен, возвращаем хоть что-то
+                          return {
+                              id: chatId,
+                              lastUpdate: file.LastModified,
+                              title: `Чат от ${new Date(file.LastModified).toLocaleDateString()}`
+                          };
+                      }
+                  })
+              );
+
+              // Сортируем по дате (свежие сверху)
+              chatList.sort((a, b) => new Date(b.lastUpdate) - new Date(a.lastUpdate));
+
+              return new Response(JSON.stringify(chatList), { headers: corsHeaders });
+          } catch (err) {
+              return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
+          }
+      }
 
       // --- ОБРАБОТКА ЧАТА ИИ (ДЛЯ МИНИ-АППА) ---
       if (url.searchParams.get("action") === "ai_chat") {
@@ -762,7 +858,7 @@ async function worker_code_fetch(request, env, ctx) {
         return new Response(html, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
-            "Content-Security-Policy": "frame-ancestors 'self' https://ok.ru https://*.ok.ru https://*.okcdn.ru https://vk.com https://*.vk.com https://*.vk-portal.net https://id.vk.com https://connect.ok.ru https://*.mycdn.me https://*.mail.ru https://d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://st.okcdn.ru https://*.okcdn.ru https://*.vk.ru https://*.mail.ru https://dzen.ru https://st-ok.cdn-vk.ru; img-src * data: blob:; connect-src *; style-src 'self' 'unsafe-inline' https://*.vk.ru https://*.okcdn.ru;",
+            "Content-Security-Policy": "frame-ancestors 'self' https://ok.ru https://*.ok.ru https://*.okcdn.ru https://vk.com https://*.vk.com https://*.vk-portal.net https://id.vk.com https://connect.ok.ru https://*.mycdn.me https://*.mail.ru https://d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net https://leshiy-ai.github.io; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://st.okcdn.ru https://*.okcdn.ru https://*.vk.ru https://*.mail.ru https://dzen.ru https://st-ok.cdn-vk.ru; img-src * data: blob:; connect-src *; style-src 'self' 'unsafe-inline' https://*.vk.ru https://*.okcdn.ru;",
             "Access-Control-Allow-Origin": "*",
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Pragma": "no-cache",
@@ -775,6 +871,67 @@ async function worker_code_fetch(request, env, ctx) {
     // --- 3. ВЕБХУКИ (POST запросы) ---
     if (request.method === "POST") {
       try { // --- ДОБАВЛЯЕМ СЮДА (API Mini App) ---
+        
+        // --- API СОХРАНЕНИЯ ИСТОРИИ И МЕДИА ---
+        if (url.pathname === "/api/history") {
+            const { userId, chatId, chatTitle, messages, isDeleted } = body;
+
+            if (!userId || !chatId || !messages) {
+                return new Response(JSON.stringify({ error: "No userId or chatId" }), { 
+                    status: 400, headers: corsHeaders 
+                });
+            }
+
+            const AWS = require('aws-sdk');
+            const s3 = new AWS.S3({
+                endpoint: 'https://storage.yandexcloud.net',
+                accessKeyId: env.YANDEX_S3_KEY_ID, 
+                secretAccessKey: env.YANDEX_S3_SECRET,
+                region: 'ru-central1',
+                s3ForcePathStyle: true,
+            });
+
+            const BUCKET_NAME = 'leshiy-storage-history';
+
+            // --- ЛОГИКА УДАЛЕНИЯ ---
+            if (isDeleted) {
+                try {
+                    await s3.deleteObject({
+                        Bucket: BUCKET_NAME,
+                        Key: `users/${userId}/chats/${chatId}.json`
+                    }).promise();
+                    return new Response(JSON.stringify({ success: true, deleted: chatId }), { headers: corsHeaders });
+                } catch (e) {
+                    return new Response(JSON.stringify({ error: "Delete failed" }), { status: 500, headers: corsHeaders });
+                }
+            }
+
+            try {
+                // Сохраняем сам файл чата
+                // Ключ: users/ID/chats/CHAT_ID.json
+                await s3.putObject({
+                    Bucket: BUCKET_NAME,
+                    Key: `users/${userId}/chats/${chatId}.json`,
+                    Body: JSON.stringify({
+                        title: chatTitle || "Новый чат",
+                        messages: messages,
+                        lastUpdate: Date.now()
+                    }),
+                    Metadata: {
+                      // S3 хранит метаданные в ASCII, поэтому используем encodeURIComponent для кириллицы
+                      'chat-title': encodeURIComponent(chatTitle || "Новый чат")
+                  },
+                  ContentType: 'application/json'
+                }).promise();
+
+                return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
+            } catch (s3Error) {
+                console.error("S3 Write Error:", s3Error);
+                return new Response(JSON.stringify({ error: "S3 Save Failed", details: s3Error.message }), { 
+                    status: 500, headers: corsHeaders 
+                });
+            }
+        }
         
         // --- ВЫБОР ПАПКИ (Backend) ---
         if (url.pathname === "/api/select-folder") {
@@ -8873,7 +9030,7 @@ async function callGeminiChat(prompt, config, env, userMessageText) {
       method: 'POST',
       headers: { 
           'Content-Type': 'application/json',
-          'X-Proxy-Secret': PROXY_KEY // <--- ДОБАВЛЯЕМ для GEMENY-PROXY
+          'X-Proxy-Secret': PROXY_KEY // <--- ДОБАВЛЯЕМ для GEMINY-PROXY
       },
       body: JSON.stringify(body),
   });
