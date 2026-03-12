@@ -64,42 +64,42 @@ module.exports.handler = async (event, context) => {
         YANDEX_CLIENT_ID: process.env.YANDEX_CLIENT_ID,
         YANDEX_CLIENT_SECRET: process.env.YANDEX_CLIENT_SECRET
       };
-      
+
       const ctx = { waitUntil: (promise) => promise };
 
-      // ЗАПУСК ВОРКЕРА
-      try {
-          if (body.callback_query) {
-              console.log(`[TELEGRAM] Клик: ${body.callback_query.data}`);
-          }
-  
-          // Вызываем именно ту функцию, которая у тебя в worker.js
-          const response = await worker.worker_code_fetch(request, env, ctx);
-          
-          // Обработка ответа
-          if (!response || typeof response.text !== 'function') {
-              return {
-                  statusCode: 200,
-                  body: typeof response === 'string' ? response : JSON.stringify(response || "OK")
-              };
-          }
-  
-          const resText = await response.text();
-          const resHeaders = {};
-          if (response.headers) {
-              response.headers.forEach((v, k) => { resHeaders[k] = v; });
-          }
-  
-          return {
-              statusCode: response.status || 200,
-              headers: resHeaders,
-              body: resText
-          };
-      } catch (e) {
-          console.error("CRITICAL RUNTIME ERROR:", e);
-          return {
-              statusCode: 500,
-              body: JSON.stringify({ error: e.message })
-          };
-      }
-  };
+    // ЗАПУСК ВОРКЕРА
+    try {
+        if (body.callback_query) {
+            console.log(`[TELEGRAM] Клик: ${body.callback_query.data}`);
+        }
+
+        // Вызываем именно ту функцию, которая у тебя в worker.js
+        const response = await worker.worker_code_fetch(request, env, ctx);
+        
+        // Обработка ответа
+        if (!response || typeof response.text !== 'function') {
+            return {
+                statusCode: 200,
+                body: typeof response === 'string' ? response : JSON.stringify(response || "OK")
+            };
+        }
+
+        const resText = await response.text();
+        const resHeaders = {};
+        if (response.headers) {
+            response.headers.forEach((v, k) => { resHeaders[k] = v; });
+        }
+
+        return {
+            statusCode: response.status || 200,
+            headers: resHeaders,
+            body: resText
+        };
+    } catch (e) {
+        console.error("CRITICAL RUNTIME ERROR:", e);
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: e.message })
+        };
+    }
+};
