@@ -10,7 +10,13 @@ Telegram-бот для автоматической загрузки фото и
 Скрытая функция: Команда /search для поиска и возможность достать файлы с хранилки.
 */
 // Глобальные константы
-const version = "v2.4.1 от 19.01.2026"; // актуальная версия
+const version = "v2.4.2 от 20.01.2026"; // актуальная версия
+
+// Разделяет "Storage|ID" на понятные составляющие
+const parsePath = (path) => {
+  const parts = String(path || "").split('|');
+  return { name: parts[0], id: parts[1] || parts[0] }; 
+};
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -100,6 +106,49 @@ export default {
         }), {
           headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
         });
+      }
+
+      if (url.pathname === "/api/search" && request.method === "GET") {
+        const query = url.searchParams.get("q") || "";
+        const userId = request.headers.get('x-vk-user-id') || url.searchParams.get("userId");
+    
+        if (!userId) {
+            return new Response(JSON.stringify({ error: "Unauthorized" }), { 
+                status: 401, 
+                headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } 
+            });
+        }
+    
+        try {
+            // Поиск в D1. Ищем по вхождению строки (LIKE) и фильтруем по владельцу (userId)
+            const { results } = await env.FILES_DB.prepare(
+                "SELECT fileName, remotePath, timestamp FROM files WHERE userId = ? AND fileName LIKE ? ORDER BY timestamp DESC LIMIT 50"
+            ).bind(String(userId), `%${query}%`).all();
+    
+            return new Response(JSON.stringify({ results }), {
+                headers: { 
+                    "Content-Type": "application/json", 
+                    "Access-Control-Allow-Origin": "*" 
+                }
+            });
+        } catch (e) {
+            return new Response(JSON.stringify({ error: e.message }), { 
+                status: 500, 
+                headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } 
+            });
+        }
+      }
+
+      if (url.pathname === "/api/download" && request.method === "GET") {
+        const path = url.searchParams.get("path");
+        const name = url.searchParams.get("name") || "file";
+        const userId = request.headers.get('x-vk-user-id') || url.searchParams.get("userId");
+    
+        if (!path || !userId) {
+            return new Response("Missing parameters", { status: 400 });
+        }
+    
+        return handleDownload(path, name, userId, env);
       }
 
       // --- АДМИНСКИЕ ЭНДПОИНТЫ ---
@@ -548,7 +597,7 @@ async function sendVKMessageWithKeyboard(peerId, text, env, kb = null) {
   return await response.json();
 }
 
-// @ts-ignore
+
 function getStartKeyboardVK(userId, hostname, env, inviteData = null) {
   let buttons = [];
   
@@ -599,7 +648,7 @@ function getStartKeyboardVK(userId, hostname, env, inviteData = null) {
 * @param {Object} env - Окружение.
 * @param {string} userId - ID пользователя.
 */
-// @ts-ignore
+
 async function renderSearchPageVK(searchKey, offset, env, userId) {
   const dataRaw = await env.USER_DB.get(searchKey);
   if (!dataRaw) return { text: "❌ Поиск устарел или не найден.", kb: null };
@@ -931,7 +980,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     const list = await env.USER_DB.list({ prefix: "user:" });
     const authIds = list.keys.map(k => k.name.split(":")[1]);
     const allowedIds = await env.USER_DB.get("admin:allowed_ids", { type: "json" }) || [];
-    // @ts-ignore
+    
     const allUniqueIds = [...new Set([...authIds, ...allowedIds])];
   
     const adminMsg = `⚙️ <b>Панель администратора</b>\n\n` +
@@ -1270,7 +1319,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
  */
 async function handleVK(body, env, hostname, ctx) {
   let chatId = null;
-  // @ts-ignore
+  
   const VK_APP_ID = env.VK_APP_ID
   const VK_GROUP_ID = env.VK_GROUP_ID
   try {
@@ -1926,6 +1975,30 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
     [data-status="done"] .progress-fill { background: #28a745; }
     /* Цвет при ошибке */
     [data-status="error"] .progress-fill { background: #dc3545; }
+    /* Стили для поиска */
+    .search-modal { background: #ebedf0; }
+    .search-input-wrapper {
+        position: sticky;
+        top: 0;
+        background: #fff;
+        padding: 12px;
+        border-bottom: 1px solid #dce1e6;
+        z-index: 10;
+    }
+    .search-result-item {
+        background: #fff;
+        margin: 8px 12px;
+        padding: 12px;
+        border-radius: 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .file-info { display: flex; flex-direction: column; gap: 2px; }
+    .file-name { font-size: 14px; font-weight: 500; color: #2c2d2e; word-break: break-all; }
+    .file-date { font-size: 11px; color: #818c99; }
+    .download-link { color: #2688eb; font-weight: 600; font-size: 14px; text-decoration: none; padding: 8px; }
     </style>
 </head>
 <body>
@@ -1997,9 +2070,24 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
       ${isAdmin ? `<span class="blue-link" onclick="togglePanel('adminPanel')" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>` : ''}
       ${isConnected ? `<span class="blue-link" onclick="openFolderSelector()">/folder</span> — 📂 Выбрать папку для загрузки<br>` : ''}
       ${isConnected ? `<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>` : ''}
-      ${isConnected ? `<span class="blue-link" onclick="goToChat()">/search</span> — 🔎 Поиск файлов по хранилке<br>` : ''}
+      ${isConnected ? `<span class="blue-link" onclick="goToSearch()">/search</span> — 🔎 Поиск файлов по хранилке<br>` : ''}
       <span class="blue-link" onclick="togglePanel('debugPanel')">/debug</span> — 🛠️ Техническая информация<br>
       ${isConnected ? `<span class="blue-link" onclick="disconnect()" style="color:#ff3347;">/disconnect</span> — 🔌 Отключить диск<br>` : ''}
+    </div>
+
+    <div id="searchModal" class="modal-overlay" onclick="closeSearch()">
+    <div class="modal search-modal" onclick="event.stopPropagation()" style="height: 90vh; padding: 0;">
+      <div class="search-input-wrapper">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <input type="text" id="searchInput" placeholder="Поиск файлов..." 
+                 style="margin-bottom:0; flex-grow:1;" oninput="doSearch(this.value)">
+          <span onclick="closeSearch()" style="cursor:pointer; font-size:28px; color:#818c99;">&times;</span>
+        </div>
+      </div>
+      <div id="searchList" style="padding-bottom: 20px;">
+        <div style="text-align:center; color:#818c99; margin-top:40px;">Введите название файла для поиска</div>
+      </div>
+    </div>
     </div>
 
     <div class="upload-container" id="dropZone" style="margin: 10px; padding: 15px; border: 2px dashed #3f8ae0; border-radius: 12px; background: #ebf2fa; text-align: center; transition: all 0.2s;">
@@ -2313,6 +2401,113 @@ function renderVKMiniAppHTML(params, userData, isAdmin) {
           localStorage.setItem('awaiting_auth', 'true'); 
         } else { alert("Ошибка"); b.disabled = false; b.innerText = "🔌 Подключиться"; }
       } catch(e) { alert("Ошибка сети"); b.disabled = false; b.innerText = "🔌 Подключиться"; }
+    }
+
+    let searchDebounce;
+
+    // Открываем поиск
+    function goToSearch() {
+        document.getElementById('searchModal').style.display = 'flex';
+        document.getElementById('searchInput').focus();
+    }
+
+    function closeSearch() {
+        document.getElementById('searchModal').style.display = 'none';
+        document.getElementById('searchInput').value = '';
+        document.getElementById('searchList').innerHTML = '<div style="text-align:center; color:#818c99; margin-top:40px;">Введите название файла для поиска</div>';
+    }
+
+    async function doSearch(query) {
+      clearTimeout(searchDebounce);
+      var list = document.getElementById('searchList');
+      
+      if (!query || query.trim().length === 0) {
+          list.innerHTML = '<div style="text-align:center; color:#818c99; margin-top:40px;">Введите название файла для поиска</div>';
+          return;
+      }
+  
+      searchDebounce = setTimeout(async function() {
+          list.innerHTML = '<div style="text-align:center; color:#818c99; margin-top:20px;">🔍 Ищу...</div>';
+          
+          try {
+              // Используем window.userId или userId (смотря как у тебя в коде объявлено)
+              var currentUid = window.userId || userId;
+              var response = await fetch('https://leshiy-storage-bot.leshiyalex.workers.dev/api/search?q=' + encodeURIComponent(query), {
+                  headers: { 'x-vk-user-id': currentUid }
+              });
+              var data = await response.json(); // data.results - файлы, data.currentFolder - активная папка
+              
+              if (!data.results || data.results.length === 0) {
+                  list.innerHTML = '<div style="text-align:center; color:#818c99; margin-top:40px;">Ничего не найдено</div>';
+                  return;
+              }
+  
+              var html = '';
+              for (var i = 0; i < data.results.length; i++) {
+                var file = data.results[i];
+            
+                // ПАРСИМ ПУТЬ ИЗ БАЗЫ (Storage|ID)
+                var pathParts = file.remotePath.split('|');
+                var fileFolderName = pathParts[0]; // Название папки из базы
+                var fileFolderId = pathParts[1] || pathParts[0]; // ID папки из базы
+                
+                // СРАВНИВАЕМ С ТЕКУЩЕЙ ПАПКОЙ ПОЛЬЗОВАТЕЛЯ
+                // (Предполагаем, что воркер прислал data.userFolderId)
+                var isAccessible = true;
+                if (file.provider === 'google' && data.userFolderId) {
+                    // Если ID папки в базе не совпадает с текущим ID у юзера - Offline
+                    if (fileFolderId !== data.userFolderId) {
+                        isAccessible = false;
+                    }
+                }
+
+                var statusColor = isAccessible ? '#4bb34b' : '#ff4d4f';
+                var statusText = isAccessible ? '● Online' : '● Offline';
+                var opacity = isAccessible ? '1' : '0.6'; // Слегка гасим недоступные файлы
+
+                var date = new Date(file.timestamp).toLocaleDateString('ru-RU');
+                
+                // Иконки
+                var ext = file.fileName.split('.').pop().toLowerCase();
+                var icon = '📄';
+                if (['jpg','jpeg','png','gif'].includes(ext)) icon = '🖼️';
+                if (['mp4','mov','avi'].includes(ext)) icon = '🎥';
+                if (['mp3','wav'].includes(ext)) icon = '🎵';
+
+                var downloadUrl = 'https://leshiy-storage-bot.leshiyalex.workers.dev/api/download' +
+                                  '?path=' + encodeURIComponent(file.remotePath) +
+                                  '&name=' + encodeURIComponent(file.fileName) +
+                                  '&userId=' + currentUid;
+
+                html += '<div class="search-result-item" style="border-left: 4px solid #4bb34b; position: relative; padding-left: 45px;">' +
+                            // Зеленый индикатор (в базе есть = считаем доступным)
+                            '<div style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-size: 20px;">' + icon + '</div>' +
+                            
+                            '<div class="file-info">' +
+                                '<span class="file-name">' + file.fileName + '</span>' +
+                                '<div style="display: flex; gap: 8px; align-items: center; margin-top: 2px;">' +
+                                    '<span class="file-date">' + date + '</span>' +
+                                    '<span style="font-size: 10px; color: #999; background: #f0f2f5; padding: 1px 5px; border-radius: 4px;">' + fileFolderName + '</span>' +
+                                    '<span style="color: ' + statusColor + '; font-size: 10px; font-weight: bold;">' + statusText + '</span>' +
+                                '</div>' +
+                            '</div>' +
+                            // Кнопка скачать (если Offline - можно сделать серенькой)
+                        '<a href="' + (isAccessible ? downloadUrl : '#') + '" ' + 
+                           (isAccessible ? 'target="_blank"' : '') + 
+                           ' class="download-link" style="background: ' + (isAccessible ? '#4986cc' : '#ebedf0') + '; color: ' + (isAccessible ? '#fff' : '#999') + '; padding: 8px 12px; border-radius: 8px; text-decoration: none; font-size: 12px; font-weight: 500; white-space: nowrap;">' + 
+                           (isAccessible ? '⬇️ Скачать' : '⚠️ Ссылка') + 
+                        '</a>' +
+
+                            
+                        '</div>';
+              }
+              list.innerHTML = html;
+              
+          } catch (e) {
+              console.error("Search error:", e);
+              list.innerHTML = '<div style="text-align:center; color:#ff4d4f; margin-top:20px;">Ошибка поиска: ' + e.message + '</div>';
+          }
+      }, 400);
     }
 
     function showDebug() { 
@@ -3167,6 +3362,102 @@ async function handleConfirmUpload(request, env) {
   }
 }
 
+async function handleDownload(path, fileName, userId, env) {
+  try {
+      // 1. ПОИСК ПОЛЬЗОВАТЕЛЯ (учитываем формат user:ID из твоего KV)
+      let userDataRaw = await env.USER_DB.get("user:" + userId) || 
+                        await env.USER_DB.get(String(userId));
+
+      if (!userDataRaw) throw new Error("Данные пользователя не найдены для ID: " + userId);
+      const userData = JSON.parse(userDataRaw);
+
+      // 2. ИСПРАВЛЕНИЕ ПУТИ
+      // Если в базе (D1) лежит только папка 'STORAGE', склеиваем её с именем файла
+      let fullPath = path;
+      if (!fullPath.includes('.') && !fullPath.toLowerCase().endsWith('.zip')) {
+          const folder = fullPath.replace(/\/$/, '');
+          fullPath = folder + '/' + fileName;
+      }
+
+      let cloudResponse;
+      const provider = userData.provider;
+
+      // 3. ОБРАБОТКА 5 ПРОВАЙДЕРОВ
+      if (provider === 'google') {
+          // GOOGLE (path = fileId)
+          const googleFile = parsePath(fullPath); // fullPath теперь "Storage|ID"
+          cloudResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${googleFile.id}?alt=media`, {
+              headers: { 'Authorization': `Bearer ${userData.access_token}` }
+          });
+
+      } else if (provider === 'yandex' && userData.access_token) {
+          // YANDEX (OAuth API) - Нужен префикс disk:/
+          const yaPath = fullPath.startsWith('disk:/') ? fullPath : 'disk:/' + fullPath;
+          const apiRes = await fetch('https://cloud-api.yandex.net/v1/disk/resources/download?path=' + encodeURIComponent(yaPath), {
+              headers: { 'Authorization': 'OAuth ' + userData.access_token }
+          });
+          
+          if (!apiRes.ok) throw new Error("Yandex API Error: " + await apiRes.text());
+          const { href } = await apiRes.json();
+          cloudResponse = await fetch(href);
+
+      } else if (provider === 'dropbox') {
+          // DROPBOX (OAuth)
+          cloudResponse = await fetch('https://content.dropboxapi.com/2/files/download', {
+              method: 'POST',
+              headers: {
+                  'Authorization': `Bearer ${userData.access_token}`,
+                  'Dropbox-API-Arg': JSON.stringify({ path: fullPath.startsWith('/') ? fullPath : '/' + fullPath })
+              }
+          });
+
+      } else if (userData.webdav_host) {
+          // MAIL.RU и WEBDAV (через Basic Auth)
+          const auth = 'Basic ' + btoa(userData.webdav_user + ':' + userData.webdav_pass);
+          // Проверяем слэш между хостом и путем
+          const url = userData.webdav_host.replace(/\/$/, '') + '/' + fullPath.replace(/^\//, '');
+          cloudResponse = await fetch(url, {
+              method: 'GET',
+              headers: { 'Authorization': auth }
+          });
+
+      } else {
+          throw new Error("Неизвестный провайдер или отсутствуют настройки");
+      }
+
+      // 4. ПРОВЕРКА ОТВЕТА ОБЛАКА
+      if (!cloudResponse || !cloudResponse.ok) {
+          throw new Error(`Облако ${provider} ответило ошибкой: ${cloudResponse?.status}`);
+      }
+
+      // 5. ФОРМИРОВАНИЕ ОТВЕТА (СТРИМИНГ)
+      // Используем TransformStream, чтобы избежать обрывов на больших файлах
+      const { readable, writable } = new TransformStream();
+      cloudResponse.body.pipeTo(writable);
+
+      const headers = new Headers();
+      headers.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+      headers.set('Content-Type', cloudResponse.headers.get('content-type') || 'application/octet-stream');
+      headers.set('Access-Control-Allow-Origin', '*');
+      
+      // Обязательно пробрасываем размер, чтобы браузер не писал "ошибка сети" в конце
+      const size = cloudResponse.headers.get('content-length');
+      if (size) headers.set('Content-Length', size);
+
+      return new Response(readable, {
+          status: 200,
+          headers: headers
+      });
+
+  } catch (e) {
+      console.error("Download fail:", e.message);
+      return new Response("Ошибка: " + e.message, { 
+          status: 500,
+          headers: { 'Access-Control-Allow-Origin': '*' }
+      });
+  }
+}
+
 // Универсальная функция для генерации HTML-перехода (чтобы не дублировать код)
 const renderRedirectPage = (targetUrl, providerName) => {
   return new Response(`
@@ -3274,7 +3565,7 @@ async function handleChatRequest(userPrompt, modelConfig, env) {
   // --- 2. ФОРМИРУЕМ ФИНАЛЬНЫЙ ПРОМПТ ---
   // Workers AI и Bothub используют историю в формате messages, но Gemini — нет.
   // Для простоты и совместимости используем один общий формат промпта.
-  // @ts-ignore
+  
   const finalPrompt = `${CHAT_INSTRUCTION}\n\nВопрос пользователя: ${userPrompt}`;
 
   // --- 3. ВЫЗЫВАЕМ СООТВЕТСТВУЮЩУЮ ФУНКЦИЮ ---
@@ -3344,7 +3635,7 @@ function getStartKeyboard(userId, hostname, env, inviteData = null) {
   const mailruRedirectUri = `https://${hostname}/auth/mailru/callback`;
   // Старый вариант: scope=cloud.write.all
   const scope = "cloud";
-  // @ts-ignore
+  
   const mAuth = `https://connect.mail.ru/oauth/authorize?client_id=${mailruClientId}&response_type=code&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(mailruRedirectUri)}&state=${userId}`;
 
   keyboard.push([{ 
@@ -3470,7 +3761,7 @@ async function handleCallbackQuery(query, env, ctx) {
   const data = query.data; // Пример: "set_folder:12345:ID_ПАПКИ"
   const chatId = query.message.chat.id;
   const userId = query.from.id;
-  // @ts-ignore
+  
   const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
   const parts = data.split(":");
   const action = parts[0];
@@ -3851,7 +4142,7 @@ async function handleCallbackQuery(query, env, ctx) {
     }
 
     if (action === "create_folder") {
-      // @ts-ignore
+      
       let finalId;
       let success = false;
       const targetUserId = parts[1] || userId; // Для команды /add или личного использования
@@ -4116,7 +4407,7 @@ async function editMessageWithKeyboard(chatId, messageId, text, env, keyboard) {
 }
 
 // Функция обработки каждого файла в карусели сообщения ВК
-// @ts-ignore
+
 async function processOneAttachment(attach, userData, userId, chatId, env) {
   try {
     let url = "", name = "", fType = attach.type;
@@ -4529,7 +4820,7 @@ async function getFileStream(fileId, env) {
   return await response.arrayBuffer(); // ← ВСЁ! Только ArrayBuffer
 }
 
-// @ts-ignore
+
 function getFileType(fileName) {
   const ext = fileName.toLowerCase().split('.').pop();
   if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff'].includes(ext)) {
@@ -4752,7 +5043,7 @@ async function uploadToYandexFromArrayBuffer(arrayBuffer, name, token, folder = 
   return false;
 }
 
-// @ts-ignore
+
 async function uploadToYandexStream(stream, name, token, folder, type, fileSize) {
   const path = folder ? `/${folder}/${name}` : `/${name}`;
   const getUrl = `https://cloud-api.yandex.net/v1/disk/resources/upload?path=${encodeURIComponent(path.replace(/\/+/g, '/'))}&overwrite=true`;
@@ -4765,6 +5056,7 @@ async function uploadToYandexStream(stream, name, token, folder, type, fileSize)
       method: "PUT", 
       body: stream, 
       headers: { "Content-Type": type },
+      
       // @ts-ignore
       duplex: 'half' 
   });
@@ -4825,7 +5117,7 @@ async function handleGoogleCallback(req, env) {
   return new Response("Error");
 }
 
-// @ts-ignore
+
 async function downloadFromGoogle(folderId, fileName, token, env) {
   try {
     // Ищем файлы в облаке
@@ -4863,12 +5155,17 @@ async function uploadToGoogleFromArrayBuffer(arrayBuffer, name, token, folderId 
   return res.ok;
 }
 
-// @ts-ignore
+
 async function uploadToGoogleStream(stream, name, token, folder, type, fileSize) {
   // Для Google используем Simple Upload (поддерживает стрим до 5МБ на бесплатном лимите легко)
   // Если нужно больше 5МБ, нужен Resumable, но для начала стабилизируем это
-  // @ts-ignore
+  
   const folderId = (folder === "root" || !folder) ? "" : folder;
+  const parentFolder = parsePath(folder); // folder теперь "Storage|ID"
+  const metadata = {
+      name: name,
+      parents: [parentFolder.id] // Google получит чистый ID
+  };
   const url = `https://www.googleapis.com/upload/drive/v3/files?uploadType=media&ignoreDefaultVisibility=true`;
   
   // В простом режиме метаданные (имя) передать сложнее одним запросом через стрим, 
@@ -4881,6 +5178,7 @@ async function uploadToGoogleStream(stream, name, token, folder, type, fileSize)
           'Content-Type': type
       },
       body: stream,
+      
       // @ts-ignore
       duplex: 'half'
   });
@@ -5006,7 +5304,7 @@ async function createMailruFolder(folderName, accessToken, env) {
 }
 
 // Работа с WebDAV
-// @ts-ignore
+
 async function uploadWebDAVFromArrayBuffer(arrayBuffer, fileName, userData, env) {
   let fullPath;
   let headers = { "Content-Type": "application/octet-stream" };
@@ -5030,7 +5328,7 @@ async function uploadWebDAVFromArrayBuffer(arrayBuffer, fileName, userData, env)
   return res.status === 201 || res.status === 204;
 }
 
-// @ts-ignore
+
 async function uploadWebDAVStream(stream, name, userData, env, type, fileSize) {
     // Подходит и для Mail.ru, и для своего WebDAV
     const baseUrl = userData.webdav_url || userData.webdav_host || "";
@@ -5044,6 +5342,7 @@ async function uploadWebDAVStream(stream, name, userData, env, type, fileSize) {
             'Content-Type': type 
         },
         body: stream,
+        
         // @ts-ignore
         duplex: 'half'
     });
@@ -5164,7 +5463,7 @@ async function uploadToDropboxFromArrayBuffer(arrayBuffer, fileName, accessToken
   return res.ok;
 }
 
-// @ts-ignore
+
 async function uploadToDropboxStream(stream, name, token, folder, fileSize) {
   const path = (folder ? `/${folder}/${name}` : `/${name}`).replace(/\/+/g, '/');
   const res = await fetch('https://content.dropboxapi.com/2/files/upload', {
@@ -5175,6 +5474,7 @@ async function uploadToDropboxStream(stream, name, token, folder, fileSize) {
           'Content-Type': 'application/octet-stream'
       },
       body: stream,
+      
       // @ts-ignore
       duplex: 'half'
   });
@@ -5402,7 +5702,7 @@ ${candidatesList}
  * @param {string} userMessageText - Текущее сообщение пользователя. 
  * @returns {Promise<string>} Сгенерированный текстовый ответ.
  */
-// @ts-ignore
+
 async function callGeminiChat(prompt, config, env, userMessageText) {
     
   // --- ДИНАМИЧЕСКИЕ ПАРАМЕТРЫ ИЗ КОНФИГУРАЦИИ ---
@@ -5800,7 +6100,7 @@ async function callWorkersAIVision(config, imageBuffer, env) { // <-- ИЗМЕН
  * @param {Object} env - Объект окружения (включает DEBUG_ENABLED и ctx).
  * @returns {Promise<string>} Сгенерированный текстовый ответ.
  */
-// @ts-ignore
+
 async function callBotHubTextChat(prompt, config, env, messageText) {
   // 1. ОПРЕДЕЛЕНИЕ СИСТЕМНОГО КОНТЕКСТА (ГЛОБАЛЬНАЯ КОНСТАНТА)
   const SYSTEM_PROMPT = `
