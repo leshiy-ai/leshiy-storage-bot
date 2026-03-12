@@ -14,7 +14,7 @@
 Диагностика: Команда /debug для проверки статуса подключения к хранилищу в реальном времени.
 */
 // Глобальные константы
-const version = "v2.5.0 от 29.01.2026"; // актуальная версия
+const version = "v2.5.1 от 30.01.2026"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -325,7 +325,7 @@ export default {
       
           // 2. Берем данные прямо из объекта (теперь "Документы" не потеряются)
           const provider = userData.provider || "yandex";
-          const folderId = userData.folderId || "STORAGE";
+          const folderId = userData.folderId || "Root";
           
           // Генерируем код инвайта
           const inviteCode = Math.random().toString(36).substring(2, 12);
@@ -375,28 +375,53 @@ export default {
       }
 
       if (url.pathname === "/api/connect-friend") {
-        const uId = url.searchParams.get("vk_user_id");
-        let fId = url.searchParams.get("friend_id") || ""; // Добавляем пустую строку как fallback
-        
+        const uId = url.searchParams.get("vk_user_id") || vkUserId;
+        let fId = url.searchParams.get("friend_id") || "";
+      
         const headers = { 
           "Content-Type": "application/json", 
           "Access-Control-Allow-Origin": "*" 
         };
       
         if (uId && fId) {
-          // Если fId — это буквы (код инвайта), превращаем его в ID владельца
+          // 1. Если fId - код инвайта, достаем ID владельца
           if (isNaN(Number(fId))) {
             const inviteDataRaw = await env.USER_DB.get("invite:" + fId);
             if (inviteDataRaw) {
               const inviteData = JSON.parse(inviteDataRaw);
-              // Принудительно приводим к строке, чтобы TS не ругался
               fId = String(inviteData.inviterId);
             } else {
               return new Response(JSON.stringify({ success: false, error: "Invite not found" }), { headers, status: 404 });
             }
           }
       
-          // Записываем в KV. Здесь и ключ, и значение должны быть строками.
+          // 2. Достаем данные владельца хранилища (Друга)
+          const ownerDataRaw = await env.USER_DB.get(`user:${fId}`);
+          if (!ownerDataRaw) {
+            return new Response(JSON.stringify({ success: false, error: "Owner storage not found" }), { headers, status: 404 });
+          }
+          const ownerData = JSON.parse(ownerDataRaw);
+      
+          // 3. Достаем или создаем профиль самого Реферала
+          const referralDataRaw = await env.USER_DB.get(`user:${uId}`);
+          let referralData = referralDataRaw ? JSON.parse(referralDataRaw) : { userId: uId };
+      
+          // 4. КОПИРУЕМ КЛЮЧЕВЫЕ ДАННЫЕ
+          // Теперь реферал "видит" то же облако, что и друг
+          referralData.provider = ownerData.provider;
+          referralData.access_token = ownerData.access_token || null;
+          referralData.refresh_token = ownerData.refresh_token || null;
+          referralData.webdav_host = ownerData.webdav_host || null;
+          referralData.webdav_user = ownerData.webdav_user || null;
+          referralData.webdav_pass = ownerData.webdav_pass || null;
+          
+          // Привязываем папку инвайта как рабочую для реферала
+          referralData.folderId = ownerData.folderId || "Root"; 
+          referralData.is_referral = true;
+          referralData.invited_by = fId;
+      
+          // 5. Сохраняем обновленный профиль реферала и связь
+          await env.USER_DB.put(`user:${uId}`, JSON.stringify(referralData));
           await env.USER_DB.put("friend_of:" + String(uId), String(fId));
           
           return new Response(JSON.stringify({ success: true, connectedTo: fId }), { headers });
@@ -579,6 +604,7 @@ export default {
       
           // 2. Обновляем поля WebDAV (как это делает команда /setup_webdav)
           userObj.provider = 'webdav';
+          userObj.folderId = body.folderId || 'Root';
           userObj.webdav_host = body.host; 
           userObj.webdav_user = body.user;
           userObj.webdav_pass = body.pass;
@@ -775,7 +801,7 @@ async function renderSearchPageVK(searchKey, offset, env, userId) {
   list += `
 Активное подключение:`;
   list += `
-<b>🔌 Провайдер: ${userData?.provider}</b> 📁 Папка: ${userData?.folderId}`;
+<b>☁️ Провайдер: ${userData?.provider}</b> 📁 Папка: ${userData?.folderId}`;
   list += `
 <b>🟢 доступно</b> | <b>🔴 не доступно</b> для выгрузки`;
 
@@ -928,8 +954,8 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     
     return await sendMessage(chatId, 
       `🚀 <b>Твоя ссылка для друга:</b>\n<code>${inviteLink}</code>\n\n` +
-      `📁 Папка: <b>${currentFolder}</b>\n` +
-      `Облако: <b>${userData.provider}</b>`, 
+      `☁️ Облако: <b>${userData.provider}</b>\n` +
+      `📁 Папка: <b>${currentFolder}</b>`, 
       null, env
     );
   }
@@ -945,7 +971,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     const debugMsg = `🤖 <b>Бот онлайн</b>\n` +
                      `📦 Версия: ${version}\n` +
                      `🔗 Статус: ${statusIcon}\n` +
-                     `🔌 Провайдер: ${currentProvider}\n` +
+                     `☁️ Провайдер: ${currentProvider}\n` +
                      `📁 Папка: <code>${currentFolder}</code>\n` +
                      `👤 Твой ID: <code>${userId}</code>\n` +
                      `${isAdmin ? "👑 Админ: Да" : "👑 Админ: Нет"}`;
@@ -959,7 +985,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
 
     await env.USER_DB.delete(userKey);
     
-    let dMsg = `🔌 <b>Диск отключен.</b>\nТы больше не подключен к ${provider}.`;
+    let dMsg = `🔌 <b>Диск отключен.</b>\nТы больше не подключен к ☁️ ${provider}.`;
     if (isShared) {
       dMsg = `🔌 <b>Ты отключился от хранилки друга.</b>\nТеперь ты можешь подключить своё собственное облако.`;
     }
@@ -1808,7 +1834,7 @@ async function handleVK(body, env, hostname, ctx) {
         debugInfo += `🤖 ВК-Чат онлайн\n`;
         debugInfo += `📦 Версия: ${version}\n`;
         debugInfo += `🔗 Статус: ${hasToken ? "✅ Соединение активно" : "❌ Не подключен"}\n`;
-        debugInfo += `🔌 Провайдер: ${actualData?.provider || '—'}\n`;
+        debugInfo += `☁️ Провайдер: ${actualData?.provider || '—'}\n`;
         debugInfo += `📁 Папка: ${actualData?.folderId || 'Root'}\n`;
         debugInfo += `👤 Твой ID: ${userId}\n`;
         debugInfo += `👑 Админ: ${isAdmin ? "Да" : "Нет"}`;
@@ -1890,7 +1916,7 @@ async function handleVK(body, env, hostname, ctx) {
               color: "default"
             }]);
           }
-          await sendVKMessageWithKeyboard(chatId, `🔌 Облако: ${userData.provider}. 📂 Всего папок: ${folders.length}. Выбери из (1-${sliced.length})`, env, { inline: true, buttons });
+          await sendVKMessageWithKeyboard(chatId, `☁️ Облако: ${userData.provider}. 📂 Всего папок: ${folders.length}. Выбери из (1-${sliced.length})`, env, { inline: true, buttons });
         } else {
           // Если папок нет
           const createBtn = [[{ action: { type: "text", label: "🗂 Создать новую папку", payload: JSON.stringify({ cmd: "start_create" }) }, color: "positive" }]];
@@ -2151,47 +2177,71 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, user-scalable=no, viewport-fit=cover">
   <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
   <style>
-    body { font-family: -apple-system, system-ui, sans-serif; background: #ebedf0; margin: 0; padding: 12px; color: #000; -webkit-tap-highlight-color: transparent; }
-    .tg-message { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); margin-bottom: 12px; position: relative; z-index: 1; }
-    .status-group { border-left: 4px solid ${isConnected ? '#4bb34b' : '#eb4242'}; background: #f5f7f8; border-radius: 0 8px 8px 0; padding: 12px 16px; margin: 12px 0; font-size: 15px; }
+    :root {
+    --bg-color: #ffffff;
+    --panel-bg: #ffffff;
+    --text-color: #000000;
+    --text-secondary: #818c99;
+    --accent-color: #2688eb;
+    --bubble-bg: #f5f7f8;
+    --border-color: #dce1e6;
+    --msg-body-text: #2c2d2e;
+    --ai-chat-bg: #e2f7e2;
+    --ai-chat-text: #1a5c1a;
+    }
+    [data-theme="dark"] {
+        --bg-color: #19191a;
+        --panel-bg: #222222;
+        --text-color: #e1e3e6;
+        --text-secondary: #909499;
+        --accent-color: #71aaeb;
+        --bubble-bg: #2d2d2e;
+        --border-color: #363738;
+        --msg-body-text: #d1d2d3;
+        --ai-chat-bg: #213021;
+        --ai-chat-text: #a5d6a5;
+    }
+    body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg-color); margin: 0; padding: 12px; color: var(--text-color); -webkit-tap-highlight-color: transparent; }
+    .tg-message { background: var(--panel-bg); border-radius: 12px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); margin-bottom: 12px; position: relative; z-index: 1; }
+    .status-group { border-left: 4px solid ${isConnected ? '#4bb34b' : '#eb4242'}; background: var(--bubble-bg); border-radius: 0 8px 8px 0; padding: 12px 16px; margin: 12px 0; font-size: 15px; }
     @keyframes spin { 100% { transform: rotate(360deg); } }
-    .refresh-btn { position: absolute; top: 8px; right: 8px; font-size: 24px; cursor: pointer; padding: 8px; z-index: 10; color: #818c99; line-height: 1; display: flex; align-items: center; justify-content: center; transition: color 0.2s; } .refresh-btn:active { color: #2688eb; } @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } 
-    .refresh-btn.loading { animation: spin 0.8s linear infinite; color: #2688eb; pointer-events: none; }
-    .header-actions { position: absolute; top: 0; right: 0; display: flex; z-index: 9999; line-height: 0; } 
-    .action-btn { width: 25px; height: 25px; cursor: pointer; display: flex; align-items: center; justify-content: center; user-select: none; -webkit-tap-highlight-color: transparent; background: transparent; color: rgba(129, 140, 153, 0.4); font-size: 20px; } 
+    .refresh-btn { position: absolute; top: 8px; right: 8px; font-size: 24px; cursor: pointer; padding: 8px; z-index: 10; color: var(--text-secondary); line-height: 1; display: flex; align-items: center; justify-content: center; transition: color 0.2s; } .refresh-btn:active { color: var(--accent-color); } @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } 
+    .refresh-btn.loading { animation: spin 0.8s linear infinite; color: var(--accent-color); pointer-events: none; }
+    .header-actions { position: absolute; top: 9px; right: 2px; display: flex; z-index: 999; gap:12px;} 
+    .header-actions button.action-btn { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; }
+    .action-btn { width: 20px; height: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; user-select: none; -webkit-tap-highlight-color: transparent; background: transparent; color: rgba(129, 140, 153, 0.4); font-size: 20px; } 
     .action-btn:active { background: rgba(0,0,0,0.05); } @keyframes pulse { 0% { opacity: 0.4; transform: scale(1); } 50% { opacity: 1; transform: scale(1.1); } 100% { opacity: 0.4; transform: scale(1); } } 
-    .loading { animation: pulse 1.5s ease-in-out infinite; color: #2688eb !important; } @media screen and (max-width: 600px) { .action-btn { width: 33px; height: 12px; } }
-    .header-actions { position: absolute; right: 10px; top: 10px; z-index: 100; }
-    #ui-admin-commands, #ui-commands-block { position: relative; z-index: 10; }
-    .msg-bubble { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); margin-bottom: 12px; display: none; position: relative; border-left: 4px solid #2688eb; }
-    .msg-header { font-weight: bold; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; color: #2688eb; }
-    .msg-body { font-size: 14px; line-height: 1.5; color: #2c2d2e; }
+    .loading { animation: pulse 1.5s ease-in-out infinite; color: var(--accent-color) !important; } @media screen and (max-width: 600px) { .action-btn { width: 33px; height: 12px; } }
+    #ui-admin-commands, #ui-commands-block { background: var(--bg-color); position: relative; z-index: 10; }
+    .msg-bubble { background: var(--panel-bg); border-radius: 12px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); margin-bottom: 12px; display: none; position: relative; border-left: 4px solid var(--accent-color); }
+    .msg-header { font-weight: bold; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; color: var(--accent-color); }
+    .msg-body { font-size: 14px; line-height: 1.5; color: var(--msg-body-text); }
     .msg-body div { margin-bottom: 4px; }
     .chat-btn { background: #5181b8; color: white; border-radius: 8px; padding: 10px; text-align: center; font-weight: 500; margin-top: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
-    .chat-btn-secondary { background: #f0f2f5; color: #2688eb; border-radius: 8px; padding: 10px; text-align: center; font-weight: 500; margin-top: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
-    .blue-link { color: #2688eb; cursor: pointer; text-decoration: none; font-weight: 600; display: inline-block; padding: 2px 0; }
-    .btn-s { background: #ffffff; border: 1px solid #dce1e6; border-radius: 10px; padding: 12px; margin-top: 8px; width: 100%; box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 15px; font-weight: 600; color: #2688eb; cursor: pointer; position: relative; z-index: 5; }
-    .btn-s:active { background: #f2f3f5; }
+    .chat-btn-secondary { background: var(--bubble-bg); color: var(--accent-color); border-radius: 8px; padding: 10px; text-align: center; font-weight: 500; margin-top: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .blue-link { background: var(--bg-color); color: var(--accent-color); cursor: pointer; text-decoration: none; font-weight: 600; display: inline-block; padding: 2px 0; }
+    .btn-s { background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 10px; padding: 12px; margin-top: 8px; width: 100%; box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 15px; font-weight: 600; color: var(--accent-color); cursor: pointer; position: relative; z-index: 5; }
+    .btn-s:active { background: var(--bubble-bg); }
     .btn-s img { width: 22px; height: 22px; pointer-events: none; }
-    .btn-s.active { border: 2.5px solid #2688eb; background: #f0f7ff; }
-    .hidden-panel { display: none; background: #fff; padding: 16px; border-radius: 12px; margin-bottom: 12px; border: 1px solid #dce1e6; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-    .hidden-panel pre { font-size: 10px; background: #f0f2f5; padding: 8px; overflow-x: auto; white-space: pre-wrap; border-radius: 6px; }
+    .btn-s.active { border: 2.5px solid var(--accent-color); background: var(--bubble-bg); }
+    .hidden-panel { display: none; background: var(--panel-bg); padding: 16px; border-radius: 12px; margin-bottom: 12px; border: 1px solid var(--border-color); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .hidden-panel pre { font-size: 10px; background: var(--bubble-bg); padding: 8px; overflow-x: auto; white-space: pre-wrap; border-radius: 6px; color: var(--text-color); }
     .check-mark { color: #4bb34b; font-weight: bold; pointer-events: none; }
-    .wd-form { display: none; background: #fff; padding: 16px; border-radius: 12px; margin-top: 10px; border: 1px solid #dce1e6; }
-    .mr-form { display: none; background: #fff; padding: 16px; border-radius: 12px; margin-top: 10px; border: 1px solid #dce1e6; }
-    input { width: 100%; padding: 12px; border: 1px solid #dce1e6; border-radius: 8px; margin-bottom: 8px; box-sizing: border-box; font-size: 15px; }
-    .quota-card { background: white; border-radius: 12px; padding: 16px; margin-top: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
-    .progress-bg { background: #f0f2f5; height: 8px; border-radius: 4px; overflow: hidden; margin: 10px 0; }
+    .wd-form { display: none; background: var(--panel-bg); padding: 16px; border-radius: 12px; margin-top: 10px; border: 1px solid var(--border-color); }
+    .mr-form { display: none; background: var(--panel-bg); padding: 16px; border-radius: 12px; margin-top: 10px; border: 1px solid var(--border-color); }
+    input { width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 8px; box-sizing: border-box; font-size: 15px; background: var(--panel-bg); color: var(--text-color); }
+    .quota-card { background: var(--panel-bg); border-radius: 12px; padding: 16px; margin-top: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+    .progress-bg { background: var(--bubble-bg); height: 8px; border-radius: 4px; overflow: hidden; margin: 10px 0; }
     .progress-fill { background: #0077ff; width: 0%; height: 100%; transition: width 1s ease; }
-    .footer { text-align: center; color: #818c99; font-size: 11px; margin-top: 25px; padding-bottom: 20px; }
+    .footer { text-align: center; color: var(--text-secondary); font-size: 11px; margin-top: 25px; padding-bottom: 20px; }
     .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: flex-end; }
-    .modal { background: white; width: 100%; border-radius: 15px 15px 0 0; padding: 20px; box-sizing: border-box; max-height: 80vh; overflow-y: auto; }
-    .folder-item { padding: 16px; border-bottom: 1px solid #f0f2f5; font-weight: 500; color: #2688eb; cursor: pointer; }
-    .wd-form, .debug-window { display: none; background: #fff; padding: 16px; border-radius: 12px; margin-top: 10px; border: 1px solid #dce1e6; }
-    .debug-window pre { font-size: 10px; background: #f0f2f5; padding: 8px; overflow-x: auto; white-space: pre-wrap; }
+    .modal { background: var(--panel-bg); width: 100%; border-radius: 15px 15px 0 0; padding: 20px; box-sizing: border-box; max-height: 80vh; overflow-y: auto; color: var(--text-color); }
+    .folder-item { padding: 16px; border-bottom: 1px solid var(--border-color); font-weight: 500; color: var(--accent-color); cursor: pointer; }
+    .wd-form, .debug-window { display: none; background: var(--panel-bg); padding: 16px; border-radius: 12px; margin-top: 10px; border: 1px solid var(--border-color); }
+    .debug-window pre { font-size: 10px; background: var(--bubble-bg); padding: 8px; overflow-x: auto; white-space: pre-wrap; color: var(--text-color); }
     .close-x { position: absolute; top: 8px; right: 12px; color: #adb5bd; font-size: 20px; cursor: pointer; }
-    #pull-to-refresh { position: fixed; top: -50px; left: 0; right: 0; height: 50px; display: flex; align-items: center; justify-content: center; transition: transform 0.2s; z-index: 9999; background: #ebedf0; color: #2688eb; font-weight: bold; }
-    .pull-indicator { border: 2px solid #f3f3f3; border-top: 2px solid #2688eb; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; margin-right: 10px; display: none; }
+    #pull-to-refresh { position: fixed; top: -50px; left: 0; right: 0; height: 50px; display: flex; align-items: center; justify-content: center; transition: transform 0.2s; z-index: 9999; background: var(--bg-color); color: var(--accent-color); font-weight: bold; }
+    .pull-indicator { border: 2px solid #f3f3f3; border-top: 2px solid var(--accent-color); border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; margin-right: 10px; display: none; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     @keyframes ptr-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     body { overscroll-behavior-y: contain; } /* Важно: отключает системный рефреш браузера */
@@ -2199,38 +2249,58 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
     .progress-fill { height: 100%; width: 0%; background: #007bff; transition: width 0.2s ease; }
     [data-status="done"] .progress-fill { background: #28a745; }
     [data-status="error"] .progress-fill { background: #dc3545; }
-    .search-modal { background: #ebedf0; }
-    .search-input-wrapper { position: sticky; top: 0; background: #fff; padding: 12px; border-bottom: 1px solid #dce1e6; z-index: 10; }
-    .search-result-item { background: #fff; margin: 8px 12px; padding: 12px; border-radius: 10px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    .file-info { display: flex; flex-direction: column; gap: 2px; }
-    .file-name { font-size: 14px; font-weight: 500; color: #2c2d2e; word-break: break-all; }
-    .file-date { font-size: 11px; color: #818c99; }
-    .download-link { color: #2688eb; font-weight: 600; font-size: 14px; text-decoration: none; padding: 8px; }
-    #ai-chat-container { margin: 15px 10px; background: #ffffff; border-radius: 12px; padding: 12px; border: 2px solid #4986cc; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: flex; flex-direction: column; }
+    .search-modal { background: var(--bg-color); }
+    .search-input-wrapper { position: sticky; top: 0; background: var(--panel-bg); padding: 12px; border-bottom: 1px solid var(--border-color); z-index: 10; }
+    .search-result-item { background: var(--panel-bg); margin: 8px 12px; padding: 12px; border-radius: 10px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .file-info { background: var(--panel-bg); display: flex; flex-direction: column; gap: 2px; }
+    .file-name { background: var(--panel-bg); font-size: 14px; font-weight: 500; color: var(--text-color); word-break: break-all; }
+    .file-date { background: var(--panel-bg); font-size: 11px; color: var(--text-secondary); }
+    .download-link { background: var(--panel-bg); color: var(--accent-color); font-weight: 600; font-size: 14px; text-decoration: none; padding: 8px; }
+    #ai-chat-container { margin: 15px 10px; background: var(--panel-bg); border-radius: 12px; padding: 12px; border: 2px solid #4986cc; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: flex; flex-direction: column; }
     #ai-chat-history { max-height: 250px; overflow-y: auto; margin-bottom: 12px; display: none; flex-direction: column; gap: 10px; }
     .chat-msg { padding: 10px 14px; border-radius: 15px; max-width: 85%; font-size: 14px; line-height: 1.4; word-wrap: break-word; display: flex; align-items: flex-start; gap: 8px; animation: slideIn 0.2s ease-out; }
     .user-msg { background-color: #2b5278 !important; color: #ffffff !important; align-self: flex-end; border-bottom-right-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.2); border: none; flex-direction: row-reverse; }
-    .ai-msg { background-color: #e2f7e2 !important; color: #1a5c1a !important; align-self: flex-start; border-bottom-left-radius: 2px; flex-direction: row; }
+    .ai-msg { background-color: var(--ai-chat-bg) !important; color: var(--ai-chat-text) !important; align-self: flex-start; border-bottom-left-radius: 2px; flex-direction: row; }
     .msg-content { display: flex; flex-direction: column; }
     .user-msg .msg-content { align-items: flex-end; text-align: right; }
     .ai-msg .msg-content { align-items: flex-start; text-align: left; }
     .msg-name { font-size: 13px; font-weight: bold; padding: 0 4px; }
     .chat-ava { width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; object-fit: cover; border: 1px solid rgba(255,255,255,0.2); }
     .chat-input-group { display: flex; gap: 8px; clear: both; }
-    #ai-input { flex-grow: 1; border: 2px solid #dce1e6; border-radius: 8px; padding: 10px; color: #000; }
+    #ai-input { flex-grow: 1; border: 2px solid var(--border-color); border-radius: 8px; padding: 10px; color: var(--text-color); background: var(--panel-bg); }
     #send-ai-btn { border-radius: 20px !important; padding: 0 20px; height: 40px; background-color: #4986cc; color: white; border: none; cursor: pointer; font-weight: 500; }
-    .loading-msg { font-style: italic; color: #888; font-size: 13px; margin-bottom: 5px; display: flex; align-items: center; gap: 5px; }
+    .loading-msg { font-style: italic; color: var(--text-secondary); font-size: 13px; margin-bottom: 5px; display: flex; align-items: center; gap: 5px; }
     @keyframes slideIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
     #ref-banner button:hover { background: #3b6da5 !important; } #ref-banner b { font-weight: bold; }
+    /* Новые точечные классы для управления цветом */
+    .theme-text-main { color: var(--text-color) !important; }
+    .theme-bg-panel { background: var(--panel-bg) !important; }
+    .theme-bg-page { background: var(--bg-color) !important; }
+    .theme-border { border-color: var(--border-color) !important; }
+    .theme-input { background: var(--panel-bg) !important; color: var(--text-color) !important; border-color: var(--border-color) !important; }
+    .theme-commands-list { color: var(--text-secondary) !important; }
+    #searchInput { background: var(--bg-color) !important; color: var(--text-color) !important; border: 1px solid var(--border-color) !important; }
+    .modal-content-styled { text-align: left; font-size: 13px; color: var(--text-color) !important; }
+    .modal-code-block { cursor: pointer; color: var(--accent-color) !important; display: block; background: var(--bg-color) !important; padding: 8px; border-radius: 6px; margin-top: 5px; word-break: break-all; border: 1px solid var(--border-color); }
+    .modal-info-note { background: var(--bubble-bg) !important; border: 1px solid var(--border-color) !important; padding: 10px; border-radius: 8px; color: var(--text-color) !important; }
+    .modal-small-text { color: var(--text-secondary) !important; display: block; margin-top: 5px; }
+    .modal-title-bright { margin: 0 0 15px 0; font-size: 18px; font-weight: 800; color: #222222 !important; text-shadow: 0 0 10px rgba(255, 255, 255, 0.2); letter-spacing: 0.5px; text-align: center; }
+    [data-theme="dark"] .modal-title-bright { color: #ffffff !important; text-shadow: 0 0 10px rgba(255, 255, 255, 0.3) !important; }
   </style>
 </head>
-<body>
-  <div id="pull-to-refresh" style="position:fixed; top:0; left:0; width:100%; height:80px; display:flex; flex-direction:column; align-items:center; justify-content:center; background:#ebedf0; z-index:1;">
+<body class="theme-bg-page">
+  <div id="pull-to-refresh" class="theme-bg-page" style="position:fixed; top:0; left:0; width:100%; height:80px; display:flex; flex-direction:column; align-items:center; justify-content:center; background:#ebedf0; z-index:1;">
     <div id="ptr-loader" class="loader"></div>
     <span id="ptr-text" style="font-size:13px; color:#888;">Потяните для обновления</span>
   </div>
-  <div id="app-container" style="position:relative; background:white; z-index:2; min-height:100vh; transition: transform 0.2s cubic-bezier(0,0,0.2,1); will-change: transform;">
+  <div id="app-container" class="theme-bg-page" style="position:relative; z-index:2; min-height:100vh; transition: transform 0.2s cubic-bezier(0,0,0.2,1); will-change: transform;">
     <div class="header-actions">
+      <button class="action-btn" onclick="toggleLanguage()" style="background:none; border:none; cursor:pointer; padding:0;">
+        <span id="langIcon" style="font-size:16px;">🇷🇺</span>
+      </button>
+      <button id="themeToggle" class="action-btn" onclick="toggleTheme()" style="background:none; border:none; cursor:pointer; padding:0;">
+        <span id="themeIcon" style="font-size:16px;">☀️</span>
+      </button>
       <div class="action-btn" id="reloadIcon" onclick="uiReload()"><b>⟳</b></div>
       <div class="action-btn close-btn" onclick="closeApp()"><b>✕</b></div>
     </div>
@@ -2280,19 +2350,19 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
     <span class="close-x" onclick="togglePanel('debugPanel')">×</span>
     <div class="msg-header">🛠 DEBUG INFO</div>
     <div id="debugContent" class="msg-body">
-      <div>🤖 <b> ВК-Приложение онлайн</b></div>
+      <div>🗄 <b>Приложение онлайн</b></div>
       <div>📦 <b>Версия:</b> ${version}</div>
       <div>🔗 <b>Статус:</b> ${isConnected ? '✅ Соединение активно' : '❌ Не подключено'}</div>
-      <div>🔌 <b>Провайдер:</b> ${isConnected ? `${provider}` : '-'}</div>
+      <div>☁️ <b>Провайдер:</b> ${isConnected ? `${provider}` : '-'}</div>
       <div>📂 <b>Папка:</b> ${isConnected ? `${currentFolder}` : '-'}</div>
       <div>👤 <b>Твой ID:</b> ${userId}</div>
       <div>👑 <b>Админ:</b> ${isAdmin ? 'Да' : 'Нет'}</div>
     </div>
   </div>
 
-  <div id="sharePanel" style="display:none; position:fixed; top: 32%; left: 50%; transform: translate(-50%, -50%); width:90%; max-width:400px; background:#fff; border:2px solid #0077ff; border-radius:12px; z-index:1000; padding:15px; box-shadow:0 10px 25px rgba(0,0,0,0.2); font-family:sans-serif;">
-    <h3 style="margin:0 0 10px 0; font-size:16px; color:#333;">Предпросмотр инвайта</h3>
-    <div id="shareContent" style="font-size:13px; color:#666; margin-bottom:15px; line-height:1.4;">
+  <div id="sharePanel" class="theme-bg-panel theme-border" style="display:none; position:fixed; top: 32%; left: 50%; transform: translate(-50%, -50%); width:90%; max-width:400px; background:#fff; border:2px solid #0077ff; border-radius:12px; z-index:1000; padding:15px; box-shadow:0 10px 25px rgba(0,0,0,0.2); font-family:sans-serif;">
+    <h3 class="modal-title-bright" style="margin:0 0 10px 0; font-size:16px;">Предпросмотр инвайта</h3>
+    <div id="shareContent" class="theme-bg-panel theme-border" style="font-size:13px; color:#666; margin-bottom:15px; line-height:1.4;">
         </div>
     <div style="display:flex; gap:10px;">
         <button onclick="confirmAndShare()" style="flex:1; background:#0077ff; color:#fff; border:none; padding:10px; border-radius:8px; cursor:pointer;">Отправить</button>
@@ -2314,21 +2384,23 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
   </div>
 
   <div id="searchModal" class="modal-overlay" onclick="closeSearch()">
-    <div class="modal search-modal" onclick="event.stopPropagation()" style="height: 90vh; padding: 0;">
-      <div class="search-input-wrapper">
+    <div class="modal search-modal theme-bg-page" onclick="event.stopPropagation()" style="height: 90vh; padding: 0;">
+      
+      <div class="search-input-wrapper theme-bg-panel theme-border">
         <div style="display:flex; align-items:center; gap:10px;">
-          <input type="text" id="searchInput" placeholder="Поиск файлов..." 
+          <input type="text" id="searchInput" class="theme-input" placeholder="Поиск файлов..." 
                  style="margin-bottom:0; flex-grow:1;" oninput="doSearch(this.value)">
-          <span onclick="closeSearch()" style="cursor:pointer; font-size:28px; color:#818c99;">&times;</span>
+          <span onclick="closeSearch()" style="cursor:pointer; font-size:28px; color:var(--text-secondary);">&times;</span>
         </div>
       </div>
+
       <div id="searchList" style="padding-bottom: 20px;">
-        <div style="text-align:center; color:#818c99; margin-top:40px;">Введите название файла для поиска</div>
+        <div style="text-align:center; color:var(--text-secondary); margin-top:40px;">Введите название файла для поиска</div>
       </div>
     </div>
   </div>
   <div id="inviterZone"></div>
-  <div class="upload-container" id="dropZone" style="margin: 10px; padding: 15px; border: 2px dashed #3f8ae0; border-radius: 12px; background: #ebf2fa; text-align: center; transition: all 0.2s;">
+  <div class="upload-container" id="dropZone" style="margin: 10px; padding: 15px; border: 2px dashed #3f8ae0; border-radius: 12px; text-align: center; transition: all 0.2s;">
 
     <div id="ai-chat-container">
       <div id="ai-chat-history"></div>
@@ -2451,6 +2523,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
     const currentProvider = ${JSON.stringify(provider)} || "-";
     const currentFolder = ${JSON.stringify(currentFolder)} || "Root";
     const allAiModels = ${JSON.stringify(AI_MODELS)};
+    let currentLang = localStorage.getItem('appLang') || 'ru';
     let foldersCache = null;
     const UI_CDN = "${cdn}"; // ссылка на мой https://images.leshiyalex.workers.dev
     const aiInput = document.getElementById('ai-input');
@@ -2564,18 +2637,80 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
       });
     }
 
+    function initTheme() {
+      const savedTheme = localStorage.getItem('user-theme');
+      const vkAppearance = new URLSearchParams(window.location.search).get('vk_appearance');
+      
+      // Приоритет: 1. Сохраненная вручную, 2. От ВК, 3. Системная
+      let theme = savedTheme || (vkAppearance && vkAppearance.includes('dark') ? 'dark' : 'light');
+      
+      applyTheme(theme);
+    }
+    
+    function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        const icon = document.getElementById('themeIcon');
+        if (icon) {
+            icon.innerText = theme === 'dark' ? '🌙' : '☀️';
+        }
+        localStorage.setItem('user-theme', theme);
+    }
+    
+    function toggleTheme() {
+        const currentTheme = document.documentElement.getAttribute('data-theme');
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        applyTheme(newTheme);
+    }
+    
+    // Запускаем при загрузке
+    updateLanguageUI();
+    initTheme();
+  
     function renderHeader(data) {
       if (!data) return;
+      window.lastHeaderData = data;
+      // Сначала убедимся, что флаг в HTML соответствует текущему языку
+      const langBtn = document.getElementById('langToggle');
+      if (langBtn) {
+          langBtn.innerText = (currentLang === 'ru' ? '🇷🇺' : '🇺🇸');
+      }
       const isConn = !!data.isConnected;
-      const pName = data.providerName || 'Не настроено';
-      const folder = data.currentFolder || 'Не выбрано';
-      const name = data.userName || "Пользователь";
+      const pName = data.providerName || (currentLang === 'ru' ? 'Не настроено' : 'Not configured');
+      const folder = data.currentFolder || (currentLang === 'ru' ? 'Не выбрано' : 'Not selected');
+      
+      const fullName = data.userName || (currentLang === 'ru' ? "Пользователь" : "User");
+      const firstName = fullName.split(' ')[0];
+  
+      // Словарь текстов
+      const i18n = {
+          ru: {
+              hi: "Привет",
+              desc: "Я твоя личная Хранилка. Просто пришли мне фото или видео, и я закину их на сервер.",
+              status: "Статус",
+              connected: "Подключен",
+              folder: "Папка",
+              notSet: "Не настроено"
+          },
+          en: {
+              hi: "Hi",
+              desc: "I'm your personal Storage. Just send me photos or videos, and I'll upload them to the server.",
+              status: "Status",
+              connected: "Connected to",
+              folder: "Folder",
+              notSet: "Not configured"
+          }
+      };
+      const lang = i18n[currentLang];
+      // Обновляем саму иконку флага, чтобы она не сбрасывалась при рендере
+      const langIcon = document.getElementById('langIcon');
+
+      // Твой HTML хедера (обновляем только тексты)
       document.getElementById('ui-header-block').innerHTML = 
-          '<div><br>👋 <b>Привет, ' + name + '! Я твоя личная Хранилка.</b></div>' +
-          '<div style="margin-top:8px;">📁 Просто пришли мне фото или видео, и я закину их на сервер.</div>' +
-          '<div class="status-group" style="border-left-color: ' + (isConn ? '#4bb34b' : '#eb4242') + '">' +
-          '<div>⚙️ Статус: ' + (isConn ? '✅ <span style="color:#4bb34b; font-weight:bold;">Подключен ' + pName + '</span>' : 'Не настроено') + '</div>' +
-          '<div id="curFolderLabel">📂 Папка: ' + (isConn ? '<b>' + folder + '</b>' : 'Не выбрана') + '</div>' +
+          '<div><br>👋 <b>' + lang.hi + ', ' + firstName + '!</b></div>' +
+          '<div style="margin-top:8px; font-size:13px; color:var(--text-secondary);">' + lang.desc + '</div>' +
+          '<div class="status-group" style="border-left-color: ' + (data.isConnected ? '#4bb34b' : '#eb4242') + '; margin-top:15px;">' +
+              '<div>⚙️ ' + lang.status + ': ' + (data.isConnected ? '✅ <span style="color:#4bb34b; font-weight:bold;">' + lang.connected + ' ' + (data.providerName || '') + '</span>' : lang.notSet) + '</div>' +
+              '<div id="curFolderLabel">📂 ' + lang.folder + ': ' + (data.isConnected ? '<b>' + (data.currentFolder || '') + '</b>' : lang.notSelected) + '</div>' +
           '</div>';
     }
     
@@ -2635,10 +2770,10 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
       const dFold = isConn ? (data.currentFolder || 'Root') : '-';
       const dAdmin = data.isAdmin ? 'Да' : 'Нет';
       container.innerHTML = 
-          '<div>🤖 <b> ВК-Приложение онлайн</b></div>' +
+          '<div>🗄 <b>Приложение онлайн</b></div>' +
           '<div>📦 <b>Версия:</b> ' + "${version}" + '</div>' +
           '<div>🔗 <b>Статус:</b> ' + (isConn ? '✅ Соединение активно' : '❌ Не подключено') + '</div>' +
-          '<div>🔌 <b>Провайдер:</b> ' + (isConn ? (data.providerName || data.provider) : '-') + '</div>' +
+          '<div>☁️ <b>Провайдер:</b> ' + (isConn ? (data.providerName || data.provider) : '-') + '</div>' +
           '<div>📂 <b>Папка:</b> ' + (isConn ? (data.currentFolder || 'Root') : '-') + '</div>' +
           '<div>👤 <b>Твой ID:</b> ' + userId + '</div>' + 
           '<div>👑 <b>Админ:</b> ' + (data.isAdmin ? 'Да' : 'Нет') + '</div>';
@@ -2657,6 +2792,35 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
       refreshData();
     }
     
+    // Функция переключения языка
+    window.toggleLanguage = function() {
+      currentLang = (currentLang === 'ru' ? 'en' : 'ru');
+      localStorage.setItem('appLang', currentLang);
+      
+      // ВАЖНО: проверяем, что здесь именно ЭМОДЗИ, а не буквы
+      const langIcon = document.getElementById('langIcon');
+      if (langIcon) {
+          langIcon.innerHTML = (currentLang === 'ru' ? '🇷🇺' : '🇺🇸');
+      }
+  
+      if (window.lastHeaderData) renderHeader(window.lastHeaderData);
+    };
+  
+    function updateLanguageUI() {
+      const langBtn = document.getElementById('langToggle');
+      if (langBtn) {
+          langBtn.innerText = (currentLang === 'ru' ? '🇷🇺' : '🇺🇸');
+      }
+  
+      // Если данные хедера уже были загружены, перерисовываем его
+      if (window.lastHeaderData) {
+          renderHeader(window.lastHeaderData);
+      } else {
+          // Если данных нет, просто перезагрузим интерфейс (опционально)
+          // uiReload(); 
+      }
+    }
+
     async function refreshData() {
       const icon = document.getElementById('reloadIcon');
       const currentUserId = userId || new URLSearchParams(window.location.search).get('vk_user_id');
@@ -2696,6 +2860,16 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
                       openFolderSelector();
                   }
               }, 500);
+          }
+          // --- НОВЫЙ БЛОК ДЛЯ ОБНОВЛЕНИЯ ПОИСКА ---
+          // Обновляем глобальные переменные (на всякий случай)
+          window.currentProvider = data.provider;
+          window.currentFolder = data.currentFolder;
+
+          const searchInput = document.getElementById('searchInput');
+          if (searchInput && searchInput.value.trim() !== "") {
+              // ПЕРЕДАЕМ АКТУАЛЬНЫЕ ДАННЫЕ В ПОИСК ПРИНУДИТЕЛЬНО
+              doSearch(searchInput.value.trim(), data.provider, data.currentFolder);
           }
       } catch (e) {
           console.error('Ошибка обновления UI:', e);
@@ -2930,6 +3104,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
 
     async function saveWebDAV() {
       const b = document.getElementById('saveBtn');
+      const panel = document.getElementById('wdForm');
       let h = document.getElementById('wdHost').value.trim();
       if (!h.startsWith('http://') && !h.startsWith('https://')) {
         h = 'https://' + h;
@@ -2938,17 +3113,35 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
       const p = document.getElementById('wdPass').value;
       const f = document.getElementById('wdFolder').value;
       if(!h || !u || !p || !f) return alert("Заполните все поля");
-      b.disabled = true; b.innerText = "💾 Сохраняю...";
+      b.disabled = true; b.innerText = "💾 Сохраняю и подключаю...";
       try {
+        console.log("Отправка данных WebDAV на сервер...");
         const res = await fetch('/api/setup-webdav', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({ userId, host: h, user: u, pass: p, folderId: f })
         });
         if(res.ok) {
-          localStorage.setItem('awaiting_auth', 'true');
-          // 🔥 ОБЯЗАТЕЛЬНО перезагрузить страницу!
-          uiReload();
+          // 1. Сразу закрываем панель настройки (чтобы не висела)
+            if (panel) {
+                panel.style.display = 'none'; // Скрываем блок формы
+            }
+          
+          // 2. Обновляем локальные данные, чтобы не ждать ответа сервера
+          window.currentProvider = 'webdav';
+          window.currentFolder = f;
+
+          // 2. Если нужно сразу показать папки (без фокуса)
+          if (typeof openFolderSelector === 'function') {
+              openFolderSelector(); 
+          }
+          // 3. Сбрасываем состояние кнопки для следующего раза
+          const b = document.getElementById('saveBtn');
+          b.disabled = false;
+          b.innerText = "📥 Подключиться";
+
+          // 4. И только потом делаем тихий рефреш данных в фоне
+          refreshData(); 
         } else {
           b.disabled = false;
           b.innerText = "🔌 Подключиться";
@@ -2973,7 +3166,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
         document.getElementById('searchList').innerHTML = '<div style="text-align:center; color:#818c99; margin-top:40px;">Введите название файла для поиска</div>';
     }
 
-    async function doSearch(query) {
+    async function doSearch(query, providerOverride, folderOverride) {
       clearTimeout(searchDebounce);
       var list = document.getElementById('searchList');
       
@@ -2986,6 +3179,10 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
           list.innerHTML = '<div style="text-align:center; color:#818c99; margin-top:20px;">🔍 Ищу...</div>';
           
           try {
+              // Определяем, какие данные использовать: 
+              // Если переданы из refreshData — берем их, если нет — берем глобальные
+              var activeProvider = providerOverride || window.currentProvider;
+              var activeFolder = folderOverride || window.currentFolder;
               // Используем window.userId или userId (смотря как у тебя в коде объявлено)
               var currentUid = window.userId || userId;
               var response = await fetch('/api/search?q=' + encodeURIComponent(query), {
@@ -3006,32 +3203,31 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
                 var currentUid = window.userId || userId;
                 var fileFolder = file.remotePath.split('/')[0];
                 // ВАЖНО: Мы сравниваем провайдера и папку напрямую из объекта файла
-                var isSameProvider = (file.provider === currentProvider);
-                var isSameFolder = (fileFolder === currentFolder);
+                var isSameProvider = (file.provider === activeProvider);
+                var isSameFolder = (fileFolder === activeFolder);
             
                 var statusText, statusColor, borderStyle, canDownload;
-                var badgeStyle = 'font-size: 10px; padding: 1px 5px; border-radius: 4px; border: 1px solid ';
-
+                // 1. Сначала подправим базовый стиль (В светлой он будет черным/темным, в темной — белым/светлым.)
+                var badgeStyle = 'font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 800; color: var(--text-color) !important; border: 1px solid ';
                 if (isSameProvider && isSameFolder) {
-                  // Тот самый диск и та же папка
                   statusText = '● Доступен';
                   statusColor = '#4bb34b';
-                  var providerBadge = badgeStyle + statusColor + '; background: ' + statusColor + '15';
-                  var folderBadge = badgeStyle + statusColor + '; background: ' + statusColor + '15';
+                  // Добавляем прозрачность фону, чтобы текст на нем читался в обеих темах
+                  var providerBadge = badgeStyle + statusColor + '; background: ' + statusColor + '33;';
+                  var folderBadge = badgeStyle + statusColor + '; background: ' + statusColor + '33;';
                   canDownload = true;
                 } else if (isSameProvider && !isSameFolder) {
-                  // Диск тот же, но папка другая (твои новые файлы попадут сюда, если папка сменилась)
                   statusText = '● Не доступен (Другая папка)';
-                  statusColor = '#ffc107'; // ЖЕЛТЫЙ
-                  var providerBadge = badgeStyle + statusColor + '; background: ' + statusColor + '15';
-                  var folderBadge = badgeStyle + '#d1d8df' + '; background: ' + '#f0f2f5';
+                  statusColor = '#ffc107'; 
+                  var providerBadge = badgeStyle + '#4bb34b; background: #4bb34b33;';
+                  var folderBadge = badgeStyle + statusColor + '; background: ' + statusColor + '33;';
                   canDownload = true;
                 } else {
-                  // Провайдер не совпадает
                   statusText = '● Не доступен (Другой диск)';
                   statusColor = '#99a2ad';
-                  var providerBadge = badgeStyle + '#d1d8df' + '; background: ' + '#f0f2f5';
-                  var folderBadge = badgeStyle + '#d1d8df' + '; background: ' + '#f0f2f5';
+                  // Для нейтральных бейджей используем вторичный цвет текста
+                  var providerBadge = badgeStyle + 'var(--border-color); background: var(--bubble-bg); color: var(--text-secondary) !important;';
+                  var folderBadge = badgeStyle + 'var(--border-color); background: var(--bubble-bg); color: var(--text-secondary) !important;';
                   canDownload = false;
                 }
  
@@ -3063,7 +3259,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
                                 '</div>' +
                             '</div>' +
                             
-                            '<a href="' + downloadUrl + '" target="_blank" class="download-link" style="background: #f0f7ff; border-radius: 6px; margin-left: 10px;">' + '⬇️ Скачать' + '</a>' +
+                            '<a href="' + downloadUrl + '" target="_blank" class="download-link" style="border-radius: 6px; margin-left: 10px;">' + '⬇️ Скачать' + '</a>' +
                         '</div>';
               }
               list.innerHTML = html;
@@ -3606,28 +3802,30 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
           // Используем обычные двойные кавычки внутри, чтобы не конфликтовать с твоими бэктиксами
           const inviteUrl = 'https://vk.com/app' + appId + '#ref=' + data.inviteCode;
           content.innerHTML =
-            "<div style='text-align:left; font-size:13px; color:#333;'>" +
-              "<span>👋 <b>Что происходит?</b> Вы формируете приглашение на доступ в свою Хранилку. Ваш друг сможет загружать файлы в выбранную Вами в данный момент папку.</span><br><br>" +
-              
-              "<b>Куда даем доступ:</b><br>" +
-              "☁️ <b>Провайдер:</b> " + pDisplay + "<br>" +
-              "📁 <b>Папка:</b> " + fName + "<br>" +
-              "🎟️ <b>Токен:</b> " + data.inviteCode + "<br><br>" +
-              "🔗 <b>Ваша ссылка (клик для копирования):</b><br>" +
-              "<code onclick='copyToClipboard(this)' style='cursor:pointer; color:#0077ff; display:block; background:#f0f7ff; padding:5px; border-radius:4px; margin-top:5px; word-break:break-all;'>" + inviteUrl + "</code>" +
-              "<small style='color: #888;'>Эта ссылка будет на кнопке <b>Открыть</b> в сообщении.</small><br><br>" +
+          "<div class='modal-content-styled'>" +
+            "<span>👋 <b>Что происходит?</b> Вы формируете приглашение на доступ в свою Хранилку. Ваш друг сможет загружать файлы в выбранную Вами в данный момент папку.</span><br><br>" +
+            
+            "<b>Куда даем доступ:</b><br>" +
+            "☁️ <b>Провайдер:</b> " + pDisplay + "<br>" +
+            "📁 <b>Папка:</b> " + fName + "<br>" +
+            "🎟️ <b>Токен:</b> " + data.inviteCode + "<br><br>" +
+            
+            "🔗 <b>Ваша ссылка (клик для копирования):</b><br>" +
+            "<code onclick='copyToClipboard(this)' class='modal-code-block'>" + inviteUrl + "</code>" +
+            "<small class='modal-small-text'>Эта ссылка будет на кнопке <b>Открыть</b> в сообщении.</small><br><br>" +
 
-              "<div style='background: #fff9e6; border: 1px solid #ffe58f; padding: 10px; border-radius: 8px;'>" +
-                  "📝 <b>Текст сообщения (клик для копирования):</b><br>" +
-                  "<span onclick='copyToClipboard(this)' style='cursor:pointer; color:#555; display:block; margin-top:5px; font-style:italic;'>" +
-                    "Я предоставил тебе доступ к своей Хранилке. Провайдер: " + pName + ". Папка: " + fName + ". Жми Открыть и подключайся!" + 
-                  "</span>" +
-              "</div><br>" +
-              "<b>Что дальше?</b><br>" +
-              "1️⃣ Нажмите кнопку <b>Отправить</b> ниже.<br>" +
-              "2️⃣ Выберите друга в открывшемся списке ВК.<br>" +
-              "3️⃣ Если вы на ПК — вставьте скопированный текст в поле сообщения, а на мобильном телефоне он вставится автоматически." +
-            "</div>";
+            "<div class='modal-info-note'>" +
+                "📝 <b>Текст сообщения (клик для копирования):</b><br>" +
+                "<span onclick='copyToClipboard(this)' style='cursor:pointer; display:block; margin-top:5px; font-style:italic;'>" +
+                  "Я предоставил тебе доступ к своей Хранилке. Провайдер: " + pName + ". Папка: " + fName + ". Жми Открыть и подключайся!" + 
+                "</span>" +
+            "</div><br>" +
+            
+            "<b>Что дальше?</b><br>" +
+            "1️⃣ Нажмите кнопку <b>Отправить</b> ниже.<br>" +
+            "2️⃣ Выберите друга в открывшемся списке ВК.<br>" +
+            "3️⃣ Если вы на ПК — вставьте скопированный текст в поле сообщения, а на мобильном телефоне он вставится автоматически." +
+          "</div>";
             // Показываем твою панель
           document.getElementById("sharePanel").style.display = "block";
           const sharePanel = document.getElementById("sharePanel");
@@ -3795,15 +3993,15 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
   }
 
     async function promptCreateFolder() {
-      const n = prompt("Название папки:");
-      if (!n || !n.trim()) return;
+      const folderName = prompt("Название папки:");
+      if (!folderName || !folderName.trim()) return;
       
       try {
         // 1. Создаем папку и ЖДЕМ ответ с ID
         const res = await fetch('/api/create-folder', { 
           method: 'POST', 
           headers: { 'Content-Type': 'application/json' }, 
-          body: JSON.stringify({ userId, name: n.trim() }) 
+          body: JSON.stringify({ userId, name: folderName.trim() }) 
         });
         
         const data = await res.json();
@@ -3827,8 +4025,13 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
           headers: { 'Content-Type': 'application/json' }, 
           body: JSON.stringify({ userId, folderId: newFolderId }) 
         });
-    
-        uiReload();
+        // Прячем модалку вручную перед релоадом, чтобы не висела
+        const modal = document.getElementById('folderModal');
+        if (modal) modal.style.display = 'none';
+        // Обновляем статус (чтобы в шапке изменилось имя папки)
+        if (typeof refreshData === 'function') {
+          await refreshData();
+        }
       } catch (e) { 
         console.error("Ошибка при создании:", e);
         uiReload();
@@ -3919,8 +4122,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser) {
       panel.id = 'inviter-panel';
       
       // Добавили transition для плавной анимации возврата/улета
-      panel.style.cssText = "position:relative; margin:10px 0; padding:15px; background:#f2faf2; border-radius:12px; border:2px dashed #4caf50; text-align:center; display:flex; flex-direction:column; align-items:center; gap:12px; transition: transform 0.2s ease-out, opacity 0.2s ease-out; touch-action: pan-y; overflow: hidden;";
-      
+      panel.style.cssText = "position:relative; margin:10px 0; padding:15px; background: var(--bubble-bg); border-radius:12px; border:2px dashed #4caf50; text-align:center; display:flex; flex-direction:column; align-items:center; gap:12px; transition: transform 0.2s ease-out, opacity 0.2s ease-out; touch-action: pan-y; overflow: hidden; color: var(--text-color);";
       const photoUrl = friendPhoto || 'https://vk.com/images/camera_50.png';
       const displayName = friendName || ('ID ' + friendId);
     
@@ -4831,7 +5033,7 @@ async function renderSearchPage(searchKey, offset, env, userId) {
   }
 
   list += `\nАктивное подключение:`;
-  list += `\n<b>🔌 Провайдер: ${userData?.provider}</b> 📁 Папка: ${userData?.folderId}`;
+  list += `\n<b>☁️ Провайдер: ${userData?.provider}</b> 📁 Папка: ${userData?.folderId}`;
   list += `\n<b>🟢 доступно</b> | <b>🔴 не доступно</b> для выгрузки`;
   //list += `\n<b>🔴 не доступно</b>, смените диск`;
 
@@ -6531,8 +6733,13 @@ async function listWebDavFolders(user) {
 }
 
 async function createWebDavFolder(folderName, userData) {
-  const url = `${userData.host}/${encodeURIComponent(folderName)}/`; // ← Обязательно с /
-  const auth = btoa(`${userData.user}:${userData.pass}`);
+  let host = userData.webdav_host || "";
+  
+  // Убеждаемся, что хост не заканчивается на слэш, чтобы не было двойного //
+  if (host.endsWith('/')) host = host.slice(0, -1);
+  
+  const url = `${host}/${encodeURIComponent(folderName)}/`; // ← Обязательно с /
+  const auth = btoa(`${userData.webdav_user}:${userData.webdav_pass}`);
 
   const res = await fetch(url, {
     method: "MKCOL", // ← Ключевое изменение!
