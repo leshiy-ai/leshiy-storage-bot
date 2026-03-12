@@ -14,7 +14,7 @@
 Диагностика: Команда /debug для проверки статуса подключения к хранилищу в реальном времени.
 */
 // Глобальные константы
-const version = "v3.0.2 от 01.02.2026"; // актуальная версия
+const version = "v3.0.3 от 02.02.2026"; // актуальная версия
 
 // ----------------------------------------------------
 // ГЛАВНЫЙ ОБРАБОТЧИК (WEBHOOK) Fetch
@@ -24,7 +24,10 @@ async function worker_code_fetch(request, env, ctx) {
     const domain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net"
     const hostname = domain || url.hostname;
     const state = url.searchParams.get("state"); // Это наш userId
-    const safeParse = (data) => {
+    let ftp = require("basic-ftp");
+    let SFTPClient = require('ssh2-sftp-client');
+    let { TypedValues } = require('ydb-sdk');
+    let safeParse = (data) => {
     if (typeof data === 'object' && data !== null) return data;
       try { return JSON.parse(data || '{}');
       } catch (e) { return {}; }};  
@@ -162,8 +165,10 @@ async function worker_code_fetch(request, env, ctx) {
         else if (user.provider === 'google') providerName = "Google Drive";
         else if (user.provider === 'dropbox') providerName = "Dropbox";
         else if (user.provider === 'webdav') {
-            providerName = (user.webdav_host && user.webdav_host.includes('mail.ru')) ? "Mail.ru" : "WebDAV";
+          providerName = (user.webdav_host && user.webdav_host.includes('mail.ru')) ? "Облако Mail.ru" : "WebDAV Сервер"; 
         }
+        else if (user.provider === 'ftp') providerName = "FTP Сервер";
+        else if (user.provider === 'sftp') providerName = "SFTP Сервер";
     
         return new Response(JSON.stringify({
             isAdmin: isAdmin,
@@ -218,7 +223,7 @@ async function worker_code_fetch(request, env, ctx) {
         try {
             // Поиск в D1. Ищем по вхождению строки (LIKE) и фильтруем по владельцу (userId)
             const { results } = await env.FILES_DB.prepare(
-                "SELECT fileName, remotePath, timestamp, provider FROM files WHERE userId = ? AND fileName LIKE ? ORDER BY timestamp DESC LIMIT 50"
+                "SELECT fileName, folderId, timestamp, provider FROM files WHERE userId = ? AND fileName LIKE ? ORDER BY timestamp DESC LIMIT 50"
             ).bind(String(userId), `%${query}%`).all();
     
             return new Response(JSON.stringify({ results }), {
@@ -822,11 +827,10 @@ function getStartKeyboardVK(userId, hostname, env, inviteData = null) {
 * @param {Object} env - Окружение.
 * @param {string} userId - ID пользователя.
 */
-
 async function renderSearchPageVK(searchKey, offset, env, userId) {
   const dataRaw = await env.USER_DB.get(searchKey);
   if (!dataRaw) return { text: "? Поиск устарел или не найден.", kb: null };
-  const searchData = JSON.parse(dataRaw);
+  const searchData = (typeof dataRaw === 'string') ? JSON.parse(dataRaw) : dataRaw;
   const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
   const total = searchData.ids.length;
   const pageIds = searchData.ids.slice(offset, offset + 5);
@@ -834,9 +838,9 @@ async function renderSearchPageVK(searchKey, offset, env, userId) {
 `;
   const userFolder = userData?.folderId || "/";
   for (const id of pageIds) {
-    const f = await env.FILES_DB.prepare("SELECT fileName, provider, remotePath FROM files WHERE id = ?").bind(id).first();
-    const isProviderOk = userData && f?.provider === userData.provider;
-    const isPathOk = f?.remotePath ? f.remotePath === userFolder : false;
+    const f = await env.FILES_DB.prepare("SELECT fileName, provider, folderId FROM files WHERE id = ?").bind(id).first();
+    const isProviderOk = f?.provider?.toLowerCase() === userData?.provider?.toLowerCase();
+    const isPathOk = f?.folderId?.replace(/^\//, '') === userData?.folderId?.replace(/^\//, '');
     const status = (isProviderOk && isPathOk) ? '??' : '??';
     list += `${status} <code>${f?.fileName || 'Файл'}</code>
 `;
@@ -877,10 +881,40 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
   const text = msg.text || "";
   const userKey = `user:${userId}`;
 
+  // СНАЧАЛА ПОЛУЧАЕМ ДАННЫЕ
+  let userData = await env.USER_DB.get(userKey, { type: "json" });
+
+  // -----------------------------------------------------------------------------------
+  // ? НОВЫЙ БЛОК: ФОРМИРОВАНИЕ ИНФОРМАЦИИ О ПОЛЬЗОВАТЕЛЕ
+  // -----------------------------------------------------------------------------------
+  let adminLog = '';
+  const request_user = msg.from;
+  if (request_user) {
+    const newFullName = `${request_user.first_name || ''} ${request_user.last_name || ''}`.trim();
+    const newUsername = request_user.username || '';
+  
+    // Если юзера нет или данные изменились — обновляем только основной ключ user:ID
+    if (!userData || userData.name !== newFullName || userData.username !== newUsername) {
+      userData = { 
+        ...(userData || {}), // Сохраняем старые данные (токены и т.д.)
+        name: newFullName, 
+        username: newUsername 
+      };
+      
+      // Сохраняем всё в один ключ
+      ctx.waitUntil(env.USER_DB.put(userKey, JSON.stringify(userData)));
+      
+      // Опционально: лог админу, что кто-то сменил имя
+      if (userData?.name && userData.name !== newFullName) {
+         await logDebug(`Сообщение админу:\n?? <b>${newFullName}</b> обновил профиль`, env);
+      }
+    }
+  }
+  // -----------------------------------------------------------------------------------
+
   // Данные админа и базовая загрузка данных пользователя
   const adminCfg = await env.USER_DB.get("admin:config", { type: "json" });
   const isAdmin = adminCfg?.admins?.includes(String(userId));
-  let userData = await env.USER_DB.get(userKey, { type: "json" });
 
   // --- 1. МОСТ ДЛЯ РЕФЕРАЛА (Приоритет) ---
   if (userData && userData.shared_from) {
@@ -904,6 +938,13 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
   if (text.startsWith("/start")) {
     const args = text.split(" ")[1];
     let inviteData = null;
+    
+    // Определяем имя для приветствия (уже из синхронизированного userData или из msg)
+    const fullName = userData?.name || msg.from.first_name || "Пользователь";
+    const welcomeName = fullName.split(" ")[0]; // Берем только первое слово
+    if (!welcomeName || welcomeName.length === 0) {
+      welcomeName = "друг"; 
+    }
 
     // Проверка инвайта по ссылке ?start=ref_XXX
     if (args && args.startsWith("ref_")) {
@@ -915,10 +956,13 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
         if (ownerData) {
           // Создаем связь в базе
           userData = { 
+            name: welcomeName, // Сохраняем имя при регистрации по рефу
             provider: ownerData.provider, 
             shared_from: String(inviteData.inviterId), 
             connected_at: Date.now(),
-            folderId: ownerData.folderId, // <--- ПАПКА ТЕПЕРЬ ТУТ
+            folderId: ownerData.folderId, 
+            access_token: ownerData.access_token,
+            refresh_token: ownerData.refresh_token
           };
           await env.USER_DB.put(userKey, JSON.stringify(userData));          
           // Добавляем инфо о папке в сообщение, чтобы сразу видеть результат
@@ -932,7 +976,9 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
 
     // Уведомление админу о новом юзере (только если это первый заход)
     if (!userData && !isAdmin) {
+      const userTag = msg.from.username ? ` (@${msg.from.username})` : "";
       const report = `?? Новый пользователь: ${msg.from.first_name || "?"}\n` +
+                     `L Имя: <b>${welcomeName}</b>${userTag}\n` +
                      `?? ID: <code>${userId}</code>\n` +
                      `?? Статус: Ожидает подключения`;
       await logDebug(report, env);
@@ -946,10 +992,12 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
       statusText = `? <b>${userData.provider}</b> подключен${folderInfo}${sharedInfo}`;
     }
 
-    let welcome = `?? <b>Привет! Я твоя личная Хранилка.</b>\n\n` +
+    let welcome = `?? <b>Привет, ${welcomeName}! Я твоя личная Хранилка.</b>\n\n` +
                   `?? Просто пришли мне фото или видео, и я закину их на сервер.\n\n` +
                   `?? Статус: ${statusText}\n\n` +
                   `?? <b>Команды:</b>\n` +
+                  `${isAdmin ? "/admin - Меню админа\n" : ""}` +
+                  `/about — О приложении\n` +
                   `/folder — Выбрать папку для загрузки\n` +
                   `/share — Создать ссылку для друга\n` +
                   `/search — Поиск файлов по хранилке\n` +
@@ -1021,6 +1069,24 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     return await sendMessage(chatId, debugMsg, null, env);
   }
 
+  // Обработка команды /about
+  if (text === '/about') {
+    const aboutText = `<b>Приложение «Хранилка» by Leshiy</b>
+
+  Одновременно работает как <a href='https://t.me/leshiy_storage_bot'>Telegram-бот</a>, <a href='https://vk.com/write-235249123'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010'>vkMiniApp-приложение</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.
+
+  ? <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru, WebDAV, FTP, SFTP. Можно делиться доступом с близкими!
+  ?? <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.
+
+  © Автор: <b>Огорельцев Александр Валерьевич</b>`;
+
+    await sendMessage(chatId, aboutText, { 
+      parse_mode: 'HTML',
+      disable_web_page_preview: true // Чтобы не вылезало три превью ссылок снизу
+    }, env);
+    return;
+  }
+
   // --- КОМАНДА /DISCONNECT ---
   if (text === "/disconnect") {
     const isShared = !!userData.shared_from;
@@ -1045,22 +1111,32 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
         folders = await listDropboxFolders(userData.access_token);
       } else if (userData.provider === "yandex") {
         folders = await listYandexFolders(userData.access_token);
+      } else if (userData.provider === "webdav" || userData.provider === "mailru-webdav") {
+        // Вызываем получение списка через WebDAV
+        folders = await listWebDavFolders(userData); 
       }
     } catch (e) {
       return await sendMessage(chatId, `? Ошибка списка папок: ${e.message}`, null, env);
     }
 
-    const buttons = folders.map(f => [
-      { text: `?? ${f.name}`, callback_data: `set_folder:${userId}:${userData.provider === 'google' ? f.id : f.name}` }
-    ]);
-    
-    if (userData.provider === "mailru-webdav") {
-      buttons.push([{ text: "?? Указать папку вручную", callback_data: `manual_folder:${userId}` }]);
-    }
-    
-    buttons.unshift([{ text: "? Создать 'Storage'", callback_data: `create_folder:${userId}:Storage` }]);
+    // Защита: если folders пришел undefined или не массив — превращаем в []
+    const safeFolders = Array.isArray(folders) ? folders : [];
 
-    const msgText = `?? <b>${userData.provider} Drive</b>\nВыбери папку:`;
+    const buttons = safeFolders.map(f => {
+      // Еще одна защита: проверяем, что объект f существует и в нем есть name
+      if (!f || !f.name) return null;
+      return [{ 
+        text: `?? ${f.name}`, 
+        callback_data: `set_folder:${userId}:${userData.provider === 'google' ? (f.id || f.name) : f.name}` 
+      }];
+    }).filter(Boolean); // Убираем пустые кнопки
+    
+    // Кнопка для ручного ввода (теперь одна для всех провайдеров)
+    buttons.unshift([{ text: "? Создать папку", callback_data: `manual_folder:${userId}:prompt` }]);
+
+    const msgText = `?? <b>${userData.provider.toUpperCase()} Drive</b>\n` +
+                    `Текущая папка: <code>${userData.folderId || 'Root'}</code>\n\n` +
+                    `Выбери из списка или укажи название:`;
     return await sendMessage(chatId, msgText, { inline_keyboard: buttons }, env);
   }
 
@@ -1123,8 +1199,11 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
   // - КОМАНДА /AI_SEARCH - 
   if (text.startsWith("/ai_search") && isAdmin) {
     const query = text.replace(/^\/ai_search\s*/i, '').trim();
-    if (!query) return await sendMessage(chatId, "?? Что ищем с помощью ИИ?", null, env);
-  
+    if (!query) {
+      // Ставим стейт ожидания поиска на 5 минут
+      await env.USER_DB.put(`state:${userId}`, "waiting_for_search", { expirationTtl: 300 });
+      return await sendMessage(chatId, "?? Что ищем с помощью ИИ?", null, env);
+    }
     await sendMessage(chatId, "? <b>Выполняю интеллектуальный поиск...</b>", null, env);
     const searchResult = await searchAIFilesByQuery(userId, isAdmin, query, env);
   
@@ -1152,19 +1231,21 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
   // --- КОМАНДА /ADMIN ---
   if (text === "/admin" && isAdmin) {
     const list = await env.USER_DB.list({ prefix: "user:" });
-    const authIds = list.keys.map(k => k.name.split(":")[1]);
-    const allowedIds = await env.USER_DB.get("admin:allowed_ids", { type: "json" }) || [];
-    
-    const allUniqueIds = [...new Set([...authIds, ...allowedIds])];
+    const userCount = list.keys.length;
   
     const adminMsg = `?? <b>Панель администратора</b>\n\n` +
       `?? Админ ID: <code>${userId}</code>\n\n` +
-      `? <b>Авторизованы (диск подключен):</b>\n` +
-      (authIds.length > 0 ? authIds.map(id => `• <code>${id}</code>`).join("\n") : "—") +
-  
-      `\n\n?? Версия: ${version}`;
+      `?? Авторизовано: <b>${userCount}</b> пользователей\n\n` +
+      `?? Версия: ${version}\n\n` +
+      `?? <b>Команды админа:</b>\n` +
+      `/add — Добавить юзера с облаком\n` +
+      `/clean_db — Чистка запросов поиска\n` +
+      `/invites — Список инвайтов\n` +
+      `/ai_settings — Настройки ИИ\n` +
+      `/ai_search — Интеллектуальный поиск\n`;
     const adminKeyboard = {
       inline_keyboard: [
+        [{ text: "?? Управление пользователями", callback_data: "admin_user_menu" }],
         [{ text: "?? Настройки ИИ", callback_data: "ai_menu_main" }],
         [{ text: "?? Выход из режима админа", callback_data: "admin_exit" }]
       ]
@@ -1207,28 +1288,43 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
             const code = keyName.split(":")[1] || "???";
             
             const rawData = await env.USER_DB.get(keyName);
-            let inviteInfo = { provider: "unknown", inviterId: "unknown", timestamp: 0 };
-            
+            // Инициализируем со всеми полями, которые хотим видеть
+            let inviteInfo = { 
+                provider: "unknown", 
+                inviterId: "unknown", 
+                folderId: "unknown", // Добавили дефолт
+                timestamp: 0 
+            };
+                        
             if (rawData) {
-                try { inviteInfo = JSON.parse(rawData); } catch(e) {}
+                // Твой get уже вернул объект, если это был JSON
+                // Просто сливаем данные в наш шаблон
+                if (typeof rawData === 'object') {
+                    inviteInfo = { ...inviteInfo, ...rawData };
+                } else if (typeof rawData === 'string') {
+                    try { inviteInfo = { ...inviteInfo, ...JSON.parse(rawData) }; } catch(e) {}
+                }
             }
+            // Достаем имя владельца инвайта из базы пользователей
+            const ownerData = await env.USER_DB.get(`user:${inviteInfo.inviterId}`, { type: "json" });
+            const ownerName = ownerData?.name || "Аноним";
 
-            msg += `${i + 1}. Код: <code>${code}</code>\n`;
+            msg += `??? Токен №${i + 1}: <code>${code}</code>\n`;
+            msg += `?? От кого (ID): <code>${inviteInfo.inviterId}</code>\n`;
+            msg += `?? ФИО: <code>${ownerName}</code>\n`;
             msg += `?? Провайдер: <b>${inviteInfo.provider}</b>\n`;
             msg += `?? Папка: <b>${inviteInfo.folderId}</b>\n`;
-            msg += `?? От кого (ID): <code>${inviteInfo.inviterId}</code>\n`;
-            
             if (inviteInfo.timestamp) {
                 const date = new Date(inviteInfo.timestamp).toLocaleString('ru-RU', { timeZone: 'Asia/Yekaterinburg' });
-                msg += `?? ${date}\n`;
+                msg += `?? Создан: ${date}\n`;
             }
             msg += `--------------------\n`;
 
             // Кнопки удаления делаем в 2 колонки для компактности
             if (i % 2 === 0) {
-                inline_keyboard.push([{ text: `? ${code}`, callback_data: `del_inv:${code}` }]);
+                inline_keyboard.push([{ text: `? Удалить №${i + 1}. ${code}`, callback_data: `del_inv:${code}` }]);
             } else {
-                inline_keyboard[inline_keyboard.length - 1].push({ text: `? ${code}`, callback_data: `del_inv:${code}` });
+                inline_keyboard[inline_keyboard.length - 1].push({ text: `? Удалить №${i + 1}. ${code}`, callback_data: `del_inv:${code}` });
             }
         }
 
@@ -1247,29 +1343,70 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     return new Response("OK");
   }
 
+  if (text === "/clean_db" && isAdmin) {
+    // Ищем все ключи, которые содержат старые суффиксы поиска
+    const list = await env.USER_DB.list();
+    let deletedCount = 0;
+
+    for (const key of list.keys) {
+      const kn = key.name;
+      // Проверяем на префикс поисковых запросов "s:"
+      if (kn.startsWith("s:")) {
+        await env.USER_DB.delete(kn);
+        deletedCount++;
+      }
+    }
+
+    return await sendMessage(chatId, `?? <b>База очищена!</b>\nУдалено лишних записей: ${deletedCount}`, null, env);
+  }
+
   if (text.startsWith("/add") && isAdmin) {
     const targetId = text.split(" ")[1];
-    if (!targetId) return await sendMessage(chatId, "?? Формат: /add [ID]", null, env);
+    if (!targetId) return await sendMessage(chatId, "?? Создание пользователя с текущим настроенным провайдером.\n\nФормат: /add [ID]", null, env);
 
     const myData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
     if (!myData) return await sendMessage(chatId, "? Сначала авторизуй свой диск!", null, env);
 
     let folders = [];
     try {
-      if (myData.provider === "google") {
-        folders = await listGoogleFolders(myData.access_token);
-      } else {
-        folders = await listYandexFolders(myData.access_token);
+      // Учитываем всех провайдеров для получения списка папок
+      switch (myData.provider) {
+        case "google":
+          folders = await listGoogleFolders(myData.access_token);
+          break;
+        case "yandex":
+          folders = await listYandexFolders(myData.access_token);
+          break;
+        case "dropbox":
+          folders = await listDropboxFolders(myData.access_token);
+          break;
+        case "webdav":
+          folders = await listWebDavFolders(myData);
+          break;
+        case "mailru":
+          folders = await listMailRuFolders(myData);
+          break;
+        case "ftp":
+        case "sftp":
+          // Для этих ребят обычно берем данные из myData (host, port, и т.д.)
+          folders = await listRemoteFolders(myData); 
+          break;
+        default:
+          console.log("Unknown provider:", myData.provider);
       }
     } catch (e) {
-      console.log("Folder list error", e);
+      console.log(`Folder list error for ${myData.provider}:`, e);
     }
 
-    // Инициализируем запись пользователя (копируем твой провайдер и токен)
+    // Инициализируем запись пользователя
+    // Копируем ВЕСЬ пакет авторизации, чтобы работал авто-рефреш
     await env.USER_DB.put(`user:${targetId}`, JSON.stringify({
       provider: myData.provider,
       access_token: myData.access_token,
-      ownerId: userId
+      refresh_token: myData.refresh_token, // ДОБАВИЛИ: теперь токен обновится сам
+      expires_at: myData.expires_at,       // Копируем время истечения для логики рефреша
+      ownerId: userId,                     // Метка, что диск принадлежит админу
+      shared: true                         // Флаг, что это общий доступ
     }));
 
     // Собираем кнопки
@@ -1345,7 +1482,8 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
 
       // ?? ЕДИНСТВЕННОЕ СКАЧИВАНИЕ ФАЙЛА
       const arrayBuffer = await getFileStream(fileObj.file_id, env);
-
+      const fileBuffer = Buffer.from(arrayBuffer);
+      
       // Загрузка в облако
       let success = false;
       if (userData.provider === "google") {
@@ -1356,11 +1494,16 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
         success = await uploadToDropboxFromArrayBuffer(arrayBuffer, fileName, userData.access_token, userData.folderId || "Storage");
       } else if (userData.provider === "webdav") {
         success = await uploadWebDAVFromArrayBuffer(arrayBuffer, fileName, userData, env);
+      } else if (userData.provider === "ftp" || userData.provider === "sftp") {
+        // НАШ НОВЫЙ БЛОК
+        const uploadResult = await uploadToRemoteServer(userData, fileBuffer, fileName);
+        success = uploadResult.success;
       }
+      
       if (success) {
         // ? Сохраняем метаданные
         await env.FILES_DB.prepare(
-          "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
+          "INSERT INTO files (userId, fileName, fileId, fileType, provider, folderId, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
         ).bind(
           String(userId), fileName, fileObj.file_id, fType, userData.provider,
           userData.folderId || "Root", Date.now()
@@ -1377,8 +1520,12 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
                   description = await modelConfig.FUNCTION(modelConfig, arrayBuffer, env);
                 } else if (fType === "video") {
                   const mimeType = "video/mp4";
-                  //const modelConfig = await loadActiveConfig('VIDEO_TO_TEXT', env);
-                  const modelConfig = await loadActiveConfig('VIDEO_TO_ANALYSIS', env);
+                  if (arrayBuffer.byteLength > 25 * 1024 * 1024) {
+                    console.log("Пропуск AI: файл слишком велик для Whisper");
+                    return; // Просто выходим, не ломая воркер
+                  }
+                  const modelConfig = await loadActiveConfig('VIDEO_TO_TEXT', env);
+                  //const modelConfig = await loadActiveConfig('VIDEO_TO_ANALYSIS', env);
                   description = await modelConfig.FUNCTION(modelConfig, arrayBuffer, env, mimeType);
                 } else if (fType === "audio" || fType === "voice") {
                   const modelConfig = await loadActiveConfig('AUDIO_TO_TEXT', env);
@@ -1389,10 +1536,16 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
                   const modelConfig = await loadActiveConfig('DOCUMENT_TO_TEXT', env);
                   description = await modelConfig.FUNCTION(modelConfig, arrayBuffer, env, mimeType);
                 }
-                await env.FILES_DB.prepare(
-                  "UPDATE files SET ai_description = ? WHERE userId = ? AND fileName = ?"
-                ).bind(description, String(userId), fileName).run();
+                if (description) {
+                  // ОБНОВЛЯЕМ ПО fileId (он уникален в Telegram), а не по имени!
+                  await env.FILES_DB.prepare(
+                    "UPDATE files SET ai_description = ? WHERE fileId = ?"
+                  ).bind(description, fileObj.file_id).run();
+                  
+                  console.log(`[AI-DESC] Описание для ${fileName} успешно обновлено.`);
+                }
               } catch (e) {
+                console.error(`[AI-ERROR] ${e.message}`);
                 await logDebug(`?? Ошибка генерации описания: ${e.message}`, env);
               }
             })()
@@ -1411,52 +1564,53 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     }
   }
 
-  // 1. ПРИОРИТЕТ: Обработка состояний (WebDAV и папки)
+  // 1. ПРИОРИТЕТ: Обработка состояний (Ввод данных сервера)
   const userState = await env.USER_DB.get(`state:${userId}`);
-  // 1. ПРИОРИТЕТ: Обработка состояний (Ввод данных)
-  if (userState === "wait_webdav_url") {
+  if (userState && (userState === "wait_webdav_url" || userState.startsWith("wait_url:"))) {
     try {
-      // Если userData еще не существует (после disconnect), создаем объект
       if (!userData) {
         userData = { id: userId, username: msg.from.username || "User" };
       }
-
+      const selectedProto = userState.includes(':') ? userState.split(":")[1] : "webdav";
       let rawText = text.trim();
-      
-      // Отсекаем протокол
-      const protocolMatch = rawText.match(/^(https?:\/\/)/);
-      if (!protocolMatch) throw new Error("Ссылка должна начинаться с https://");
-      const protocol = protocolMatch[1];
-      let linkWithoutProtocol = rawText.replace(protocol, "");
-
-      // Ищем ПОСЛЕДНЮЮ собаку (отделяет почту:пароль от сервера)
-      const lastAtIndex = linkWithoutProtocol.lastIndexOf("@");
-      if (lastAtIndex === -1) throw new Error("Неверный формат. Используй логин:пароль@сервер");
-
-      const authPart = linkWithoutProtocol.substring(0, lastAtIndex); 
-      const hostPart = linkWithoutProtocol.substring(lastAtIndex + 1); 
-
-      // Ищем ПЕРВОЕ двоеточие в authPart (отделяет почту от пароля)
-      const colonIndex = authPart.indexOf(":");
-      if (colonIndex === -1) throw new Error("Не найден пароль (двоеточие)");
-
-      const user = authPart.substring(0, colonIndex);
-      const pass = authPart.substring(colonIndex + 1);
-
-      // ПИШЕМ ДАННЫЕ (Используем общий провайдер 'webdav')
-      userData.provider = "webdav"; 
+      // Парсим через встроенный конструктор URL (так надежнее для всех протоколов)
+      let parsedUrl;
+      try {
+          parsedUrl = new URL(rawText);
+      } catch (e) {
+          throw new Error("Неверный формат ссылки. Пример: proto://user:pass@host:port/path");
+      }
+      const protocol = parsedUrl.protocol.replace(':', '');
+      // Проверка на дурака: совпадает ли присланное с выбранным
+      if (protocol !== selectedProto && !(protocol === 'https' && selectedProto === 'webdav')) {
+          throw new Error(`Вы выбрали ${selectedProto.toUpperCase()}, а прислали ${protocol.toUpperCase()}`);
+      }
+      const user = decodeURIComponent(parsedUrl.username);
+      const pass = decodeURIComponent(parsedUrl.password);
+      const host = parsedUrl.hostname;
+      const port = parsedUrl.port || (protocol === 'sftp' ? '22' : protocol === 'ftp' ? '21' : '443');
+      const folder = parsedUrl.pathname.replace(/^\/|\/$/g, '') || "/";
+      if (!user || !pass || !host) throw new Error("В ссылке должны быть логин, пароль и адрес сервера");
+      // Записываем данные в объект пользователя
+      userData.provider = selectedProto;
       userData.user = user;
       userData.pass = pass;
-      userData.host = `${protocol}${hostPart}`;
-      userData.webdav_url = rawText; // Полная ссылка для совместимости
-      userData.folderId = "Storage"; 
+      userData.folderId = folder;
 
-      // Сохраняем пользователя в KV
+      if (selectedProto === 'webdav') {
+          // WebDAV требует протокол ПРЯМО В ХОСТЕ, иначе твоя функция аплоада не поймет куда слать
+          userData.host = `https://${host}`; 
+          userData.webdav_url = rawText; // Сохраняем оригинал для совместимости
+      } else {
+          // FTP и SFTP требуют только "голый" домен/IP
+          userData.host = host;
+          userData.port = port;
+      }
+      // Сохраняем в YDB
       await env.USER_DB.put(`user:${userId}`, JSON.stringify(userData));
       // Чистим состояние
       await env.USER_DB.delete(`state:${userId}`);
-
-      // УДАЛЕНИЕ СООБЩЕНИЯ С ПАРОЛЕМ
+      // Удаляем сообщение с паролем
       try {
         await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/deleteMessage`, {
           method: "POST",
@@ -1464,16 +1618,14 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
           body: JSON.stringify({ chat_id: chatId, message_id: msg.message_id })
         });
       } catch (e) {}
-
-      await sendMessage(chatId, "? <b>WebDAV успешно настроен!</b>\nПровайдер: <code>webdav</code>\nПапка: <code>Storage</code>", null, env);
-
-      // Пробуем создать папку (твоя функция)
-      await createWebDavFolder("Storage", userData);
-
+      await sendMessage(chatId, `? <b>${selectedProto.toUpperCase()} успешно настроен!</b>\nСервер: <code>${host}</code>\nПапка: <code>${folder}</code>`, null, env);
+      // Если это WebDAV, пробуем создать папку
+      if (selectedProto === 'webdav') {
+          await createWebDavFolder(folder, userData);
+      }
       return new Response("OK");
     } catch (e) {
       await sendMessage(chatId, `? <b>Ошибка настройки:</b>\n${e.message}`, null, env);
-      console.error("WebDAV Parse Error:", e);
       return new Response("OK");
     }
   }
@@ -1484,13 +1636,25 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     await env.USER_DB.delete(`state:${userId}`);
     
     // Перенаправляем текст в логику поиска, как будто ввели /search ТЕКСТ
-    const searchQuery = text.trim();
-    // Вызываем поиск. Для простоты здесь просто повторяем вызов sendMessage с поиском:
-    await sendMessage(chatId, `?? Ищу: <b>${searchQuery}</b>...`, null, env);
-    const searchResult = await searchFilesByQuery(userId, isAdmin, searchQuery, env);
+    const query = text.trim();
+    if (!query) return;
+    // Решаем, какой поиск запускать (как в основной команде)
+    const isAIQuery = query.includes(" ") && isAdmin;
 
-    if (!searchResult.success || searchResult.fileIds.length === 0) {
-      return await sendMessage(chatId, `? По запросу "<b>${searchQuery}</b>" ничего не найдено.`, null, env);
+    let searchResult;
+    if (isAIQuery) {
+      // Текст и логика как в /ai_search
+      await sendMessage(chatId, "? <b>Выполняю интеллектуальный поиск...</b>", null, env);
+      searchResult = await searchAIFilesByQuery(userId, isAdmin, query, env);
+    } else {
+      // Текст и логика как в обычном /search
+      await sendMessage(chatId, "? <b>Выполняю поиск файлов...</b>", null, env);
+      searchResult = await searchFilesByQuery(userId, isAdmin, query, env);
+    }
+
+    // Общая проверка результата
+    if (!searchResult.success || !searchResult.fileIds || searchResult.fileIds.length === 0) {
+      return await sendMessage(chatId, `? По запросу "<b>${query}</b>" ничего не найдено.`, null, env);
     }
 
     const shortId = Math.random().toString(36).substring(2, 8);
@@ -1498,21 +1662,126 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     
     await env.USER_DB.put(searchKey, JSON.stringify({
       ids: searchResult.fileIds,
-      q: searchQuery
+      q: query
     }), { expirationTtl: 3600 });
-
     const { text: msgText, kb } = await renderSearchPage(searchKey, 0, env, userId);
     return await sendMessage(chatId, msgText, kb, env);
   }
 
   if (userState === "wait_manual_folder") {
-    userData.folderId = text.trim();
-    await env.USER_DB.put(`user:${userId}`, JSON.stringify(userData));
-    await env.USER_DB.delete(`state:${userId}`);
-    await sendMessage(chatId, `? Папка установлена: <code>${userData.folderId}</code>`, null, env);
+    const folderName = text.trim();
+    let success = false;
+    let targetId = folderName; // По умолчанию ID — это имя (для Яндекс/WebDAV/FTP)
+
+    // 1. Пытаемся создать папку у провайдера
+    if (userData.provider === "google") {
+        const finalId = await createGoogleFolder(folderName, userData.access_token);
+        if (finalId) {
+            targetId = finalId; // ПЕРЕХВАТЫВАЕМ РЕАЛЬНЫЙ ID
+            success = true;
+        }
+    } else if (userData.provider === "yandex") {
+        success = await createYandexFolder(folderName, userData.access_token);
+    } else if (userData.provider === "mailru") {
+        success = await createMailruFolder(folderName, userData.access_token, env);
+    } else if (userData.provider === "dropbox") {
+        // Dropbox часто тоже возвращает path_display, проверим success
+        success = await createDropboxFolder(folderName, userData.access_token);
+    } else if (userData.provider === "webdav") {
+        success = await createWebDavFolder(folderName, userData);
+    } else if (userData.provider === "ftp") {
+        success = await createFtpFolder(folderName, userData); 
+    } else if (userData.provider === "sftp") {
+        success = await createSftpFolder(folderName, userData);
+    }
+
+    // Сохраняем результат
+    if (success) {
+        userData.folderId = targetId; // ТЕПЕРЬ ТУТ БУДЕТ ID ДЛЯ ГУГЛА
+        userData.folderName = folderName; // Сохраняем имя отдельно для красоты в логах
+        
+        await env.USER_DB.put(`user:${userId}`, JSON.stringify(userData));
+        await env.USER_DB.delete(`state:${userId}`);
+        await sendMessage(chatId, `? Папка <b>${folderName}</b> создана и выбрана!\n<pre>ID: ${targetId}</pre>`, null, env);
+    } else {
+        // Если создание не поддерживается, оставляем введенное имя как путь
+        userData.folderId = folderName;
+        await env.USER_DB.put(`user:${userId}`, JSON.stringify(userData));
+        await env.USER_DB.delete(`state:${userId}`);
+        await sendMessage(chatId, `?? Папка установлена как путь: <code>${folderName}</code> (проверьте наличие вручную)`, null, env);
+    }
     return new Response("OK");
   }
 
+  // Админские стэйты (режим ожидания ввода)
+  if (isAdmin && userState === "wait_admin_add_id") {
+    await env.USER_DB.delete(`state:${userId}`);
+    const targetId = text.trim();
+      
+    // Проверка на число
+    if (!/^\d+$/.test(targetId)) {
+      return await sendMessage(chatId, "? Ошибка: ID должен состоять только из цифр. Попробуй снова через меню.", null, env);
+    }
+
+    const myData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
+    if (!myData) return await sendMessage(chatId, "? Сначала авторизуй свой диск!", null, env);
+
+    let folders = [];
+    try {
+      // Учитываем всех провайдеров для получения списка папок
+      switch (myData.provider) {
+        case "google":
+          folders = await listGoogleFolders(myData.access_token);
+          break;
+        case "yandex":
+          folders = await listYandexFolders(myData.access_token);
+          break;
+        case "dropbox":
+          folders = await listDropboxFolders(myData.access_token);
+          break;
+        case "webdav":
+          folders = await listWebDavFolders(myData);
+          break;
+        case "mailru":
+          folders = await listMailRuFolders(myData.access_token);
+          break;
+        case "ftp":
+        case "sftp":
+          folders = await listRemoteFolders(myData); 
+          break;
+        default:
+          console.log("Unknown provider:", myData.provider);
+      }
+    } catch (e) {
+      console.log(`Folder list error for ${myData.provider}:`, e);
+    }
+
+    // Инициализируем запись пользователя
+    // Копируем ВЕСЬ пакет авторизации, чтобы работал авто-рефреш
+    await env.USER_DB.put(`user:${targetId}`, JSON.stringify({
+      provider: myData.provider,
+      access_token: myData.access_token,
+      refresh_token: myData.refresh_token, // ДОБАВИЛИ: теперь токен обновится сам
+      expires_at: myData.expires_at,       // Копируем время истечения для логики рефреша
+      ownerId: userId,                     // Метка, что диск принадлежит админу
+      shared: true                         // Флаг, что это общий доступ
+    }));
+
+    // Собираем кнопки
+    let buttons = folders.map(f => [
+      { text: `?? ${f.name}`, callback_data: `set_folder:${targetId}:${f.id}` }
+    ]);
+    
+    // Кнопка создания — ВСЕГДА первая
+    buttons.unshift([{ text: "? Создать новую папку", callback_data: `create_folder:${targetId}` }]);
+
+    const msgText = `?? Пользователь <code>${targetId}</code> инициализирован.\n` +
+                    `?? Облако: <b>${myData.provider}</b>\n\n` +
+                    `?? <b>Выбери папку или создай новую:</b>`;
+
+    return await sendMessage(chatId, msgText, { inline_keyboard: buttons }, env);
+  }
+  
   // 3. РЕФЕРАЛЫ (Ловим и токен, и целую ссылку)
   const refMatch = text.match(/ref_([a-zA-Z0-9]+)/) || text.match(/^([a-zA-Z0-9]{8,12})$/);
   if (refMatch) {
@@ -2089,12 +2358,17 @@ async function handleVK(body, env, hostname, ctx) {
         if (userState === "waiting_for_search") {
           await env.USER_DB.delete(`state:${userId}`);
           await sendVKMessage(chatId, `? Ищу "${text}"...`, env);
+          const { TypedValues } = require('ydb-sdk');
           const searchResult = await searchFilesByQuery(userId, isAdmin, text, env);
           if (searchResult.success && searchResult.fileIds.length > 0) {
             let resList = `?? Результаты:\n`;
             for (const id of searchResult.fileIds.slice(0, 5)) {
-              const f = await env.FILES_DB.prepare("SELECT fileName FROM files WHERE id = ?").bind(id).first();
-              resList += `• ${f?.fileName || 'Файл'}\n`;
+              const res = await runQuery(filesDriver, 
+                "DECLARE $id AS Utf8; SELECT fileName FROM files WHERE id = $id", 
+                { '$id': env.TypedValues.utf8(String(id)) }
+              );
+              const fileName = res.resultSets[0].rows[0]?.items[0]?.textValue || 'Файл';
+              resList += `• ${fileName}\n`;
             }
             await sendVKMessage(chatId, resList, env);
           } else {
@@ -3318,7 +3592,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
                 var file = data.results[i];
                 var date = new Date(file.timestamp).toLocaleDateString('ru-RU');
                 var currentUid = window.userId || userId;
-                var fileFolder = file.remotePath.split('/')[0];
+                var fileFolder = file.folderId.split('/')[0];
                 // ВАЖНО: Мы сравниваем провайдера и папку напрямую из объекта файла
                 var isSameProvider = (file.provider === activeProvider);
                 var isSameFolder = (fileFolder === activeFolder);
@@ -3358,7 +3632,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
 
                 // Ссылка на скачивание
                 var downloadUrl = '/api/download' +
-                                  '?path=' + encodeURIComponent(file.remotePath) +
+                                  '?path=' + encodeURIComponent(file.folderId) +
                                   '&name=' + encodeURIComponent(file.fileName) +
                                   '&userId=' + currentUid;
 
@@ -4394,7 +4668,7 @@ async function handleVkUpload(request, env, ctx, userId, corsHeaders) {
     /*/ --- 3. ЗАПИСЬ В БАЗУ D1 ---
     const fileId = String(Date.now());
     await env.FILES_DB.prepare(
-      "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO files (userId, fileName, fileId, fileType, provider, folderId, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
     ).bind(String(userId), name, fileId, dbFileType, userData.provider, userData.folderId || "Root", Date.now()).run();
     */
 
@@ -4605,7 +4879,7 @@ async function handleVkUploadArrayBuffer(request, env, ctx) {
     // Запись в D1
     const fileId = "app_" + Date.now();
     await env.FILES_DB.prepare(
-      "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO files (userId, fileName, fileId, fileType, provider, folderId, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
     ).bind(String(vkUserId), fileName, fileId, dbFileType, provider, folder, Date.now()).run();
 
     // AI аналитика (в фоне)
@@ -4767,7 +5041,7 @@ async function handleConfirmUpload(request, env) {
       if (!userData) throw new Error("User data not found in KV");
 
       await env.FILES_DB.prepare(
-          "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
+          "INSERT INTO files (userId, fileName, fileId, fileType, provider, folderId, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
       ).bind(String(userId), fileName, "app_" + Date.now(), "document", userData.provider, userData.folderId || "Root", Date.now()).run();
 
       return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
@@ -5132,7 +5406,7 @@ async function renderSearchPage(searchKey, offset, env, userId) {
   const dataRaw = await env.USER_DB.get(searchKey);
   if (!dataRaw) return { text: "? Поиск устарел или не найден.", kb: null };
   
-  const searchData = JSON.parse(dataRaw);
+  const searchData = (typeof dataRaw === 'string') ? JSON.parse(dataRaw) : dataRaw;
   const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
 
   const total = searchData.ids.length;
@@ -5142,13 +5416,23 @@ async function renderSearchPage(searchKey, offset, env, userId) {
   const userFolder = userData?.folderId || "/";
 
   for (const id of pageIds) {
-    const f = await env.FILES_DB.prepare("SELECT fileName, provider, remotePath FROM files WHERE id = ?").bind(id).first();
-    // ПРОВЕРКА: провайдер совпадает И путь файла соответствует папке юзера
-    const isProviderOk = userData && f?.provider === userData.provider;
-    const isPathOk = f?.remotePath ? f.remotePath === userFolder : false;
+    const f = await env.FILES_DB.prepare("SELECT * FROM files WHERE id = ?").bind(id).first();
     
-    const status = (isProviderOk && isPathOk) ? '??' : '??';
-    list += `${status} <code>${f?.fileName || 'Файл'}</code>\n`;
+    if (f) {
+        // Убираем слеши и регистр, чтобы не было "ложно-красных" статусов
+        const dbProv = (f.provider || "").toLowerCase();
+        const userProv = (userData?.provider || "").toLowerCase();
+        const dbPath = (f.folderId || "").toLowerCase().replace(/^\/|\/$/g, '');
+        const userPath = (userData?.folderId || "").toLowerCase().replace(/^\/|\/$/g, '');
+
+        const isOk = dbProv === userProv && dbPath === userPath;
+        const status = isOk ? '??' : '??';
+
+        list += `${status} <code>${f.fileName || 'Без имени'}</code>\n`;
+    } else {
+        // Если попали сюда — значит адаптер не нашел ID в базе
+        list += `?? <code>Файл ${id} (ID не найден)</code>\n`;
+    }
   }
 
   list += `\nАктивное подключение:`;
@@ -5196,9 +5480,12 @@ async function handleCallbackQuery(query, env, ctx) {
   try {
     // --- ПАГИНАЦИЯ (Стрелочки) ---
     if (data.startsWith("pg:")) {
-      const [_, prefix, uId, sId, offset] = data.split(":");
-      const key = `${prefix}:${uId}:${sId}`; // Собираем s:userId:shortId
+      const parts = data.split(":");
+      // Правильно собираем ключ s:userId:shortId из частей dl:s:userId:shortId:offset
+      const key = `${parts[1]}:${parts[2]}:${parts[3]}`; 
+      const offset = parts[4] || "0";
       
+      // Вызываем рендер (внутри него уже есть защита JSON.parse, которую мы обсуждали)
       const { text: newText, kb } = await renderSearchPage(key, parseInt(offset), env, userId);
 
       await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/editMessageText`, {
@@ -5217,18 +5504,14 @@ async function handleCallbackQuery(query, env, ctx) {
     // --- ВЫГРУЗКА (dl:) ---
     if (data.startsWith("dl:")) {
       const parts = data.split(":");
-      // Собираем ключ обратно: s : userId : shortId
       const key = `${parts[1]}:${parts[2]}:${parts[3]}`;
       const offset = parts[4] || "0";
 
       const dataRaw = await env.USER_DB.get(key);
       const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
+      if (!dataRaw || !userData) return;
 
-      if (!dataRaw || !userData) {
-        return await sendMessage(chatId, "? Ошибка: данные поиска не найдены.", null, env);
-      }
-
-      const searchData = JSON.parse(dataRaw);
+      const searchData = (typeof dataRaw === 'object') ? dataRaw : JSON.parse(dataRaw);
       const toDl = searchData.ids.slice(parseInt(offset), parseInt(offset) + 5);
 
       await sendMessage(chatId, `? Начинаю выгрузку ${toDl.length} файл(ов)...`, null, env);
@@ -5236,320 +5519,126 @@ async function handleCallbackQuery(query, env, ctx) {
       for (const fileId of toDl) {
         try {
           const file = await env.FILES_DB.prepare("SELECT * FROM files WHERE id = ?").bind(fileId).first();
-          
-          // Проверка провайдера (чтобы не пытаться качать с яндекса, если выбран дропбокс)
           if (!file || file.provider !== userData.provider) continue;
 
-          let downloadUrl = "";
-          
+          let fileBuffer = null;
+          let directUrl = "";
           const headers = new Headers();
 
-          if (file.provider === 'webdav') {
-            downloadUrl = `${userData.host}/${file.remotePath}/${file.fileName}`.replace(/([^:])\/\//g, '$1/');
-            headers.set("Authorization", "Basic " + btoa(userData.user + ":" + userData.pass));
-          } else if (file.provider === 'yandex') {
-            const yaRes = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/download?path=${encodeURIComponent(file.remotePath + "/" + file.fileName)}`, {
+          // --- ГРУППА 1: ССЫЛОЧНЫЕ (Yandex, Dropbox) ---
+          if (file.provider === 'yandex') {
+            const yaRes = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/download?path=${encodeURIComponent(file.folderId + "/" + file.fileName)}`, {
               headers: { "Authorization": "OAuth " + userData.access_token }
             });
             const yaData = await yaRes.json();
-            downloadUrl = yaData.href;
-          } else if (file.provider === 'dropbox') {
-            try {
-              // 1. Формируем правильный путь (Dropbox требует / в начале)
-              const fullPath = (file.remotePath + "/" + file.fileName).replace(/\/+/g, '/');
-              const path = fullPath.startsWith('/') ? fullPath : '/' + fullPath;
-
-              // 2. Получаем временную ссылку
-              const dbxRes = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
-                method: "POST",
-                headers: { 
-                  "Authorization": "Bearer " + userData.access_token, 
-                  "Content-Type": "application/json" 
-                },
-                body: JSON.stringify({ path: path })
-              });
-
-              const dbxData = await dbxRes.json();
-
-              if (dbxData.link) {
-                // 3. Качаем файл по ссылке
-                const fileResp = await fetch(dbxData.link);
-                const dbxBuffer = await fileResp.arrayBuffer();
-
-                if (dbxBuffer && dbxBuffer.byteLength > 0) {
-                  const formData = new FormData();
-                  formData.append('chat_id', String(chatId));
-                  
-                  // Шлем как документ (самый надежный вариант)
-                  formData.append('document', new Blob([dbxBuffer]), file.fileName);
-                  
-                  const tgRes = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendDocument`, {
-                    method: 'POST',
-                    body: formData
-                  });
-
-                  if (tgRes.ok) {
-                    await logDebug(`? Dropbox отправил: ${file.fileName}`, env);
-                  } else {
-                    await logDebug(`? Ошибка ТГ (Dropbox): ${await tgRes.text()}`, env);
-                  }
-                }
-              } else {
-                await logDebug(`? Dropbox не дал ссылку. Ошибка: ${JSON.stringify(dbxData)}`, env);
-              }
-            } catch (e) {
-              await logDebug(`? Крит. ошибка Dropbox: ${e.message}`, env);
-            }
-            continue; // Важно: уходим на следующий файл
-
-          } else if (file.provider === 'google') {
-            const gBuffer = await downloadFromGoogle(file.remotePath, file.fileName, userData.access_token, env);
-            
-            if (gBuffer && gBuffer.byteLength > 0) {
-              const formData = new FormData();
-              formData.append('chat_id', String(chatId));
+            directUrl = yaData.href;
+          }
           
-              const ext = file.fileName.toLowerCase().split('.').pop();
-              let method = 'sendDocument';
-              let typeKey = 'document';
-          
-              // Мапим расширения на методы Telegram
-              if (['jpg', 'jpeg', 'png'].includes(ext)) { method = 'sendPhoto'; typeKey = 'photo'; }
-              else if (['mp4', 'mov'].includes(ext)) { method = 'sendVideo'; typeKey = 'video'; }
-              else if (['ogg', 'opus'].includes(ext)) { method = 'sendVoice'; typeKey = 'voice'; } 
-              else if (['mp3', 'wav'].includes(ext)) { method = 'sendAudio'; typeKey = 'audio'; }
-          
-              formData.append(typeKey, new Blob([gBuffer]), file.fileName);
-              
-              await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/${method}`, {
-                method: 'POST',
-                body: formData
-              });
-              
-              await logDebug(`? Отправлен: ${file.fileName}`, env);
-            }
-            continue; 
+          else if (file.provider === 'dropbox') {
+            const fullPath = (file.folderId + "/" + file.fileName).replace(/\/+/g, '/');
+            const path = fullPath.startsWith('/') ? fullPath : '/' + fullPath;
+            const dbxRes = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
+              method: "POST",
+              headers: { "Authorization": "Bearer " + userData.access_token, "Content-Type": "application/json" },
+              body: JSON.stringify({ path: path })
+            });
+            const dbxData = await dbxRes.json();
+            directUrl = dbxData.link;
           }
 
-          if (!downloadUrl) continue;
+          // --- ГРУППА 2: БУФЕРНЫЕ (WebDAV, Mail.ru, Google, FTP/SFTP) ---
+          else if (file.provider === 'webdav' || file.provider === 'mailru') {
+            const downloadUrl = `${userData.host}/${file.folderId}/${file.fileName}`.replace(/([^:])\/\//g, '$1/');
+            headers.set("Authorization", "Basic " + btoa(userData.user + ":" + userData.pass));
+            const fResp = await fetch(downloadUrl, { headers });
+            if (fResp.ok) fileBuffer = await fResp.arrayBuffer();
+          }
 
-          // --- СКАЧИВАНИЕ И ОТПРАВКА В TG ---
-          const fileResp = await fetch(downloadUrl, { headers: headers });
-          if (!fileResp.ok) continue;
-          
-          const fileBuffer = await fileResp.arrayBuffer();
-          const formData = new FormData();
-          formData.append('chat_id', String(chatId));
+          // Процесс скачивания если провайдер гугл
+          else if (file.provider === 'google') {
+            console.log(`[DEBUG] Старт выгрузки Google: ${file.fileName}`);
+            // Используем твою функцию, которую юзают 3 проекта
+            fileBuffer = await downloadFromGoogle(file.folderId, file.fileName, userData.access_token);
+            
+            if (fileBuffer) {
+              console.log(`[DEBUG] Файл скачан, размер: ${fileBuffer.byteLength} байт`);
+            } else {
+              console.error(`[DEBUG] Google не отдал файл: ${file.fileName}`);
+            }
+          }
+          // Задел под FTP/SFTP (если у тебя есть функции для них)
+          else if (file.provider === 'ftp' || file.provider === 'sftp') {
+             // fileBuffer = await downloadFromFtp(file, userData, env); 
+             continue; 
+          }
 
+          // --- ОБЩАЯ ОТПРАВКА ---
           let method = 'sendDocument';
           let typeKey = 'document';
           if (file.fileType === 'photo') { method = 'sendPhoto'; typeKey = 'photo'; }
           else if (file.fileType === 'video') { method = 'sendVideo'; typeKey = 'video'; }
 
-          formData.append(typeKey, new Blob([fileBuffer]), file.fileName);
-          
-          await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/${method}`, {
-            method: 'POST',
-            body: formData
-          });
+          if (directUrl) {
+            // Шлем ссылкой (для Yandex/Dropbox) - самый надежный метод в Облаке
+            await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/${method}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ chat_id: chatId, [typeKey]: directUrl, caption: file.fileName })
+            });
+          } 
+          else if (fileBuffer && fileBuffer.byteLength > 0) {
+            // ФИКС: Конвертируем ArrayBuffer в Buffer
+            const buffer = Buffer.isBuffer(fileBuffer) 
+              ? fileBuffer 
+              : Buffer.from(fileBuffer);
 
-        } catch (e) {
-          console.error("Ошибка при выгрузке конкретного файла:", e);
-        }
+            // Формируем multipart/form-data вручную
+            const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
+            const crlf = '\r\n';
+            
+            let body = '';
+            body += `--${boundary}${crlf}`;
+            body += `Content-Disposition: form-data; name="chat_id"${crlf}${crlf}`;
+            body += `${chatId}${crlf}`;
+            
+            body += `--${boundary}${crlf}`;
+            body += `Content-Disposition: form-data; name="caption"${crlf}${crlf}`;
+            body += `${file.fileName}${crlf}`;
+            
+            body += `--${boundary}${crlf}`;
+            body += `Content-Disposition: form-data; name="${typeKey}"; filename="${file.fileName}"${crlf}`;
+            body += `Content-Type: ${file.fileType === 'photo' ? 'image/png' : 'application/octet-stream'}${crlf}${crlf}`;
+            
+            const textPart = Buffer.from(body, 'utf-8');
+            const endBoundary = Buffer.from(`${crlf}--${boundary}--${crlf}`, 'utf-8');
+            
+            // Объединяем всё в один буфер
+            const finalBuffer = Buffer.concat([textPart, buffer, endBoundary]);
+
+            const tgRes = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/${method}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                'Content-Length': finalBuffer.length.toString()
+              },
+              body: finalBuffer
+            });
+
+            if (!tgRes.ok) {
+              const errText = await tgRes.text();
+              console.error(`[DEBUG] Ошибка ТГ (${file.fileName}): ${errText}`);
+            } else {
+              console.log(`[DEBUG] Файл ${file.fileName} успешно отправлен!`);
+            }
+          }
+
+        } catch (e) { console.error(`Ошибка на файле ${fileId}:`, e); }
       }
-
       await sendMessage(chatId, "? Готово!", null, env);
       return new Response("OK");
     }
-    // --- 1. ВЫГРУЗКА (deliver_files) ---
-    if (data.startsWith("deliver_files:")) {
-      const parts = data.split(":");
-      // ПРОВЕРКА: Если в ключе 4 части (старый формат) или 5 (новый)
-      // Собираем ключ: это части с индексами 1, 2, 3 (search:userId:timestamp)
-      const searchKey = `${parts[1]}:${parts[2]}:${parts[3]}`;
-      const mode = parts[4] || "0"; 
 
-      const searchData = await env.USER_DB.get(searchKey, { type: "json" });
-      const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
-
-      if (!searchData) return await sendMessage(chatId, `? Ошибка: Ключ ${searchKey} не найден в базе.`, null, env);
-      if (!userData) return await sendMessage(chatId, "? Ошибка: Профиль пользователя не найден.", null, env);
-        
-      let filesToDownload = (mode === "all") 
-      ? searchData.fileIds 
-      : searchData.fileIds.slice(parseInt(mode), parseInt(mode) + 5);
-
-      if (mode === "all") {
-        filesToDownload = searchData.fileIds;
-      } else {
-        const start = parseInt(mode);
-        filesToDownload = searchData.fileIds.slice(start, start + 5);
-      }
-  
-      await sendMessage(chatId, `? Начинаю выгрузку файлов (${filesToDownload.length})...`, null, env); 
-  
-      let successCount = 0;
-      let failCount = 0;
-  
-      for (const fileId of filesToDownload) {
-        try {
-          const file = await env.FILES_DB.prepare("SELECT * FROM files WHERE id = ?").bind(fileId).first();
-          if (!file || file.provider !== userData.provider) {
-            failCount++;
-            continue;
-          }
-  
-          let downloadUrl = "";
-          const headers = new Headers();
-  
-          // Формирование ссылки
-          if (file.provider === 'webdav') {
-            downloadUrl = `${userData.host}/${file.remotePath}/${file.fileName}`.replace(/([^:])\/\//g, '$1/');
-            headers.set("Authorization", "Basic " + btoa(userData.user + ":" + userData.pass));
-          } else if (file.provider === 'yandex') {
-            const yaRes = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/download?path=${encodeURIComponent(file.remotePath + "/" + file.fileName)}`, {
-              headers: { "Authorization": "OAuth " + userData.access_token }
-            });
-            const yaData = await yaRes.json();
-            downloadUrl = yaData.href;
-          } else if (file.provider === 'google') {
-            const gBuffer = await downloadFromGoogle(file.remotePath, file.fileName, userData.access_token, env);
-            
-            if (gBuffer && gBuffer.byteLength > 0) {
-              const formData = new FormData();
-              formData.append('chat_id', String(chatId));
-
-              formData.append('document', new Blob([gBuffer]), file.fileName);
-              
-              await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendDocument`, {
-                method: 'POST',
-                body: formData
-              });
-              await logDebug(`? Отправлен: ${file.fileName}`, env);
-            }
-            continue; 
-          }
-  
-          if (!downloadUrl) {
-            failCount++;
-            continue;
-          }
-  
-          // Скачиваем файл во временный буфер
-          const fileResp = await fetch(downloadUrl, { headers: headers });
-          if (!fileResp.ok) {
-            failCount++;
-            continue;
-          }
-          
-          const fileBuffer = await fileResp.arrayBuffer();
-          const formData = new FormData();
-          formData.append('chat_id', String(chatId));
-  
-          let method = 'sendDocument';
-          let typeKey = 'document';
-          if (file.fileType === 'photo') { method = 'sendPhoto'; typeKey = 'photo'; }
-          else if (file.fileType === 'video') { method = 'sendVideo'; typeKey = 'video'; }
-  
-          // Ключевой момент: создаем Blob с правильным типом
-          formData.append(typeKey, new Blob([fileBuffer]), file.fileName);
-  
-          // Отправка в Telegram с проверкой ответа
-          const tgRes = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/${method}`, {
-            method: 'POST',
-            body: formData
-          });
-  
-          if (tgRes.ok) {
-            successCount++;
-          } else {
-            const errText = await tgRes.text();
-            console.error("TG Error:", errText);
-            failCount++;
-          }
-  
-        } catch (e) { 
-          console.error("Critical Error:", e); 
-          failCount++;
-        }
-      }
-  
-      const finalMsg = successCount > 0 
-        ? `? Успешно выгружено: ${successCount}\n? Ошибок: ${failCount}` 
-        : `? Не удалось выгрузить ни одного файла. Ошибок: ${failCount}`;
-      
-      await sendMessage(chatId, finalMsg, null, env);
-      return new Response("OK");
-    }
-
-  // --- 2. ПОКАЗАТЬ ЕЩЁ (show_more_search) ---
-  if (data.startsWith("show_more_search:")) {
-    const parts = data.split(":");
-    // формат: show_more_search : search : userId : timestamp : offset
-    const searchKey = `${parts[1]}:${parts[2]}:${parts[3]}`;
-    const offset = parseInt(parts[4] || "5");
-
-    const searchData = await env.USER_DB.get(searchKey, { type: "json" });
-    const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
-
-    if (!searchData) return await sendMessage(chatId, "? Поиск устарел.", null, env);
-
-    const nextBatch = searchData.fileIds.slice(offset, offset + 5);
-    if (nextBatch.length === 0) return sendMessage(chatId, "?? Больше файлов нет.", null, env);
-
-    let list = "";
-    for (const id of nextBatch) {
-      const f = await env.FILES_DB.prepare("SELECT fileName, provider FROM files WHERE id = ?").bind(id).first();
-      if (f) {
-        const status = (userData && f.provider === userData.provider) ? '??' : '??';
-        list += `${status} <code>${f.fileName}</code>\n`;
-      }
-    }
-
-    const nextOffset = offset + 5;
-    const kb = { 
-      inline_keyboard: [
-        // Кнопка выгрузки именно ЭТОЙ пачки (теперь передаем смещение)
-        [{ text: `?? Выгрузить эти 5 файлов`, callback_data: `deliver_files:${searchKey}:${offset}` }]
-      ] 
-    };
-    
-    if (searchData.fileIds.length > nextOffset) {
-      kb.inline_keyboard.push([{ text: "?? Еще 5", callback_data: `show_more_search:${searchKey}:${nextOffset}` }]);
-    }
-
-    await sendMessage(chatId, `?? <b>Результаты ${offset + 1}-${offset + nextBatch.length}:</b>\n\n${list}`, kb, env);
-    return new Response("OK");
-  }
-
-  // --- 3. ПОКАЗАТЬ ВСЁ (show_all_search) ---
-  if (data.startsWith("show_all_search:")) {
-    const parts = data.split(":");
-    const searchKey = `${parts[1]}:${parts[2]}:${parts[3]}`;
-    
-    const searchData = await env.USER_DB.get(searchKey, { type: "json" });
-    const userData = await env.USER_DB.get(`user:${userId}`, { type: "json" });
-
-    if (!searchData) return await sendMessage(chatId, "? Поиск устарел.", null, env);
-  
-    let allList = "?? <b>Полный список результатов:</b>\n\n";
-    for (const id of searchData.fileIds.slice(0, 50)) { // Лимит 50 чтобы не упасть
-      const f = await env.FILES_DB.prepare("SELECT fileName, provider FROM files WHERE id = ?").bind(id).first();
-      if (f) {
-        const status = (userData && f.provider === userData.provider) ? '??' : '??';
-        allList += `${status} <code>${f.fileName}</code>\n`;
-      }
-    }
-    
-    const kb = {
-      inline_keyboard: [[{ text: "?? Выгрузить ВООБЩЕ ВСЁ", callback_data: `deliver_files:${searchKey}:all` }]]
-    };
-
-    await sendMessage(chatId, allList, kb, env);
-    return new Response("OK");
-  }
-
-  if (data.startsWith("del_inv:")) {
+    if (data.startsWith("del_inv:")) {
     const code = data.split(":")[1];
     await env.USER_DB.delete(`invite:${code}`);
     
@@ -5562,29 +5651,30 @@ async function handleCallbackQuery(query, env, ctx) {
     
     await sendMessage(chatId, `? Инвайт <code>${code}</code> успешно удален.`, null, env);
     return new Response("OK");
-  }
+    }
 
-  if (data === "del_inv_all") {
-      const list = await env.USER_DB.list({ prefix: "invite:" });
-      for (const key of list.keys) {
-          await env.USER_DB.delete(key.name);
-      }
-      await sendMessage(chatId, "??? Все инвайты были очищены.", null, env);
-      return new Response("OK");
-  }
+    if (data === "del_inv_all") {
+        const list = await env.USER_DB.list({ prefix: "invite:" });
+        for (const key of list.keys) {
+            await env.USER_DB.delete(key.name);
+        }
+        await sendMessage(chatId, "??? Все инвайты были очищены.", null, env);
+        return new Response("OK");
+    }
 
-  if (data === "search_retry") {
-    // Ставим стейт ожидания заново
-    await env.USER_DB.put(`state:${userId}`, "waiting_for_search", { expirationTtl: 300 });
-  
-    const retryMsg = `?? <b>Новый поиск</b>\n\nВведите название файла или тег:`;
+    if (data === "search_retry") {
+      // Ставим стейт ожидания заново
+      await env.USER_DB.put(`state:${userId}`, "waiting_for_search", { expirationTtl: 300 });
     
-    // Отвечаем на колбэк и отправляем новое сообщение (или редактируем старое)
-    await sendMessage(chatId, retryMsg, null, env);
-    return new Response("OK");
-  }
+      const retryMsg = `?? <b>Новый поиск</b>\n\nВведите название файла или тег:`;
+      
+      // Отвечаем на колбэк и отправляем новое сообщение (или редактируем старое)
+      await sendMessage(chatId, retryMsg, null, env);
+      return new Response("OK");
+    }
 
     if (action === "manual_folder") {
+      const targetUserId = parts[1] || userId;
       await env.USER_DB.put(`state:${userId}`, "wait_manual_folder");
       await sendMessage(chatId, "?? Напиши название папки (например: <code>Storage</code>):", null, env);
       return new Response("OK");
@@ -5598,19 +5688,24 @@ async function handleCallbackQuery(query, env, ctx) {
       const folderIdOrName = parts[parts.length - 1]; 
       const userData = await env.USER_DB.get(`user:${targetUserId}`, { type: "json" });
       if (!userData) return new Response("OK");
-  
+
       if (userData.provider === "google") {
         finalId = await createGoogleFolder(folderIdOrName, userData.access_token);
+        success = !!finalId;
       } else if (userData.provider === "yandex") {
         success = await createYandexFolder(folderIdOrName, userData.access_token);
       } else if (userData.provider === "mailru") {
-        // Вызываем создание папки для Mail.ru
         success = await createMailruFolder(folderIdOrName, userData.access_token, env);
       } else if (userData.provider === "dropbox") {
         success = await createDropboxFolder(folderIdOrName, userData.access_token);
       } else if (userData.provider === "webdav") {
         success = await createWebDavFolder(folderIdOrName, userData);
+      } else if (userData.provider === "ftp") {
+        success = await createFtpFolder(folderIdOrName, userData);
+      } else if (userData.provider === "sftp") {
+        success = await createSftpFolder(folderIdOrName, userData);
       }
+      
       if (success) {
         userData.folderId = folderIdOrName;
         await env.USER_DB.put(`user:${targetUserId}`, JSON.stringify(userData));
@@ -5618,7 +5713,6 @@ async function handleCallbackQuery(query, env, ctx) {
       } else {
         await sendMessage(chatId, "? Не удалось создать папку. Попробуйте позже.", null, env);
       }
-
     } else if (action === "set_folder") {
       // В данных было set_folder::STORAGE, значит parts будет ["set_folder", "", "STORAGE"]
       const folderIdOrName = parts[parts.length - 1]; 
@@ -5652,6 +5746,78 @@ async function handleCallbackQuery(query, env, ctx) {
       return await sendMessage(chatId, `?? <b>Вы вышли из режима администратора.</b>\n\nНажмите /admin для возврата.`, null, env);
     }
 
+    if (action === "admin_user_menu") {
+      const list = await env.USER_DB.list({ prefix: "user:" });
+      await env.USER_DB.delete(`state:${userId}`);
+      const authIds = list.keys.map(k => k.name.split(":")[1]);
+      
+      let report = `?? <b>Управление пользователями</b>\n\n?? Всего пользователей: (${authIds.length})\n\n`;
+      
+      if (authIds.length > 0) {
+        for (let i = 0; i < authIds.length; i++) {
+          const id = authIds[i];
+          const uData = await env.USER_DB.get(`user:${id}`, { type: "json" });
+          
+          const name = uData?.name || "Аноним";
+          const provider = uData?.provider ? `<b>${uData.provider}</b>` : "<i>Не подключен</i>";
+          const folder = uData?.folderId ? `<code>${uData.folderId}</code>` : "Не указана";
+          const username = uData?.username && uData.username !== 'нет' ? `@${uData.username}` : "отсутствует";
+
+          report += `?? <b>ID:</b> <code>${id}</code>\n` +
+                    `?? <b>ФИО:</b> <code>${name}</code>\n` +
+                    `?? <b>Username:</b> ${username}\n` +
+                    `?? <b>Провайдер:</b> ${provider}\n` +
+                    `?? <b>Папка:</b> ${folder}\n` +
+                    `--------------------\n`;
+        }
+      } else {
+        report += "Пользователей в базе пока нет.";
+      }
+      const statButtons = [
+      [{ text: "? Добавить пользователя", callback_data: "admin_user_add" }],
+      [{ text: "?? Назад в меню", callback_data: "admin_back" }]
+      ];
+      return await editMessageWithKeyboard(chatId, query.message.message_id, report, env, statButtons);
+    }
+
+    if (action === "admin_user_add") {
+      // Устанавливаем стейт ожидания ID
+      await env.USER_DB.put(`state:${userId}`, "wait_admin_add_id");
+      const msgText = `? <b>Добавление нового пользователя</b>\n\n` +
+                  `Пришли мне ID пользователя, которому хочешь дать доступ к своему диску.\n\n` +
+                  `<i>Пример: 12345678</i>`;
+  
+      // Отправляем новое сообщение, чтобы админ мог просто прислать цифры в ответ
+      return await sendMessage(chatId, msgText, { 
+        inline_keyboard: [[{ text: "? Отмена", callback_data: "admin_user_menu" }]] 
+      }, env);
+    }
+    
+    // Обработка кнопки "Назад" в админке
+    if (action === "admin_back") {
+      const list = await env.USER_DB.list({ prefix: "user:" });
+      const userCount = list.keys.length;
+
+      const adminMsg = `?? <b>Панель администратора</b>\n\n` +
+        `?? Админ ID: <code>${userId}</code>\n\n` +
+        `?? Авторизовано: <b>${userCount}</b> пользователей\n\n` +
+        `?? Версия: ${version}\n\n` +
+        `?? <b>Команды админа:</b>\n` +
+        `/add — Добавить юзера с облаком\n` +
+        `/invites — Список инвайтов\n` +
+        `/ai_settings — Настройки ИИ\n` +
+        `/ai_search — Интеллектуальный поиск`;
+
+      const adminButtons = [
+        [{ text: "?? Управление пользователями", callback_data: "admin_user_menu" }],
+        [{ text: "?? Настройки ИИ", callback_data: "ai_menu_main" }],
+        [{ text: "?? Выход из режима админа", callback_data: "admin_exit" }]
+      ];
+
+      // Используем твою функцию редактирования
+      return await editMessageWithKeyboard(chatId, query.message.message_id, adminMsg, env, adminButtons);
+    }
+
     // Обработка переключения сервиса в продвинутом меню
     if (data.startsWith("admin_model_show_")) {
       const serviceType = data.substring("admin_model_show_".length);
@@ -5674,6 +5840,7 @@ async function handleCallbackQuery(query, env, ctx) {
       );
       return;
     }
+
     if (data.startsWith("admin_model_set_")) {
       const payload = data.substring("admin_model_set_".length);
       const separatorIndex = payload.indexOf(";");
@@ -5706,6 +5873,7 @@ async function handleCallbackQuery(query, env, ctx) {
       );
       return;
     }
+
     if (action === "ai_menu") {
       const serviceType = parts[1];
       if (!SERVICE_TYPE_MAP[serviceType]) {
@@ -5724,9 +5892,14 @@ async function handleCallbackQuery(query, env, ctx) {
       );
       return;
     }
+
     if (action === "ai_menu_main") {
       const statusTable = await generateModelStatusTable(env);
       const buttons = getAIServiceMenuKeyboard(); // < это список сервисов
+      
+      // ? Добавляем кнопку "Назад" в самый конец списка
+      buttons.push([{ text: "?? Назад в админку", callback_data: "admin_back" }]);
+
       await editMessageWithKeyboard(
         chatId,
         query.message.message_id,
@@ -5736,6 +5909,7 @@ async function handleCallbackQuery(query, env, ctx) {
       );
       return;
     }
+
     if (action === "ai_menu_back") {
       const buttons = Object.entries(SERVICE_TYPE_MAP).map(([type, info]) => [
         { text: info.name, callback_data: `ai_menu:${type}` }
@@ -5756,6 +5930,7 @@ async function handleCallbackQuery(query, env, ctx) {
                           `2. Либо просто скопируй и <b>пришли мне токен</b> (например: <code>${Math.random().toString(36).substring(2, 10)}</code>) прямо в этот чат.`;
       return await sendMessage(chatId, instruction, null, env);
     }
+
     if (action === "ask_mailru_webdav") {
       await env.USER_DB.put(`state:${userId}`, "wait_webdav_url");
       return await sendMessage(chatId, 
@@ -5771,27 +5946,38 @@ async function handleCallbackQuery(query, env, ctx) {
     if (action === "ask_custom_server_info") {
       const customServerGuide = 
         `?? <b>Подключение своего сервера</b>\n\n` +
-        `Поддерживаются следующие протоколы:\n` +
-        `? <b>WebDAV</b> (рекомендуется) — работает в Cloudflare Workers\n` +
-        `? <b>FTP / SFTP</b> — НЕ работают в Cloudflare Workers (только в Python-версии)\n\n` +
-        `?? <b>Формат для WebDAV:</b>\n<code>https://user:pass@ваш-сервер.ru</code>\n\n` +
-        `? После отправки ссылки я удалю ваше сообщение из чата.\n\n` +
-        `?? <b>Для FTP/SFTP</b> используйте <a href="https://github.com/leshiy-ai/leshiy-storage-bot">Python-версию бота</a> (на Render/VPS).\n` +
-        `Это полноценный продукт для личного хостинга.`;
+        `Вы можете подключить личное хранилище напрямую. Мы поддерживаем:\n\n` +
+        `? <b>?? WebDAV</b> — стандарт для облаков (Yandex, Mail.ru).\n` +
+        `? <b>?? FTP</b> / <b>?? SFTP</b> — для личных серверов и NAS.\n\n` +
+        `Укажите данные в формате ссылки для быстрой настройки.\n` +
+        `<i>Ваше сообщение будет удалено сразу после обработки.</i>`;
     
       return await sendMessage(chatId, customServerGuide, { 
-        inline_keyboard: [[
-          { text: "?? Отправить WebDAV-ссылку", callback_data: "ask_custom_server" }
-        ]] 
+        inline_keyboard: [
+          [{ text: "?? Подключить WebDAV", callback_data: "ask_custom_server:webdav" }],
+          [{ text: "?? Подключить FTP", callback_data: "ask_custom_server:ftp" }],
+          [{ text: "?? Подключить SFTP", callback_data: "ask_custom_server:sftp" }]
+        ] 
       }, env);
     }
 
-    if (action === "ask_custom_server") {
-      await env.USER_DB.put(`state:${userId}`, "wait_webdav_url");
-      return await sendMessage(chatId, `?? <b>Подключение своего сервера</b>\n
-    Пришли ссылку в формате:\n
-    <code>https://user:pass@webdav.yandex.ru</code>\n
-    <i>После получения я удалю твое сообщение из чата в целях безопасности.</i>`, null, env);
+    // Исправленный блок обработки кнопок выбора протокола
+    if (data.startsWith("ask_custom_server:")) {
+      const proto = data.split(":")[1]; 
+      
+      await env.USER_DB.put(`state:${userId}`, `wait_url:${proto}`);
+      
+      const examples = {
+        webdav: "https://user:pass@webdav.yandex.ru",
+        ftp: "ftp://user:pass@1.2.3.4:21",
+        sftp: "sftp://user:pass@my-server.com:22"
+      };
+
+      const text = `?? <b>Подключение ${proto.toUpperCase()}</b>\n\n` +
+                   `Отправь мне данные в формате ссылки:\n<code>${examples[proto]}</code>\n\n` +
+                   `<i>После получения я удалю твое сообщение из чата.</i>`;
+
+      return await sendMessage(chatId, text, null, env);
     }
 
     if (action === "confirm_ref") {
@@ -5998,7 +6184,7 @@ async function processOneAttachment(attach, userData, userId, chatId, env) {
     // --- 4. ЗАПИСЬ В БАЗУ ---
     const vkId = String(attach[fType]?.id || Date.now());
     await env.FILES_DB.prepare(
-      "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO files (userId, fileName, fileId, fileType, provider, folderId, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
     ).bind(String(userId), name, vkId, dbFileType, userData.provider, userData.folderId || "Root", Date.now()).run();
 
     // --- 5. ЗАГРУЗКА В ОБЛАКО ---
@@ -6165,7 +6351,7 @@ async function processOneAttachmentStream(attach, userData, userId, chatId, env,
       // --- 4. ЗАПИСЬ В БАЗУ ---
       const vkId = String(attach[fType]?.id || Date.now());
       await env.FILES_DB.prepare(
-          "INSERT INTO files (userId, fileName, fileId, fileType, provider, remotePath, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
+          "INSERT INTO files (userId, fileName, fileId, fileType, provider, folderId, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)"
       ).bind(String(userId), name, vkId, dbFileType, userData.provider, userData.folderId || "Root", Date.now()).run();
 
       // --- 5. ЗАГРУЗКА В ОБЛАКО (СТРИМИНГ) ---
@@ -6287,6 +6473,62 @@ async function getFileStream(fileId, env) {
   return await response.arrayBuffer(); // < ВСЁ! Только ArrayBuffer
 }
 
+async function showFolderSelector(chatId, userData, env) {
+  try {
+    const provider = userData.provider;
+    let folders = [];
+
+    // ГРУППИРОВКА ПРОВАЙДЕРОВ
+    switch (provider) {
+      case 'yandex':
+        folders = await listYandexFolders(userData.access_token);
+        break;
+      case 'google':
+        folders = await listGoogleFolders(userData.access_token);
+        break;
+      case 'dropbox':
+        folders = await listDropboxFolders(userData.access_token);
+        break;
+      case 'mailru':
+        folders = await listMailRuFolders(userData.access_token);
+        break;
+      case 'webdav':
+        folders = await listWebDavFolders(userData.userId);
+        break;
+      case 'sftp':
+      case 'ftp':
+        // Для этих ребят обычно используем userData.path или корень
+        folders = await listRemoteFolders(userData); 
+        break;
+      default:
+        await logDebug(`?? Неизвестный провайдер: ${provider}`, env);
+    }
+
+    let buttons = [];
+
+    // Собираем кнопки
+    // f.id для Гугла будет ID, для остальных — путь или имя
+    folders.forEach(f => {
+      buttons.push([{ 
+        text: `?? ${f.name}`, 
+        callback_data: `set_folder:${chatId}:${f.id}` 
+      }]);
+    });
+
+    // Кнопка создания (универсальная)
+    buttons.push([{ text: "? Создать 'Storage'", callback_data: `create_folder:${chatId}:Storage` }]);
+
+    const text = buttons.length > 1 
+      ? `?? <b>Папки на ${provider}:</b>\nВыбери ту, которую бот будет использовать.` 
+      : `?? <b>На ${provider} нет папок.</b>\nНажми кнопку ниже для создания.`;
+
+    return await sendMessage(chatId, text, { inline_keyboard: buttons }, env);
+
+  } catch (e) {
+    await logDebug(`? Ошибка селектора (${userData.provider}): ${e.message}`, env);
+    return await sendMessage(chatId, `? Ошибка загрузки папок: ${e.message}`, null, env);
+  }
+}
 
 function getFileType(fileName) {
   const ext = fileName.toLowerCase().split('.').pop();
@@ -6453,46 +6695,6 @@ async function handleYandexCallback(req, env) {
   return new Response("Error", { status: 400 });
 }
 
-async function showFolderSelector(chatId, userData, env) {
-  try {
-    // 1. Запрос к Яндексу (только папки, лимит 50)
-    const res = await fetch("https://cloud-api.yandex.net/v1/disk/resources?path=/&limit=50", {
-      headers: { "Authorization": `OAuth ${userData.access_token}` }
-    });
-
-    if (!res.ok) {
-      return await sendMessage(chatId, `? Ошибка Яндекса: ${res.status}. Попробуй переподключить диск.`, null, env);
-    }
-
-    const data = await res.json();
-    const items = data._embedded?.items || [];
-    
-    let buttons = [];
-
-    // 2. Собираем кнопки из папок
-    items.forEach(item => {
-      if (item.type === 'dir') {
-        buttons.push([{ 
-          text: `?? ${item.name}`, 
-          callback_data: `set_folder::${item.name}` 
-        }]);
-      }
-    });
-
-    // 3. Всегда добавляем кнопку создания (в конец)
-    buttons.push([{ text: "? Создать 'Storage'", callback_data: `create_folder:${chatId}:Storage` }]);
-
-    const text = buttons.length > 1 
-      ? "?? <b>Твои папки на диске:</b>\nВыбери ту, куда сохранять файлы." 
-      : "?? <b>Папок не найдено.</b>\nНажми кнопку ниже, чтобы создать папку для бота.";
-
-    return await sendMessage(chatId, text, { inline_keyboard: buttons }, env);
-
-  } catch (e) {
-    return await sendMessage(chatId, `? Ошибка: ${e.message}`, null, env);
-  }
-}
-
 async function uploadToYandexFromArrayBuffer(arrayBuffer, name, token, folder = "") {
   let fullPath = folder ? `/${folder}/${name}` : `/${name}`;
   fullPath = fullPath.replace(/\/+/g, '/');
@@ -6581,13 +6783,32 @@ async function handleGoogleCallback(req, env) {
     };
     await env.USER_DB.put(`user:${uid}`, JSON.stringify(userToSave));
     await sendMessage(uid, "? <b>Google Drive подключен!</b>", null, env);
+    await showFolderSelector(uid, userToSave, env); // Один метод на всех
     return renderSuccessPage();
   }
   return new Response("Error");
 }
 
-
 async function downloadFromGoogle(folderId, fileName, token, env) {
+  try {
+    const q = `'${folderId}' in parents and name = '${fileName}' and trashed = false`;
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`, {
+      headers: { "Authorization": `Bearer ${token}` }
+    });
+    const data = await res.json();
+    const fileId = data.files?.[0]?.id;
+    if (!fileId) return null;
+
+    const dlRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+      headers: { "Authorization": `Bearer ${token}` }
+    });
+    return dlRes.ok ? await dlRes.arrayBuffer() : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function downloadFromGoogleOld(folderId, fileName, token, env) {
   try {
     // Ищем файлы в облаке
     const res = await fetch(`https://www.googleapis.com/drive/v3/files?pageSize=100&fields=files(id,name,mimeType,parents)`, {
@@ -6609,21 +6830,47 @@ async function downloadFromGoogle(folderId, fileName, token, env) {
 }
 
 async function uploadToGoogleFromArrayBuffer(arrayBuffer, name, token, folderId = "root") {
-  const meta = {
-    name: name,
-    parents: (folderId && folderId !== "root") ? [folderId] : []
-  };
-  const fd = new FormData();
-  fd.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
-  fd.append('file', new Blob([arrayBuffer]));
-  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${token}` },
-    body: fd
-  });
-  return res.ok;
-}
+  try {
+    const metadata = {
+      name: name,
+      parents: (folderId && folderId !== "root") ? [folderId] : []
+    };
 
+    const boundary = '-------yandexcloudboundary';
+    const metadataPart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`;
+    const mediaHeader = `--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n`;
+    const footer = `\r\n--${boundary}--`;
+
+    // Собираем всё в один Buffer (в Yandex Cloud это работает стабильнее всего)
+    const body = Buffer.concat([
+      Buffer.from(metadataPart),
+      Buffer.from(mediaHeader),
+      Buffer.from(arrayBuffer),
+      Buffer.from(footer)
+    ]);
+
+    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`,
+        'Content-Length': body.length.toString()
+      },
+      body: body
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("[GOOGLE-DRIVE-ERROR]", res.status, errText);
+      return false;
+    }
+
+    return true;
+  } catch (e) {
+    console.error("[GOOGLE-DRIVE-CRASH]", e);
+    return false;
+  }
+}
 
 async function uploadToGoogleStream(stream, name, token, folder, type, fileSize) {
   // Для Google используем Simple Upload (поддерживает стрим до 5МБ на бесплатном лимите легко)
@@ -6692,7 +6939,7 @@ async function createGoogleFolder(folderName, token, parentId = "root") {
   return data.id; // Возвращает ID созданной папки
 }
 
-// Работа с Облаком Mail.Ru
+// Работа с OAuth Облако Mail.Ru
 async function handleMailruCallback(request, env) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
@@ -6734,6 +6981,7 @@ async function handleMailruCallback(request, env) {
       }));
 
       await sendMessage(userId, "? <b>Облако Mail.ru (Внешнее) подключено!</b>", null, env);
+      await showFolderSelector(userId, data, env);
       return new Response("? Успешно! Можете вернуться в Telegram.");
     }
 
@@ -6741,6 +6989,35 @@ async function handleMailruCallback(request, env) {
     return new Response(`? Ошибка обмена: ${JSON.stringify(data)}`);
   } catch (e) {
     return new Response(`? Ошибка сети: ${e.message}`);
+  }
+}
+
+async function listMailRuFolders(accessToken, env) {
+  try {
+    // Получаем содержимое корня (/)
+    const url = `https://cloud.mail.ru/api/v2/folder?access_token=${accessToken}&home=/`;
+    
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (data.status !== 200) {
+      await logDebug(`? Mailru List Error: ${JSON.stringify(data)}`, env);
+      return [];
+    }
+
+    // В Mail.ru API v2 список файлов лежит в data.body.list
+    // Папки имеют type: 'folder'
+    const folders = (data.body.list || [])
+      .filter(item => item.type === 'folder')
+      .map(item => ({
+        id: item.home, // Полный путь, например "/Storage"
+        name: item.name
+      }));
+
+    return folders;
+  } catch (e) {
+    await logDebug(`? Mailru List Catch: ${e.message}`, env);
+    return [];
   }
 }
 
@@ -6771,15 +7048,21 @@ async function createMailruFolder(folderName, accessToken, env) {
 // Работа с WebDAV
 
 async function uploadWebDAVFromArrayBuffer(arrayBuffer, fileName, userData, env) {
-  let baseUrl = (userData.webdav_host || "https://webdav.cloud.mail.ru").trim();
-  if (!baseUrl.startsWith('http')) baseUrl = 'https://' + baseUrl;
-  baseUrl = baseUrl.replace(/\/+$/, '');
+  // Пробуем взять из новых полей, если старых webdav_ нет
+  // Объявляем переменные ОДИН раз
+  let host = userData.webdav_host || userData.host || "";
+  const user = userData.webdav_user || userData.user || "";
+  const pass = userData.webdav_pass || userData.pass || "";
+
+  // Теперь просто работаем с уже объявленной переменной host
+  if (host && !host.startsWith('http')) host = 'https://' + host;
+  host = host.replace(/\/+$/, '');
 
   const folder = userData.folderId || "";
   const path = folder ? `${folder}/${fileName}` : fileName;
-  const url = `${baseUrl}/${path}`;
+  const url = `${host}/${path}`;
 
-  const auth = btoa(`${userData.webdav_user}:${userData.webdav_pass}`);
+  const auth = btoa(`${user}:${pass}`);
 
   const res = await fetch(url, {
     method: 'PUT',
@@ -6796,14 +7079,19 @@ async function uploadWebDAVFromArrayBuffer(arrayBuffer, fileName, userData, env)
 
 
 async function uploadWebDAVStream(stream, name, userData, env, type, fileSize, mimeType) {
-    // Подходит и для Mail.ru, и для своего WebDAV
-    const baseUrl = userData.webdav_url || userData.webdav_host || "";
-    // Берём папку
+    // Приоритет: специальная полная ссылка, затем старый хост, затем новый универсальный
+    let baseUrl = userData.webdav_url || userData.webdav_host || userData.host || "";
+    const user = userData.webdav_user || userData.user || "";
+    const pass = userData.webdav_pass || userData.pass || "";
+
+    if (baseUrl && !baseUrl.startsWith('http')) baseUrl = 'https://' + baseUrl;
+    baseUrl = baseUrl.replace(/\/+$/, '');
+
     const folder = userData.folderId || "";
-    // Формируем путь: если есть папка — добавляем её
     const path = folder ? `${folder}/${name}` : name;
     const url = `${baseUrl}/${path}`;
-    const auth = btoa(`${userData.webdav_user}:${userData.webdav_pass}`);
+    
+    const auth = btoa(`${user}:${pass}`);
     
     const res = await fetch(url, {
         method: 'PUT',
@@ -6820,14 +7108,20 @@ async function uploadWebDAVStream(stream, name, userData, env, type, fileSize, m
 }
 
 async function listWebDavFolders(user) {
-  const host = user.webdav_host.startsWith('http') ? user.webdav_host : `https://${user.webdav_host}`;
-  
+  // Берем данные из новых полей, если старых нет
+  const webdawHost = user.webdav_host || user.host || "";
+  const webdavUser = user.webdav_user || user.user || "";
+  const webdavPass = user.webdav_pass || user.pass || "";
+
+  // Гарантируем наличие протокола
+  const host = webdawHost.startsWith('http') ? webdawHost : `https://${webdawHost}`;
+  if (!webdawHost) throw new Error("Хост WebDAV не найден в конфиге");
   // Запрос PROPFIND для получения списка файлов и папок
   // Depth: 1 означает "только в текущей папке"
   const response = await fetch(host, {
     method: 'PROPFIND',
     headers: {
-      'Authorization': 'Basic ' + btoa(`${user.webdav_user}:${user.webdav_pass}`),
+      'Authorization': 'Basic ' + btoa(`${webdavUser}:${webdavPass}`),
       'Depth': '1',
       'Content-Type': 'application/xml; charset=utf-8'
     }
@@ -6857,9 +7151,9 @@ async function listWebDavFolders(user) {
         // Отрезаем полный путь, оставляя только имя папки
         const parts = path.split('/').filter(Boolean);
         const name = parts[parts.length - 1] || "/";
-        
+        const hostPath = (webdawHost || "").split('/').filter(Boolean).pop() || "";
         // Не добавляем корневую папку в список выбора (чтобы не дублировать)
-        if (name !== user.webdav_host.split('/').pop()) {
+        if (name !== hostPath) {
           folders.push({
             name: name,
             path: path
@@ -6873,13 +7167,16 @@ async function listWebDavFolders(user) {
 }
 
 async function createWebDavFolder(folderName, userData) {
-  let host = userData.webdav_host || "";
+  // Пробуем взять с префиксом, если нет — берем общее поле
+  let host = userData.webdav_host || userData.host || "";
+  let user = userData.webdav_user || userData.user || "";
+  let pass = userData.webdav_pass || userData.pass || "";
   
   // Убеждаемся, что хост не заканчивается на слэш, чтобы не было двойного //
   if (host.endsWith('/')) host = host.slice(0, -1);
   
   const url = `${host}/${encodeURIComponent(folderName)}/`; // < Обязательно с /
-  const auth = btoa(`${userData.webdav_user}:${userData.webdav_pass}`);
+  const auth = btoa(`${user}:${pass}`);
 
   const res = await fetch(url, {
     method: "MKCOL", // < Ключевое изменение!
@@ -6913,12 +7210,14 @@ async function handleDropboxCallback(request, env) {
 
   const data = await res.json();
   if (data.access_token) {
-    await env.USER_DB.put(`user:${userId}`, JSON.stringify({
+    const userData = {
       provider: "dropbox",
       access_token: data.access_token,
-      refresh_token: data.account_id // У Dropbox свои нюансы с рефрешем, для начала хватит этого
-    }));
+      account_id: data.account_id
+    };
+    await env.USER_DB.put(`user:${userId}`, JSON.stringify(userData));
     await sendMessage(userId, "?? <b>Dropbox успешно подключен!</b>", null, env);
+    await showFolderSelector(userId, userData, env);
     return renderSuccessPage();
   }
   return new Response("Error", { status: 400 });
@@ -6942,7 +7241,6 @@ async function uploadToDropboxFromArrayBuffer(arrayBuffer, fileName, accessToken
   }
   return true;
 }
-
 
 async function uploadToDropboxStream(stream, name, token, folder, fileSize) {
   const path = (folder ? `/${folder}/${name}` : `/${name}`).replace(/\/+/g, '/');
@@ -7024,6 +7322,136 @@ async function createDropboxFolder(folderName, token) {
 }
 
 /**
+ * Универсальная функция загрузки для FTP и SFTP
+ */
+async function uploadToRemoteServer(userConfig, fileBuffer, fileName) {
+    const ftp = require("basic-ftp");
+    const { provider, host, port, user, pass, folderId } = userConfig;
+    // Убираем лишние слэши в начале/конце и формируем путь
+    const cleanFolder = (folderId || "").replace(/^\/+|\/+$/g, "");
+    const folderIdorName = cleanFolder ? `${cleanFolder}/${fileName}` : fileName;
+
+    if (provider === 'sftp') {
+        const sftp = new SFTPClient();
+        try {
+            await sftp.connect({
+                host: host,
+                port: parseInt(port) || 22,
+                username: user,
+                password: pass,
+                retries: 2,
+                connectTimeout: 10000
+            });
+            await sftp.put(fileBuffer, folderIdorName);
+            return { success: true };
+        } catch (err) {
+            console.error("SFTP Error:", err);
+            throw new Error(`SFTP: ${err.message}`);
+        } finally {
+            await sftp.end();
+        }
+    } 
+
+    if (provider === 'ftp') {
+        const client = new ftp.Client();
+        // Включаем подробные логи, чтобы видеть, что происходит
+        client.ftp.verbose = true;
+        client.trackProgress(info => {
+                console.log(`[FTP Progress] ${info.name}: ${info.bytesOverall} bytes`);
+            });
+        // Настраиваем таймаут подключения (в миллисекундах)
+        client.ftp.timeout = 15000;
+        client.ftp.ipFamily = 4;
+        try {
+            await client.access({
+                host: host,
+                port: parseInt(port) || 21,
+                user: user,
+                password: pass,
+                secure: false // Можно сделать true для FTPS в будущем
+            });
+            const finalPath = folderId || fileName;
+            // Передаем Buffer напрямую
+            const stream = require("stream");
+            const source = new stream.PassThrough();
+            source.end(fileBuffer);
+
+            await client.uploadFrom(source, finalPath);
+            return { success: true };
+        } catch (err) {
+            console.error("FTP Error:", err);
+            throw new Error(`FTP: ${err.message}`);
+        } finally {
+            client.close();
+        }
+    }
+}
+
+async function listRemoteFolders(user) {
+    const { provider, host, port, user: login, pass } = user;
+    const currentPath = user.folderId || "/"; // Или откуда начинаем поиск
+
+    if (provider === 'sftp') {
+        const SFTPClient = require("ssh2-sftp-client");
+        const sftp = new SFTPClient();
+        try {
+            await sftp.connect({
+                host: host,
+                port: parseInt(port) || 22,
+                username: login,
+                password: pass,
+                connectTimeout: 10000
+            });
+            
+            const list = await sftp.list(currentPath);
+            // Фильтруем только директории
+            return list
+                .filter(item => item.type === 'd')
+                .map(item => ({
+                    id: currentPath.endsWith('/') ? currentPath + item.name : currentPath + '/' + item.name,
+                    name: item.name
+                }));
+        } catch (err) {
+            console.error("SFTP List Error:", err);
+            return [];
+        } finally {
+            await sftp.end();
+        }
+    }
+
+    if (provider === 'ftp') {
+        const ftp = require("basic-ftp");
+        const client = new ftp.Client();
+        client.ftp.timeout = 15000;
+        try {
+            await client.access({
+                host: host,
+                port: parseInt(port) || 21,
+                user: login,
+                password: pass,
+                secure: false
+            });
+            
+            const list = await client.list(currentPath);
+            // У basic-ftp тип 2 — это директория (обычно)
+            // Но надежнее проверять через item.isDirectory
+            return list
+                .filter(item => item.isDirectory)
+                .map(item => ({
+                    id: currentPath.endsWith('/') ? currentPath + item.name : currentPath + '/' + item.name,
+                    name: item.name
+                }));
+        } catch (err) {
+            console.error("FTP List Error:", err);
+            return [];
+        } finally {
+            client.close();
+        }
+    }
+    return [];
+}
+
+/**
  * Выполняет поиск файлов по имени или тегам.
  * Если вызвана админом — ищет по всем файлам.
  * Если вызвана пользователем — ищет только по своим файлам.
@@ -7035,37 +7463,42 @@ async function createDropboxFolder(folderName, token) {
 async function searchFilesByQuery(userId, isAdmin, query, env) {
   try {
     // Очищаем запрос от лишних символов для безопасности
-    const searchTerm = `%${query.trim()}%`;
-    let filesResult;
+    const { TypedValues } = require('ydb-sdk');
+    const searchTerm = `%${query.trim().toLowerCase()}%`;
+    let sql;
+    let params;
     if (isAdmin) {
       // Админ: ищем по ВСЕМ файлам
-      filesResult = await env.FILES_DB.prepare(
-        `SELECT id FROM files 
-         WHERE (fileName LIKE ? OR tags LIKE ?) 
-         ORDER BY timestamp DESC LIMIT 100`
-      ).bind(searchTerm, searchTerm).all();
+      sql = `DECLARE $search AS Utf8; 
+             SELECT id FROM files 
+             WHERE (Unicode::ToLower(fileName) LIKE Unicode::ToLower($search) 
+              OR Unicode::ToLower(tags) LIKE Unicode::ToLower($search))
+             ORDER BY timestamp DESC LIMIT 100`;
+      params = { '$search': env.TypedValues.utf8(searchTerm) };
     } else {
       // Обычный пользователь: только свои файлы
-      filesResult = await env.FILES_DB.prepare(
-        `SELECT id FROM files 
-         WHERE userId = ? 
-         AND (fileName LIKE ? OR tags LIKE ?) 
-         ORDER BY timestamp DESC LIMIT 50`
-      ).bind(String(userId), searchTerm, searchTerm).all();
+      sql = `DECLARE $uid AS Utf8; DECLARE $search AS Utf8; 
+             SELECT id FROM files 
+             WHERE userId = $uid 
+             AND (Unicode::ToLower(fileName) LIKE Unicode::ToLower($search) 
+              OR Unicode::ToLower(tags) LIKE Unicode::ToLower($search))
+             ORDER BY timestamp DESC LIMIT 50`;
+      params = { 
+        '$uid': env.TypedValues.utf8(String(userId)), 
+        '$search': env.TypedValues.utf8(searchTerm) 
+      };
     }
+    // ВАЖНО: Используем наш драйвер YDB
+    const result = await env.runQuery(env.filesDriver, sql, params);
+    const rows = result.resultSets[0].rows;
 
-    if (!filesResult.success || !filesResult.results || filesResult.results.length === 0) {
-      return { success: false, message: `По запросу "${query}" ничего не найдено.` };
+    if (!rows || rows.length === 0) {
+      return { success: false, fileIds: [] };
     }
 
     // 3. Собираем только ID
-    const relevantIds = filesResult.results.map(f => f.id);
-
-    return { 
-      success: true, 
-      fileIds: relevantIds 
-    };
-
+    const relevantIds = rows.map(row => row.items[0].textValue || row.items[0].uint64Value);
+    return { success: true, fileIds: relevantIds };
   } catch (e) {
     console.error("Search error:", e);
     return { success: false, message: "Ошибка поиска: " + e.message };
@@ -7083,64 +7516,47 @@ async function searchAIFilesByQuery(userId, isAdmin, query, env) {
   let candidates = [];
 
   try {
-    await logDebug(`?? [AI Search] Запуск для userID=${userId}, isAdmin=${isAdmin}, запрос: "${query}"`, env);
-
-    // --- Определяем тип файла ---
-    let fileTypeFilter = null;
-    const qLower = query.toLowerCase();
-    if (qLower.includes('фото') || qLower.includes('photo') || qLower.includes('изображение')) {
-      fileTypeFilter = 'photo';
-    } else if (qLower.includes('видео') || qLower.includes('video')) {
-      fileTypeFilter = 'video';
-    } else if (qLower.includes('голос') || qLower.includes('voice')) {
-      fileTypeFilter = 'voice';
-    } else if (qLower.includes('аудио') || qLower.includes('audio') || qLower.includes('mp3') || qLower.includes('ogg')) {
-      fileTypeFilter = 'audio';
-    }
-
-    // --- Извлекаем слова ---
     const queryWords = query
       .toLowerCase()
       .split(/\s+/)
       .filter(w => w.length >= 3 && !['для', 'про', 'с', 'на', 'в', 'и', 'или', 'из', 'все'].includes(w));
 
-    await logDebug(`?? [AI Search] Тип файла: ${fileTypeFilter}, Слова: [${queryWords.join(', ')}]`, env);
+    // Используем runQuery как в обычном поиске
+    let sql = `DECLARE $uid AS Utf8; `;
+    const params = { '$uid': env.TypedValues.utf8(String(userId)) };
 
-    // --- Формируем SQL ---
-    let sql = `SELECT id, fileName, ai_description FROM files WHERE ai_description IS NOT NULL`;
-    let binds = [];
+    // Собираем SQL
+    sql += `SELECT id, fileName, ai_description FROM files WHERE ai_description IS NOT NULL`;
 
     if (!isAdmin) {
-      sql += ` AND userId = ?`;
-      binds.push(String(userId));
+      sql += ` AND userId = $uid`;
     }
 
-    if (fileTypeFilter) {
-      sql += ` AND fileType = ?`;
-      binds.push(fileTypeFilter);
-    }
-
-    // Используем ИЛИ для слов (как в самом начале)
     if (queryWords.length > 0) {
-      const conditions = queryWords.map(() => `(ai_description LIKE ?)`).join(' OR ');
-      sql += ` AND (${conditions})`;
-      binds.push(...queryWords.map(w => `%${w}%`));
+      const conditions = [];
+      queryWords.forEach((word, index) => {
+        const paramName = `$w${index}`;
+        sql = `DECLARE ${paramName} AS Utf8; ` + sql; 
+        params[paramName] = env.TypedValues.utf8(`%${word}%`);
+        conditions.push(`(ai_description LIKE ${paramName})`);
+      });
+      sql += ` AND (${conditions.join(' OR ')})`;
     }
 
-    // ? Сортировка: СНАЧАЛА НОВЫЕ файлы (DESC по timestamp)
-    // ? Лимит: проверяем последние 50 файлов (достаточно для релевантности)
     sql += ` ORDER BY timestamp DESC LIMIT 50`;
 
-    await logDebug(`?? [AI Search] SQL: ${sql} | Параметры: ${JSON.stringify(binds)}`, env);
+    // Выполняем через рабочий драйвер
+    const result = await env.runQuery(env.filesDriver, sql, params);
+    const rows = result.resultSets[0].rows;
 
-    const candidatesResult = await env.FILES_DB.prepare(sql).bind(...binds).all();
-    candidates = candidatesResult.results || [];
+    if (!rows || rows.length === 0) return { success: true, fileIds: [] };
 
-    await logDebug(`?? [AI Search] Найдено кандидатов: ${candidates.length}`, env);
-
-    if (candidates.length === 0) {
-      return { success: true, fileIds: [] };
-    }
+    // ВАЖНО: Достаем id как Utf8 (textValue), как в твоем рабочем поиске
+    candidates = rows.map(row => ({
+      id: row.items[0].textValue, 
+      fileName: row.items[1].textValue,
+      ai_description: row.items[2].textValue
+    }));
 
   } catch (e) {
     await logDebug(`?? [AI Search] Ошибка SQL: ${e.message}`, env);
@@ -7149,9 +7565,10 @@ async function searchAIFilesByQuery(userId, isAdmin, query, env) {
 
   // --- Вызов ИИ ---
   try {
-    const candidatesList = candidates.map(f =>
-      `${f.id}. [${f.fileName}] ${f.ai_description.substring(0, 200).replace(/\n/g, ' ')}...`
-    ).join("\n");
+    const candidatesList = candidates.map(f => {
+      // Здесь f.id уже чистая строка из textValue
+      return `${f.id}. [${f.fileName}] ${f.ai_description.substring(0, 200).replace(/\n/g, ' ')}...`;
+    }).join("\n");
 
     const prompt = `Ты — эксперт по релевантности.
 Запрос: "${query}"
@@ -7162,18 +7579,41 @@ ${candidatesList}
     const modelConfig = await loadActiveConfig('TEXT_TO_TEXT', env);
     const responseText = await handleSearchRequest(prompt, modelConfig, env);
 
-    const relevantIds = [...responseText.matchAll(/\b\d+\b/g)]
-      .map(match => parseInt(match[0]))
-      .filter(id => id > 0);
+    // ТВОИ ПЕРЕМЕННЫЕ
+    const relevantIds = responseText
+      .split(',')
+      .map(id => id.trim())
+      .filter(id => id.length > 0 && id !== '0');
 
     if (relevantIds.length > 0) {
-      return { success: true, fileIds: relevantIds };
+      const finalIds = relevantIds.map(aiId => {
+        // 1. Сначала ищем по точному совпадению ID
+        let found = candidates.find(c => {
+          const cId = (typeof c.id === 'object' && c.id !== null) ? c.id.textValue : String(c.id);
+          return cId === aiId;
+        });
+
+        // 2. Если не нашли, значит ИИ вернул ПОРЯДКОВЫЙ НОМЕР (например "2")
+        if (!found && !isNaN(aiId)) {
+          const idx = parseInt(aiId) - 1; // ИИ часто считает с 1
+          if (candidates[idx]) found = candidates[idx];
+        }
+        
+        if (found) {
+          return (typeof found.id === 'object' && found.id !== null) ? found.id.textValue : String(found.id);
+        }
+        return null; // Если совсем мусор прислал — игнорим
+      }).filter(id => id !== null);
+
+      return { success: true, fileIds: finalIds };
     }
     throw new Error("ИИ не вернул ID");
 
   } catch (e) {
     await logDebug(`? [AI Search] Сбой ИИ. Используем всех кандидатов.`, env);
-    return { success: true, fileIds: candidates.map(f => f.id) };
+    // Фоллбэк тоже на чистых строках
+    const fallbackIds = candidates.map(f => String(f.id));
+    return { success: true, fileIds: fallbackIds };
   }
 }
 
@@ -7458,30 +7898,50 @@ async function callGeminiVideoVision(config, videoBuffer, env, mimeType) {
 
 // ? *** Workers AI Chat API (для текстового общения с историей) ***
 async function callWorkersAIChat(systemPrompt, config, env, userPrompt) {
-  const { AI } = env;
-  if (!AI) {
-      throw new Error("Workers AI binding 'AI' не настроен.");
-  }
-
+  // Получаем учетные данные из окружения (process.env в Яндекс.Облаке)
+  const CLOUDFLARE_ACCOUNT_ID = env.CLOUDFLARE_ACCOUNT_ID || process.env.CLOUDFLARE_ACCOUNT_ID;
+  const CLOUDFLARE_API_TOKEN = env.CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
   const MODEL_NAME = config.MODEL;
-  const messages = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt }
-  ];
+  const URL = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${MODEL_NAME}`;
+  if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_API_TOKEN) {
+        throw new Error("Не настроены ID аккаунта или API токен Cloudflare.");
+    }
+  
+  const payload = {
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+        ],
+        stream: false,
+        max_tokens: 1000,
+        temperature: 0.7
+    };
 
   try {
-      const response = await AI.run(MODEL_NAME, { 
-          messages: messages,
-          stream: false,
-          max_tokens: 500,
-          temperature: 0.7
-      });
+      console.log(`[CHAT] Запрос к CF AI: ${MODEL_NAME}`);
+        
+        const fetchResponse = await fetch(URL, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
 
-      if (!response?.response) {
-          throw new Error(`Workers AI не вернул ответ. Response: ${JSON.stringify(response)}`);
-      }
+        if (!fetchResponse.ok) {
+            const errorBody = await fetchResponse.json();
+            throw new Error(`CF API Error: ${fetchResponse.status} - ${errorBody.errors?.[0]?.message || fetchResponse.statusText}`);
+        }
 
-      return response.response.trim();
+        const aiResponse = await fetchResponse.json();
+
+        // Важно: В внешнем API ответ лежит в aiResponse.result.response
+        if (!aiResponse.success || !aiResponse.result || !aiResponse.result.response) {
+            throw new Error(`CF AI вернул странный ответ: ${JSON.stringify(aiResponse)}`);
+        }
+
+        return aiResponse.result.response.trim();
   } catch (e) {
       console.error("Workers AI call failed:", e);
       throw new Error(`Ошибка Workers AI: ${e.message}`);
@@ -7496,39 +7956,37 @@ async function callWorkersAIChat(systemPrompt, config, env, userPrompt) {
  * @param {Object} env - Объект окружения, содержащий привязку AI.
  * @returns {Promise<string>} Транскрибированный текст.
  */
-async function callWorkersAISpeechToText(config, audioBuffer, env) {
-  const { AI } = env;
-  // --- УНИФИКАЦИЯ: Используем модель из конфигурации ---
-  const WHISPER_MODEL = config.MODEL; 
-  // ---------------------------------------------------
+async function callWorkersAISpeechToText(config, audioBuffer, envData) {
+    const CLOUDFLARE_ACCOUNT_ID = envData.CLOUDFLARE_ACCOUNT_ID || process.env.CLOUDFLARE_ACCOUNT_ID;
+    const CLOUDFLARE_API_TOKEN = envData.CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
+    const WHISPER_MODEL = config.MODEL; 
+    const URL = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${WHISPER_MODEL}`;
 
-  if (!AI) {
-      throw new Error("Workers AI binding 'AI' не настроен.");
-  }
+    try {
+        console.log(`[ASR] Отправка бинарного потока к Cloudflare AI...`);
+        
+        const fetchResponse = await fetch(URL, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+                // ВОТ ЭТА СТРОКА ГОВОРИТ: "НЕ ИЩИ ТУТ JSON, ЭТО АУДИО"
+                'Content-Type': 'application/octet-stream' 
+            },
+            body: audioBuffer 
+        });
 
-  // Workers AI ожидает массив байтов (Array of numbers)
-  // Функция теперь принимает audioBuffer вторым аргументом, согласно новой подписи.
-  const audioData = [...new Uint8Array(audioBuffer)]; 
+        const response = await fetchResponse.json();
+        const aiResponse = response.result; 
 
-  try {
-      const aiResponse = await AI.run(
-          WHISPER_MODEL,
-          {
-              audio: audioData
-          }
-      );
+        if (!aiResponse || !aiResponse.text) {
+            throw new Error(`Whisper API не вернул текст. Response: ${JSON.stringify(response)}`);
+        }
 
-      if (!aiResponse || !aiResponse.text) {
-          throw new Error(`Whisper API не вернул ожидаемый текст. Response: ${JSON.stringify(aiResponse)}`);
-      }
-
-      // Возвращаем транскрибированный текст
-      return aiResponse.text.trim();
-  } catch (e) {
-      console.error("Workers AI Whisper call failed:", e);
-      // Перебрасываем ошибку с префиксом ASR, который вы используете в logDebug
-      throw new Error(`ASR_FAIL: Ошибка Workers AI Whisper: ${e.message}`);
-  }
+        return aiResponse.text.trim();
+    } catch (e) {
+        console.error("Workers AI Whisper call failed:", e);
+        throw new Error(`ASR_FAIL: ${e.message}`);
+    }
 }
 
 // ? *** Workers AI Vision (Uform-Gen2 для генерации промпта из фото) - УНИФИЦИРОВАНО ***
@@ -7540,13 +7998,14 @@ async function callWorkersAISpeechToText(config, audioBuffer, env) {
  * @returns {Promise<string>} Сгенерированный текстовый промпт.
  */
 async function callWorkersAIVision(config, imageBuffer, env) { // <-- ИЗМЕНЕНА ПОДПИСЬ
-  const { AI } = env;
+  const CLOUDFLARE_ACCOUNT_ID = env.CLOUDFLARE_ACCOUNT_ID || process.env.CLOUDFLARE_ACCOUNT_ID;
+  const CLOUDFLARE_API_TOKEN = env.CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
   // --- УНИФИКАЦИЯ: Используем модель из конфигурации ---
   const VISION_MODEL = config.MODEL; 
-  // ---------------------------------------------------
+  const URL = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${VISION_MODEL}`;
 
-  if (!AI) {
-      throw new Error("Workers AI binding 'AI' не настроен.");
+  if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_API_TOKEN) {
+      throw new Error("VISION_FAIL: Не настроены CLOUDFLARE_ACCOUNT_ID или CLOUDFLARE_API_TOKEN.");
   }
 
   // Здесь audioBuffer стал вторым аргументом, а promptText - третьим.
@@ -7555,20 +8014,34 @@ async function callWorkersAIVision(config, imageBuffer, env) { // <-- ИЗМЕН
   // Uform-Gen2 требует простого промпта. Мы используем эффективную инструкцию на английском.
   const simplifiedPrompt = `Describe the attached image in full detail as a high-quality, atmospheric, long prompt (max 750 characters) for an image generation AI like Stable Diffusion or Midjourney. Focus on subject, style, lighting, and composition. The response must be ONLY in RUSSIAN, without any added commentary.`;
 
-  try {
-      const aiResponse = await AI.run(
-          VISION_MODEL,
-          {
-              prompt: simplifiedPrompt,
-              image: imageBytes
-          }
-      );
+  const payload = {
+    prompt: simplifiedPrompt,
+    image: imageBytes
+  };
 
-      if (!aiResponse || !aiResponse.description) { // <-- Uform возвращает 'description'
-          throw new Error(`Vision API не вернул ожидаемый ответ. Response: ${JSON.stringify(aiResponse)}`);
+  try {
+      const fetchResponse = await fetch(URL, {
+          method: 'POST',
+          headers: {
+              'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+              'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+      });
+
+      if (!fetchResponse.ok) {
+          const errorBody = await fetchResponse.json();
+          throw new Error(`Cloudflare API Error: ${fetchResponse.status} - ${errorBody.errors?.[0]?.message || fetchResponse.statusText}`);
       }
 
-      return aiResponse.description.trim();
+      const aiResponse = await fetchResponse.json();
+
+      // В внешнем API ответ всегда обернут в .result
+      if (!aiResponse.success || !aiResponse.result || !aiResponse.result.description) {
+          throw new Error(`Vision API не вернул описание. Response: ${JSON.stringify(aiResponse)}`);
+      }
+
+      return aiResponse.result.description.trim();
   } catch (e) {
       console.error("Workers AI Vision call failed:", e);
       throw new Error(`VISION_FAIL: Ошибка Workers AI Vision: ${e.message}`);

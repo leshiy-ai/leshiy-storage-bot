@@ -1,51 +1,47 @@
-const { Driver, getCredentialsFromEnv, getLogger, TypedValues } = require('yandex-cloud/nodejs-sdk');
-const { worker_code_fetch } = require('./worker.js'); // Импортируем код воркера
-const { initYdb, runQuery, USER_DB_ADAPTER, FILES_DB_ADAPTER, filesDriver } = require('./db_adapter.js');
+const { USER_DB_ADAPTER, FILES_DB_ADAPTER, TypedValues, runQuery, filesDriver } = require('./db_adapter');
+const worker = require('./worker'); 
+const fetch = require('node-fetch');
 
-// --- Handler (точка входа для Yandex.Cloud Functions) ---
+// Глобальные пропсы для имитации среды Cloudflare
+global.fetch = fetch;
+global.Headers = fetch.Headers;
+global.Request = fetch.Request;
+global.Response = fetch.Response;
+
 module.exports.handler = async (event, context) => {
+    // ПАРСИНГ ТЕЛА (для Telegram)
+    let body = {};
     try {
-        // --- 1. Адаптация Yandex.Cloud Event в Request-совместимый объект ---
-        const urlSearchParams = new URLSearchParams();
-        if (event.queryStringParameters) {
-            for (const key in event.queryStringParameters) {
-                urlSearchParams.append(key, event.queryStringParameters[key]);
-            }
-        }
-        const queryString = urlSearchParams.toString();
+        body = typeof event.body === 'string' ? JSON.parse(event.body) : (event.body || {});
+    } catch (e) {
+        body = event.body;
+    }
 
-        // Формируем полный URL (примерный, для совместимости)
-        // APP_DOMAIN должен быть в переменных окружения
-        const domain = process.env.APP_DOMAIN || 'localhost';
-        const fullUrl = `https://${domain}${event.url}${queryString ? '?' + queryString : ''}`;
+    // СБОРКА ПОЛНОГО URL
+    const uri = event.headers['x-envoy-original-path'] || event.url || '/';
+    const domain = process.env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
+    const fullUrl = `https://${domain}${uri}`;
+    console.log("?? URL ДЛЯ ВОРКЕРА:", fullUrl);
 
-        // Адаптируем заголовки
-        const headers = new Headers();
-        if (event.headers) {
-            for (const key in event.headers) {
-                headers.append(key, event.headers[key]);
-            }
-        }
+    // СОЗДАНИЕ ОБЪЕКТА ЗАПРОСА
+    const requestOptions = {
+        method: event.httpMethod,
+        headers: event.headers,
+    };
 
-        // Формируем объект Request
-        const requestOptions = {
-            method: event.httpMethod,
-            headers: headers,
-        };
+    if (event.httpMethod !== 'GET' && event.httpMethod !== 'HEAD' && event.body) {
+        requestOptions.body = event.isBase64Encoded ? Buffer.from(event.body, 'base64') : event.body;
+    }
 
-        if (event.httpMethod !== 'GET' && event.httpMethod !== 'HEAD' && event.body) {
-            requestOptions.body = event.isBase64Encoded ? Buffer.from(event.body, 'base64') : event.body;
-        }
-
-        const request = new Request(fullUrl, { ...requestOptions });
+    const request = new Request(fullUrl, { ...requestOptions });
 
         const env = {
-          USER_DB: USER_DB_ADAPTER, // Используем готовый адаптер
-          FILES_DB: FILES_DB_ADAPTER,
-          TypedValues: TypedValues, // Переменная из db_adapter
-          runQuery: runQuery,       // Функция из db_adapter
-          filesDriver: filesDriver, // Драйвер из db_adapter
-          // --- Переменные окружения ---
+            USER_DB: USER_DB_ADAPTER, // Используем готовый адаптер
+            FILES_DB: FILES_DB_ADAPTER,
+            TypedValues: TypedValues, // Переменная из db_adapter
+            runQuery: runQuery,       // Функция из db_adapter
+            filesDriver: filesDriver, // Драйвер из db_adapter
+            // Остальные переменные (токены)
           APP_DOMAIN: process.env.APP_DOMAIN,
           BOTHUB_API_KEY: process.env.BOTHUB_API_KEY,
           BOT_USERNAME: process.env.BOT_USERNAME,
@@ -70,31 +66,41 @@ module.exports.handler = async (event, context) => {
       };
 
 
-        // --- 2. Вызов логики воркера ---
-        const response = await worker_code_fetch(request, env, context);
+      const ctx = { waitUntil: (promise) => promise };
 
-        // --- 3. Адаптация Response в формат Yandex.Cloud Functions ---
-        const responseBody = await response.text();
-        const responseHeaders = {};
-        for (const [key, value] of response.headers.entries()) {
-            responseHeaders[key] = value;
-        }
-
-        return {
-            statusCode: response.status,
-            headers: responseHeaders,
-            body: responseBody,
-            isBase64Encoded: false // Предполагаем, что воркер не отдает base64
-        };
-
-    } catch (error) {
-        console.error('Critical error in handler:', error);
-        return {
-            statusCode: 500,
-            body: 'Internal Server Error: ' + error.message
-        };
-    }
-};
-
-// Инициализация YDB при старте функции
-initYdb();
+      // ЗАПУСК ВОРКЕРА
+      try {
+          if (body.callback_query) {
+              console.log(`[TELEGRAM] Клик: ${body.callback_query.data}`);
+          }
+  
+          // Вызываем именно ту функцию, которая у тебя в worker.js
+          const response = await worker.worker_code_fetch(request, env, ctx);
+          
+          // Обработка ответа
+          if (!response || typeof response.text !== 'function') {
+              return {
+                  statusCode: 200,
+                  body: typeof response === 'string' ? response : JSON.stringify(response || "OK")
+              };
+          }
+  
+          const resText = await response.text();
+          const resHeaders = {};
+          if (response.headers) {
+              response.headers.forEach((v, k) => { resHeaders[k] = v; });
+          }
+  
+          return {
+              statusCode: response.status || 200,
+              headers: resHeaders,
+              body: resText
+          };
+      } catch (e) {
+          console.error("CRITICAL RUNTIME ERROR:", e);
+          return {
+              statusCode: 500,
+              body: JSON.stringify({ error: e.message })
+          };
+      }
+  };
