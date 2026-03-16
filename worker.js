@@ -1,8 +1,8 @@
-/* 🗄Приложение "Хранилка" by Leshiy
+/* 🗄 Приложение "Хранилка" by Leshiy
 
 Чат-бот и приложение для автоматической загрузки фото и видео в облачное хранилище с реферальной системой доступа.
 
-🇷🇺 Одновременно работает как Telegram-бот, vk-чат-бот, и vkMiniApp-приложение и okMiniApp в одноклассниках с функцией аплоад/доунлоад с реферальной системой доступа.
+🇷🇺 Одновременно работает как Telegram-бот и tgApp-приложение, vk-чат-бот, и vkMiniApp-приложение и okMiniApp в одноклассниках с функцией аплоад/доунлоад с реферальной системой доступа.
 🆓 Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. Абсолютно бесплатно.
 🌐 Это продвинутый SaaS-инструмент работающий круглосуточно 24/7 для личного использования или сообщества по обмену файлами с друзьями и родственниками.
 ✨ Основные функции: Автоматическая загрузка фото и видео на облачные платформы (Яндекс Диск, Google Drive, Dropbox, Облако Mail.Ru WebDAV, или Свои FTP/SFTP/WebDAV сервера.)
@@ -17,7 +17,7 @@
 */
 
 // Глобальные константы
-const version = "v3.0.7 от 05.03.2026"; // актуальная версия
+const version = "v3.1.0 от 16.03.2026"; // актуальная версия
 
 const providerNames = {
     'yandex': '☁️ Яндекс Диск',
@@ -133,6 +133,15 @@ async function worker_code_fetch(request, env, ctx) {
         const redirectUri = encodeURIComponent(`https://${domain}/auth/dropbox/callback`);
         const target = `https://www.dropbox.com/oauth2/authorize?client_id=${env.DROPBOX_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&state=${state}`;
         return renderRedirectPage(target, "Dropbox");
+      }
+
+      // 4. Telegram
+      if (url.pathname === "/auth/telegram") {
+        const domain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
+        const bot_id = "547043436"; // ID бота @leshiy_storage_bot
+        const redirectUri = encodeURIComponent(`https://${domain}/auth/telegram/callback`);
+        const target = `https://oauth.telegram.org/auth?bot_id=${botId}&origin=${encodeURIComponent('https://' + domain)}&request_access=write&return_to=${encodeURIComponent(redirectUri)}`;
+        return renderRedirectPage(target, "Telegram");
       }
 
       if (url.searchParams.get("action") === "get-status") {
@@ -830,12 +839,25 @@ async function worker_code_fetch(request, env, ctx) {
       if (url.pathname === "/auth/google/callback") return await handleGoogleCallback(request, env);
       if (url.pathname === "/auth/mailru/callback") return await handleMailruCallback(request, env);
       if (url.pathname === "/auth/dropbox/callback") return await handleDropboxCallback(request, env);
+      if (url.pathname === "/auth/telegram/callback") return await handleTelegramCallback(request, env);
+      if (url.pathname === "/auth/vk/callback") return await handleVKCallback(request, env);
+
+      // --- ТОЧКА ВХОДА TELEGRAM MINI APP ---
+      if (url.pathname === "/tg") {
+        // Просто вызываем функцию и возвращаем результат её работы
+        return await handleTelegramApp(request, env);
+      }
 
       // --- ОБРАБОТКА VK MINI APP ---
       if (url.pathname === "/vk" || url.pathname.startsWith("/app")) {
         const params = Object.fromEntries(url.searchParams);
         const vkUserId = params.vk_user_id;
         
+        // 1. ЕСЛИ МЫ В БРАУЗЕРЕ (НЕТ ID) — ПОКАЗЫВАЕМ ВИДЖЕТ АВТОРИЗАЦИИ
+        if (!vkUserId) {
+            return handleVKAuthPage(request, env); 
+        }
+      
         let userData = null;
         try {
             if (vkUserId) {
@@ -843,6 +865,12 @@ async function worker_code_fetch(request, env, ctx) {
               if (kvData) {
                   // Если адаптер вернул объект — берем его, если строку — парсим
                   userData = (typeof kvData === 'object') ? kvData : JSON.parse(kvData);
+                  // ДОБАВЛЯЕМ ЭТО: подкидываем данные из базы в params
+                  if (userData) {
+                      params.userName = userData.name || userData.userName;
+                      params.userPhoto = userData.photo || userData.userPhoto; 
+                      // Теперь в params есть и фото, и имя, взятые из DB
+                  }
               }
             }
         } catch (e) {
@@ -1568,7 +1596,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
   if (text === '/about') {
     const aboutText = `<b>Приложение «Хранилка» by Leshiy</b>
 
-  Одновременно работает как <a href='https://t.me/leshiy_storage_bot'>Telegram-бот</a>, <a href='https://vk.com/write-235249123'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010'>vkMiniApp-приложение</a> а также доступно как <a href='https://ok.ru/app/512004791160'>okMiniApp в одноклассниках</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.
+  Одновременно работает как <a href='https://t.me/leshiy_storage_bot'>Telegram-бот</a>, <a href='https://t.me/leshiy_storage_bot/app'>tgApp-приложение</a>, <a href='https://vk.com/write-235249123'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010'>vkMiniApp-приложение</a> а также доступно как <a href='https://ok.ru/app/512004791160'>okMiniApp в одноклассниках</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.
 
   ✨ <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru, WebDAV, FTP, SFTP. Можно делиться доступом с близкими!
   🧠 <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.
@@ -2851,7 +2879,7 @@ async function handleVK(body, env, hostname, ctx) {
       // Обработка команды /about
       if (command === "/about") {
         let aboutText = `Приложение «Хранилка» by Leshiy\n\n`;
-        aboutText += `Одновременно работает как Telegram-бот https://t.me/leshiy_storage_bot, @leshiy_ai (vk-чат-бот), и [https://vk.com/app${VK_APP_ID}|vkMiniApp-приложение] и [https://ok.ru/app/${OK_APP_ID}|okMiniApp-приложение] с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.\n`;
+        aboutText += `Одновременно работает как Telegram-бот https://t.me/leshiy_storage_bot, Tg-приложение https://t.me/leshiy_storage_bot/app, @leshiy_ai (vk-чат-бот), и [https://vk.com/app${VK_APP_ID}|vkMiniApp-приложение] и [https://ok.ru/app/${OK_APP_ID}|okMiniApp-приложение] с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.\n`;
         aboutText += `✨ Что я умею: Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru, WebDAV, FTP, SFTP. Можно делиться доступом с близкими!\n`;
         aboutText += `🧠 Gemini AI: Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.\n\n`;
         aboutText += `© Автор: Огорельцев Александр Валерьевич`;
@@ -3650,23 +3678,29 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
   <div class="footer">Версия: ${version} | ID: ${userId}</div>
 
   <script>
-    // Сначала инициализируем Bridge
+    // 1. Сразу объявляем глобальные данные от сервера
+    // Используем простые кавычки и проверяем на пустые значения
+    window.userName = "${userData?.name || userData?.userName || 'Пользователь'}";
+    window.userPhoto = "${userData?.photo || userData?.userPhoto || ''}";
+    
+    console.log("Старт скрипта. Данные сервера:", window.userName);
+
+    // 2. Инициализируем Bridge
     vkBridge.send('VKWebAppInit');
     
+    // 3. Запрашиваем инфу у ВК (если мы в приложении)
     vkBridge.send('VKWebAppGetUserInfo').then(function(user) {
-      if (user) {
+      if (user && user.id) {
         window.userName = user.first_name + ' ' + user.last_name;
         window.userPhoto = user.photo_100;
-        console.log("Пользователь определен:", window.userName);
-        
-        // Теперь, когда имя точно есть, обновляем UI и шлем имя на сервер
-        if (typeof refreshData === 'function') refreshData();
+        console.log("Bridge обновил данные:", window.userName);
       }
+      if (typeof refreshData === 'function') refreshData();
     }).catch(function(err) {
-      console.error("Ошибка Bridge:", err);
-      // Если юзер запретил инфу, всё равно запускаем приложение
+      console.log("Bridge недоступен (браузер), работаем на данных сервера");
       if (typeof refreshData === 'function') refreshData();
     });
+
     // Очищаем awaiting_auth, если пользователь уже подключён
     if (${isConnected}) {
       localStorage.removeItem('awaiting_auth');
@@ -3858,7 +3892,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         ru: {
             hi: "Привет",
             tagline: "Приложение «Хранилка» by Leshiy",
-            shortDesc: "Одновременно работает как <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram-бот</a>, <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>vkMiniApp-приложение</a> и <a href='https://ok.ru/app/512004791160' target='_blank' style='color: #4db3ff;'>okMiniApp в одноклассниках</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.",
+            shortDesc: "Одновременно работает как <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram-бот</a>, <a href='https://t.me/leshiy_storage_bot/app' target='_blank' style='color: #4db3ff;'>tgApp-приложение</a>, <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>vkMiniApp-приложение</a> и <a href='https://ok.ru/app/512004791160' target='_blank' style='color: #4db3ff;'>okMiniApp в одноклассниках</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.",
             features: "✨ <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru и WebDAV. Можно делиться доступом с близкими!",
             aiNote: "🧠 <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.",
             status: "⚙️ Связь с хранилищем:",
@@ -3870,7 +3904,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         en: {
             hi: "Hi",
             tagline: "App «Storage» by Leshiy",
-            shortDesc: "It works simultaneously as a <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram bot</a>, a <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>VK chat bot</a>, and a <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>VKMiniApp</a> and <a href='https://ok.ru/app/512004791160' target='_blank' style='color: #4db3ff;'>okMiniApp</a> application with an upload/download function and a referral access system. Serves as a «bridge» between social networks and cloud storage. Allows you to save media files (photos, videos, documents) to your personal cloud storage. 24/7 at your service.",
+            shortDesc: "It works simultaneously as a <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram bot</a>, <a href='https://t.me/leshiy_storage_bot/app' target='_blank' style='color: #4db3ff;'>Telegram App</a>, <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>VK chat bot</a>, and a <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>VKMiniApp</a> and <a href='https://ok.ru/app/512004791160' target='_blank' style='color: #4db3ff;'>okMiniApp</a> application with an upload/download function and a referral access system. Serves as a «bridge» between social networks and cloud storage. Allows you to save media files (photos, videos, documents) to your personal cloud storage. 24/7 at your service.",
             features: "✨ <b>Features:</b> High-quality uploads, support for Yandex, Google, Dropbox, Mail.Ru & WebDAV. Share access with your family!",
             aiNote: "🧠 <b>Gemini AI:</b> Feel free to ask me anything about the bot or just chat.",
             status: "⚙️ Cloud Connection:",
@@ -8543,6 +8577,222 @@ async function createWebDavFolder(folderName, userData) {
 
   // 201 — создано, 405 — уже существует (иногда Mail.ru возвращает 405)
   return res.status === 201 || res.status === 405;
+}
+
+// Работа с ВК
+function handleVKAuthPage(request, env) {
+    return new Response(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body { background: #212121; margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; }
+                .card { 
+                    background: white; 
+                    padding: 32px 24px; 
+                    border-radius: 28px; 
+                    width: 360px; 
+                    text-align: center; 
+                    box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+                }
+                .title { font: 700 20px sans-serif; margin-bottom: 8px; color: #000; }
+                .subtitle { font: 400 14px sans-serif; color: #818c99; margin-bottom: 24px; line-height: 1.4; }
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <div style="font-size: 40px; margin-bottom: 10px;">🔐</div>
+                <div class="title">Вход в Хранилку</div>
+                <div class="subtitle">Используйте VK ID для безопасного доступа к вашим файлам</div>
+                <div id="vkid"></div>
+            </div>
+
+            <script src="https://unpkg.com/@vkid/sdk@<3.0.0/dist-sdk/umd/index.js"></script>
+            <script>
+                const VKID = window.VKIDSDK;
+                VKID.Config.init({
+                    app: 54467300,
+                    redirectUrl: 'https://d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net/auth/vk/callback',
+                    responseMode: VKID.ConfigResponseMode.Callback
+                });
+
+                const oneTap = new VKID.OneTap();
+                oneTap.render({
+                    container: document.getElementById('vkid'),
+                    showAlternativeLogin: true,
+                    oauthList: ['mail_ru', 'ok_ru'],
+                    styles: { height: 44, borderRadius: 8 }
+                })
+                .on(VKID.OneTapInternalEvents.LOGIN_SUCCESS, function(payload) {
+                    // ОБМЕН КОДА НА ID (как в твоем гитхабе)
+                    VKID.Auth.exchangeCode(payload.code, payload.device_id)
+                        .then(res => {
+                            // Берем именно user_id из того JSON, что ты прислал
+                            const userId = res.user_id || (res.user && res.user.id);
+                            if (userId) {
+                                // ПИШЕМ В LOCALSTORAGE, чтобы get-status его увидел
+                                localStorage.setItem('vk_user_id', String(userId));
+                                window.location.href = '/auth/vk/callback?vk_user_id=' + userId;
+                            }
+                        })
+                        .catch(err => {
+                            console.error(err);
+                            const backupId = payload.uuid || payload.user?.id;
+                            if (backupId) {
+                                localStorage.setItem('vk_user_id', String(backupId));
+                                window.location.href = '/auth/vk/callback?vk_user_id=' + backupId;
+                            }
+                        });
+                });
+            </script>
+        </body>
+        </html>
+    `, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+}
+
+// Авторизация через ВК
+async function handleVKCallback(request, env) {
+    const url = new URL(request.url);
+    const userId = url.searchParams.get('vk_user_id');
+
+    if (!userId || userId === 'undefined') {
+        return new Response("Ошибка: ID не получен", { status: 400 });
+    }
+
+    // Финальный прыжок в Хранилку с параметром, который поймет основной скрипт
+    return new Response(null, {
+        status: 302,
+        headers: { 'Location': `/vk?vk_user_id=${userId}` }
+    });
+}
+
+// Работа с Телеграм
+async function handleTelegramApp(request, env) {
+    const domain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
+    const bot_name = env.BOT_USERNAME || "leshiy_storage_bot";
+
+    return new Response(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Хранилка: Вход</title>
+            <script src="https://telegram.org/js/telegram-web-app.js"></script>
+            <style>
+                body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background: #212121; color: white; margin: 0; }
+                .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 2s linear infinite; margin-bottom: 20px; }
+                @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+                #widget-container { display: none; text-align: center; background: white; color: black; border-radius: 24px; padding: 32px 24px; width: 90%; max-width: 360px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+                #widget-container h3 { margin: 0 0 10px; font-size: 24px; font-weight: 700; color: black; }
+                #widget-container p { color: #666; margin-bottom: 24px; font-size: 15px; }
+                #tg-login-btn { display: flex; justify-content: center; min-height: 44px; }
+            </style>
+        </head>
+        <body>
+            <div id="loading">
+              <div class="loader"></div>
+              <p>Проверка Telegram...</p>
+            </div>
+
+            <div id="widget-container">
+              <div style="font-size: 40px; margin-bottom: 10px;">🔐</div>
+              <h3>Вход в Хранилку</h3>
+              <p>Используйте Telegram ID для безопасного доступа к вашим файлам</p>
+              <div id="tg-login-btn"></div>
+            </div>
+
+            <script>
+                // Твоя оригинальная функция отрисовки
+                function showWidget() {
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('widget-container').style.display = 'block';
+                    
+                    const script = document.createElement('script');
+                    script.async = true;
+                    script.src = "https://telegram.org/js/telegram-widget.js?22";
+                    script.setAttribute('data-telegram-login', "${bot_name}");
+                    script.setAttribute('data-size', 'large');
+                    script.setAttribute('data-auth-url', "https://${domain}/auth/telegram/callback");
+                    script.setAttribute('data-request-access', 'write');
+                    document.getElementById('tg-login-btn').appendChild(script);
+                }
+
+                const tg = window.Telegram.WebApp;
+                
+                if (tg.initData && tg.initData.length > 0) {
+                    window.location.href = "/auth/telegram/callback?" + tg.initData;
+                } else {
+                    setTimeout(() => {
+                        if (!tg.initData || tg.initData.length === 0) {
+                            showWidget();
+                        } else {
+                            window.location.href = "/auth/telegram/callback?" + tg.initData;
+                        }
+                    }, 300);
+                }
+            </script>
+        </body>
+        </html>
+    `, { headers: { 
+            'Content-Type': 'text/html; charset=utf-8',
+            'Content-Security-Policy': "frame-ancestors 'self' https://*.telegram.org https://d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net https://leshiy-ai.github.io; script-src 'self' 'unsafe-inline' https://telegram.org https://oauth.telegram.org; frame-src https://oauth.telegram.org https://*.telegram.org; img-src * data:; connect-src *;"
+        } 
+    });
+}
+
+// Авторизация через Телеграм
+async function handleTelegramCallback(request, env) {
+  const url = new URL(request.url);
+  const authData = Object.fromEntries(url.searchParams);
+  const { hash, ...data } = authData;
+
+  // Достаем nodeCrypto из env
+  const cryptoLibrary = env.nodeCrypto; 
+  if (!cryptoLibrary) return new Response("Crypto lib not found in env", { status: 500 });
+
+  const checkString = Object.keys(data)
+    .sort()
+    .map(key => `${key}=${data[key]}`)
+    .join('\n');
+
+  let secretKey;
+  if (authData.user) {
+    // Mini App
+    secretKey = cryptoLibrary.createHmac('sha256', 'WebAppData')
+                             .update(env.BOT_TOKEN)
+                             .digest();
+  } else {
+    // Виджет (Браузер)
+    secretKey = cryptoLibrary.createHash('sha256')
+                             .update(env.BOT_TOKEN)
+                             .digest();
+  }
+
+  const hmac = cryptoLibrary.createHmac('sha256', secretKey)
+                            .update(checkString)
+                            .digest('hex');
+
+  if (hmac !== hash) {
+    return new Response("Invalid Hash", { status: 403 });
+  }
+
+  // Вынимаем ID правильно
+  let userId;
+  if (authData.user) {
+      userId = JSON.parse(authData.user).id;
+  } else {
+      userId = authData.id;
+  }
+
+  // Редирект (как мы договорились, через конструктор)
+  const targetDomain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
+  return new Response(null, {
+    status: 302,
+    headers: { 'Location': `https://${targetDomain}/vk?vk_user_id=${userId}&source=telegram` }
+  });
 }
 
 // Работа с DropBox
