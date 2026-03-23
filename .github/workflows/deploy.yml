@@ -27,4 +27,5 @@ jobs:
           memory: '256Mb'
           execution-timeout: '60s'
           entrypoint: 'index.handler' # Точка входа в твоем index.js
-          # МЫ УДАЛИЛИ БЛОК environment ПОЛНОСТЬЮ.
+          environment: |
+            TELEGRAM_TOKEN=${{ secrets.TELEGRAM_TOKEN }}
