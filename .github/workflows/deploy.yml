@@ -26,7 +26,8 @@ jobs:
           runtime: 'nodejs22'
           memory: '256Mb'
           execution-timeout: '60s'
-          service-account-id: ${{ secrets.YANDEX_SERVICE_ID }}
+          service-account: ${{ secrets.YANDEX_SERVICE_ID }}
+          network-id: ${{ secrets.YANDEX_NETWORK_ID }}
           entrypoint: 'index.handler' # Точка входа в твоем index.js
           environment: |
             APP_DOMAIN=${{ vars.APP_DOMAIN }}
