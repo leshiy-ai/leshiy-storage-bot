@@ -1,5 +1,5 @@
 
-name: Deploy to Yandex Cloud
+name: Deploy to Yandex.Cloud Functions
 
 on:
   push:
@@ -13,13 +13,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy Yandex Cloud Function
+      - name: Deploy Function
         uses: yc-actions/yc-sls-function@v4
         with:
           yc-sa-json-credentials: ${{ secrets.YANDEX_SECRET_KEY }}
           folder-id: ${{ secrets.YANDEX_FOLDER_ID }}
           function-name: 'storage-bot-worker'
-          runtime: 'nodejs20'
-          entrypoint: 'index.handler'
-          memory: '256m'
-          execution-timeout: '10s'
+          runtime: 'nodejs22'
+          memory: '256Mb'
+          execution-timeout: '60s'
+          entrypoint: 'index.handler' # Точка входа в твоем index.js
+          # БЛОК ENVIRONMENT УДАЛЕН — ЯНДЕКС СОХРАНИТ ТЕКУЩИЕ НАСТРОЙКИ
