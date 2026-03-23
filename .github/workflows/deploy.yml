@@ -18,7 +18,7 @@ jobs:
         with:
           yc-sa-json-credentials: ${{ secrets.YANDEX_SECRET_KEY }}
           folder-id: ${{ secrets.YANDEX_FOLDER_ID }}
-          function-id: ${{ secrets.YANDEX_FUNCTION_ID }}
+          function-name: 'storage-bot-worker'
           runtime: 'nodejs22'
           memory: '256Mb'
           execution-timeout: '60s'
@@ -44,7 +44,6 @@ jobs:
             VK_SECURE_KEY=${{ secrets.VK_SECURE_KEY }}
             VK_SERVICE_KEY=${{ secrets.VK_SERVICE_KEY }}
             OK_APP_ID=${{ secrets.OK_APP_ID }}
-            
             # Облака и интеграции [cite: 1, 2]
             APP_DOMAIN=${{ secrets.APP_DOMAIN }}
             YANDEX_CLIENT_ID=${{ secrets.YANDEX_CLIENT_ID }}
