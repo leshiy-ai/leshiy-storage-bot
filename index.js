@@ -54,6 +54,7 @@ module.exports.handler = async (event, context) => {
         DROPBOX_CLIENT_SECRET: process.env.DROPBOX_CLIENT_SECRET,
         GEMINI_API_KEY: process.env.GEMINI_API_KEY,
         GEMINI_BOT_TOKEN: process.env.GEMINI_BOT_TOKEN,
+        GEMINI_PROXY_KEY: process.env.GEMINI_PROXY_KEY,
         GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
         GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
         MAILRU_CLIENT_ID: process.env.MAILRU_CLIENT_ID,

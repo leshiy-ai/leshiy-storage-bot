@@ -42,6 +42,7 @@ jobs:
             DROPBOX_CLIENT_SECRET=${{ secrets.DROPBOX_CLIENT_SECRET }}
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
             GEMINI_BOT_TOKEN=${{ secrets.GEMINI_BOT_TOKEN }}
+            GEMINI_PROXY_KEY=${{ secrets.GEMINI_PROXY_KEY }}
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
             GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
             MAILRU_CLIENT_PRIVATE=${{ secrets.MAILRU_CLIENT_PRIVATE }}
