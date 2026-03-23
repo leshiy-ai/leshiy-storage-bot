@@ -29,5 +29,30 @@ jobs:
           entrypoint: 'index.handler' # Точка входа в твоем index.js
           environment: |
             APP_DOMAIN=${{ vars.APP_DOMAIN }}
-            BOT_USERNAME='leshiy_storage_bot'
+            BOT_USERNAME=${{ vars.BOT_USERNAME }}
+            MAILRU_CLIENT_ID=${{ vars.MAILRU_CLIENT_ID }}
+            OK_APP_ID=${{ vars.OK_APP_ID }}
+            VK_APP_ID=${{ vars.VK_APP_ID }}
+            VK_GROUP_ID=${{ vars.VK_GROUP_ID }}
+            BOTHUB_API_KEY=${{ secrets.BOTHUB_API_KEY }}
+            CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+            CLOUDFLARE_API_TOKEN=${{ secrets.CLOUDFLARE_API_TOKEN }}
+            DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
+            DROPBOX_CLIENT_ID=${{ secrets.DROPBOX_CLIENT_ID }}
+            DROPBOX_CLIENT_SECRET=${{ secrets.DROPBOX_CLIENT_SECRET }}
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            GEMINI_BOT_TOKEN=${{ secrets.GEMINI_BOT_TOKEN }}
+            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+            GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
+            MAILRU_CLIENT_PRIVATE=${{ secrets.MAILRU_CLIENT_PRIVATE }}
+            MAILRU_CLIENT_SECRET=${{ secrets.MAILRU_CLIENT_SECRET }}
             TELEGRAM_TOKEN=${{ secrets.TELEGRAM_TOKEN }}
+            VK_GROUP_TOKEN=${{ secrets.VK_GROUP_TOKEN }}
+            VK_SECURE_KEY=${{ secrets.VK_SECURE_KEY }}
+            VK_SERVICE_KEY=${{ secrets.VK_SERVICE_KEY }}
+            YANDEX_API_KEY=${{ secrets.YANDEX_API_KEY }}
+            YANDEX_CLIENT_ID=${{ secrets.YANDEX_CLIENT_ID }}
+            YANDEX_CLIENT_SECRET=${{ secrets.YANDEX_CLIENT_SECRET }}
+            YANDEX_FOLDER_ID=${{ secrets.YANDEX_FOLDER_ID }}
+            YANDEX_S3_KEY_ID=${{ secrets.YANDEX_S3_KEY_ID }}
+            YANDEX_S3_SECRET=${{ secrets.YANDEX_S3_SECRET }}

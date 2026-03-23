@@ -53,25 +53,25 @@ module.exports.handler = async (event, context) => {
         DROPBOX_CLIENT_ID: process.env.DROPBOX_CLIENT_ID,
         DROPBOX_CLIENT_SECRET: process.env.DROPBOX_CLIENT_SECRET,
         GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+        GEMINI_BOT_TOKEN: process.env.GEMINI_BOT_TOKEN,
         GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
         GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
         MAILRU_CLIENT_ID: process.env.MAILRU_CLIENT_ID,
         MAILRU_CLIENT_PRIVATE: process.env.MAILRU_CLIENT_PRIVATE,
         MAILRU_CLIENT_SECRET: process.env.MAILRU_CLIENT_SECRET,
+        OK_APP_ID: process.env.OK_APP_ID,
         TELEGRAM_TOKEN: process.env.TELEGRAM_TOKEN,
         VK_APP_ID: process.env.VK_APP_ID,
         VK_GROUP_ID: process.env.VK_GROUP_ID,
         VK_GROUP_TOKEN: process.env.VK_GROUP_TOKEN,
         VK_SECURE_KEY: process.env.VK_SECURE_KEY,
+        VK_SERVICE_KEY: process.env.VK_SERVICE_KEY,
+        YANDEX_API_KEY: process.env.YANDEX_API_KEY,
         YANDEX_CLIENT_ID: process.env.YANDEX_CLIENT_ID,
         YANDEX_CLIENT_SECRET: process.env.YANDEX_CLIENT_SECRET,
-        YANDEX_API_KEY: process.env.YANDEX_API_KEY,
-        GEMINI_BOT_TOKEN: process.env.GEMINI_BOT_TOKEN,
-        OK_APP_ID: process.env.OK_APP_ID,
-        VK_SERVICE_KEY: process.env.VK_SERVICE_KEY,
+        YANDEX_FOLDER_ID: process.env.YANDEX_FOLDER_ID,
         YANDEX_S3_KEY_ID: process.env.YANDEX_S3_KEY_ID,
-        YANDEX_S3_SECRET: process.env.YANDEX_S3_SECRET,
-        YANDEX_FOLDER_ID: process.env.YANDEX_FOLDER_ID
+        YANDEX_S3_SECRET: process.env.YANDEX_S3_SECRET        
     };
 
     const ctx = { waitUntil: (promise) => promise };
