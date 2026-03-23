@@ -28,4 +28,5 @@ jobs:
           execution-timeout: '60s'
           entrypoint: 'index.handler' # Точка входа в твоем index.js
           environment: |
+            APP_DOMAIN=${{ vars.APP_DOMAIN }}
             TELEGRAM_TOKEN=${{ secrets.TELEGRAM_TOKEN }}

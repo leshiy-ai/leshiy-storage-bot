@@ -2,7 +2,6 @@ const { USER_DB_ADAPTER, FILES_DB_ADAPTER, TypedValues, runQuery, filesDriver } 
 const nodeCrypto = require('crypto');
 const worker = require('./worker'); 
 const fetch = require('node-fetch');
-require('dotenv').config();
 
 // Глобальные пропсы для имитации среды Cloudflare
 global.fetch = fetch;
