@@ -2,12 +2,13 @@ const { Driver, getCredentialsFromEnv, TypedValues } = require('ydb-sdk');
 
 const config = {
     userDb: {
-        endpoint: 'grpcs://ydb.serverless.yandexcloud.net:2135',
-        database: '/ru-central1/b1gov9f01s68fqhqbg7m/etnjbpn3j100lbfkh9rf',
+        // Пробуем взять из системы, если пусто - берем твой адрес
+        endpoint: process.env.YDB_USER_ENDPOINT || 'grpcs://ydb.serverless.yandexcloud.net:2135',
+        database: process.env.YDB_USER_DATABASE || '/ru-central1/b1gov9f01s68fqhqbg7m/etnjbpn3j100lbfkh9rf',
     },
     filesDb: {
-        endpoint: 'grpcs://ydb.serverless.yandexcloud.net:2135',
-        database: '/ru-central1/b1gov9f01s68fqhqbg7m/etnij2u9r8dhav6finsm',
+        endpoint: process.env.YDB_FILES_ENDPOINT || 'grpcs://ydb.serverless.yandexcloud.net:2135',
+        database: process.env.YDB_FILES_DATABASE || '/ru-central1/b1gov9f01s68fqhqbg7m/etnij2u9r8dhav6finsm',
     }
 };
 

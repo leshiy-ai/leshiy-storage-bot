@@ -1,4 +1,5 @@
 const { USER_DB_ADAPTER, FILES_DB_ADAPTER, TypedValues, runQuery, filesDriver } = require('./db_adapter');
+const nodeCrypto = require('crypto');
 const worker = require('./worker'); 
 const fetch = require('node-fetch');
 
@@ -21,7 +22,7 @@ module.exports.handler = async (event, context) => {
     const uri = event.headers['x-envoy-original-path'] || event.url || '/';
     const domain = process.env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
     const fullUrl = `https://${domain}${uri}`;
-    console.log("?? URL ДЛЯ ВОРКЕРА:", fullUrl);
+    console.log("🛠 URL ДЛЯ ВОРКЕРА:", fullUrl);
 
     // СОЗДАНИЕ ОБЪЕКТА ЗАПРОСА
     const requestOptions = {
@@ -36,12 +37,13 @@ module.exports.handler = async (event, context) => {
     const request = new Request(fullUrl, { ...requestOptions });
 
     const env = {
-      USER_DB: USER_DB_ADAPTER, // Используем готовый адаптер
-      FILES_DB: FILES_DB_ADAPTER,
-      TypedValues: TypedValues, // Переменная из db_adapter
-      runQuery: runQuery,       // Функция из db_adapter
-      filesDriver: filesDriver, // Драйвер из db_adapter
-      // Остальные переменные (токены)
+        USER_DB: USER_DB_ADAPTER, // Используем готовый адаптер
+        FILES_DB: FILES_DB_ADAPTER,
+        TypedValues: TypedValues, // Переменная из db_adapter
+        runQuery: runQuery,       // Функция из db_adapter
+        filesDriver: filesDriver, // Драйвер из db_adapter
+        nodeCrypto: nodeCrypto,
+        // Остальные переменные (токены)
         APP_DOMAIN: process.env.APP_DOMAIN,
         BOTHUB_API_KEY: process.env.BOTHUB_API_KEY,
         BOT_USERNAME: process.env.BOT_USERNAME,
@@ -62,10 +64,17 @@ module.exports.handler = async (event, context) => {
         VK_GROUP_TOKEN: process.env.VK_GROUP_TOKEN,
         VK_SECURE_KEY: process.env.VK_SECURE_KEY,
         YANDEX_CLIENT_ID: process.env.YANDEX_CLIENT_ID,
-        YANDEX_CLIENT_SECRET: process.env.YANDEX_CLIENT_SECRET
-      };
+        YANDEX_CLIENT_SECRET: process.env.YANDEX_CLIENT_SECRET,
+        YANDEX_API_KEY: process.env.YANDEX_API_KEY,
+        GEMINI_BOT_TOKEN: process.env.GEMINI_BOT_TOKEN,
+        OK_APP_ID: process.env.OK_APP_ID,
+        VK_SERVICE_KEY: process.env.VK_SERVICE_KEY,
+        YANDEX_S3_KEY_ID: process.env.YANDEX_S3_KEY_ID,
+        YANDEX_S3_SECRET: process.env.YANDEX_S3_SECRET,
+        YANDEX_FOLDER_ID: process.env.YANDEX_FOLDER_ID
+    };
 
-      const ctx = { waitUntil: (promise) => promise };
+    const ctx = { waitUntil: (promise) => promise };
 
     // ЗАПУСК ВОРКЕРА
     try {

@@ -1,0 +1,65 @@
+
+name: Deploy to Yandex.Cloud Functions
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy Function
+        uses: yc-actions/yc-sls-function@v4
+        with:
+          yc-sa-json-credentials: ${{ secrets.YANDEX_SECRET_KEY }}
+          folder-id: ${{ secrets.YANDEX_FOLDER_ID }}
+          function-id: ${{ secrets.YANDEX_FUNCTION_ID }}
+          runtime: 'nodejs22'
+          memory: '256Mb'
+          execution-timeout: '60s'
+          entrypoint: 'index.handler' # Точка входа в твоем index.js
+          environment: |
+            # Базы данных (из db_adapter)
+            YDB_USER_ENDPOINT=${{ secrets.YDB_USER_ENDPOINT }}
+            YDB_USER_DATABASE=${{ secrets.YDB_USER_DATABASE }}
+            YDB_FILES_ENDPOINT=${{ secrets.YDB_FILES_ENDPOINT }}
+            YDB_FILES_DATABASE=${{ secrets.YDB_FILES_DATABASE }}
+            
+            # Основные токены [cite: 1, 2]
+            TELEGRAM_TOKEN=${{ secrets.TELEGRAM_TOKEN }}
+            GEMINI_BOT_TOKEN=${{ secrets.GEMINI_BOT_TOKEN }}
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
+            BOTHUB_API_KEY=${{ secrets.BOTHUB_API_KEY }}
+            
+            # Соцсети [cite: 1, 2]
+            VK_GROUP_TOKEN=${{ secrets.VK_GROUP_TOKEN }}
+            VK_APP_ID=${{ secrets.VK_APP_ID }}
+            VK_GROUP_ID=${{ secrets.VK_GROUP_ID }}
+            VK_SECURE_KEY=${{ secrets.VK_SECURE_KEY }}
+            VK_SERVICE_KEY=${{ secrets.VK_SERVICE_KEY }}
+            OK_APP_ID=${{ secrets.OK_APP_ID }}
+            
+            # Облака и интеграции [cite: 1, 2]
+            APP_DOMAIN=${{ secrets.APP_DOMAIN }}
+            YANDEX_CLIENT_ID=${{ secrets.YANDEX_CLIENT_ID }}
+            YANDEX_CLIENT_SECRET=${{ secrets.YANDEX_CLIENT_SECRET }}
+            YANDEX_API_KEY=${{ secrets.YANDEX_API_KEY }}
+            YANDEX_S3_KEY_ID=${{ secrets.YANDEX_S3_KEY_ID }}
+            YANDEX_S3_SECRET=${{ secrets.YANDEX_S3_SECRET }}
+            YANDEX_FOLDER_ID=${{ secrets.YANDEX_FOLDER_ID }}
+            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+            GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
+            DROPBOX_CLIENT_ID=${{ secrets.DROPBOX_CLIENT_ID }}
+            DROPBOX_CLIENT_SECRET=${{ secrets.DROPBOX_CLIENT_SECRET }}
+            MAILRU_CLIENT_ID=${{ secrets.MAILRU_CLIENT_ID }}
+            MAILRU_CLIENT_SECRET=${{ secrets.MAILRU_CLIENT_SECRET }}
+            MAILRU_CLIENT_PRIVATE=${{ secrets.MAILRU_CLIENT_PRIVATE }}
+            CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+            CLOUDFLARE_API_TOKEN=${{ secrets.CLOUDFLARE_API_TOKEN }}
+            BOT_USERNAME=${{ secrets.BOT_USERNAME }}
