@@ -29,4 +29,5 @@ jobs:
           entrypoint: 'index.handler' # Точка входа в твоем index.js
           environment: |
             APP_DOMAIN=${{ vars.APP_DOMAIN }}
+            BOT_USERNAME='leshiy_storage_bot'
             TELEGRAM_TOKEN=${{ secrets.TELEGRAM_TOKEN }}
