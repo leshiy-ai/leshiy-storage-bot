@@ -29,22 +29,17 @@ jobs:
             YDB_USER_DATABASE=${{ secrets.YDB_USER_DATABASE }}
             YDB_FILES_ENDPOINT=${{ secrets.YDB_FILES_ENDPOINT }}
             YDB_FILES_DATABASE=${{ secrets.YDB_FILES_DATABASE }}
-            
-            # Основные токены [cite: 1, 2]
             TELEGRAM_TOKEN=${{ secrets.TELEGRAM_TOKEN }}
             GEMINI_BOT_TOKEN=${{ secrets.GEMINI_BOT_TOKEN }}
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
             DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
             BOTHUB_API_KEY=${{ secrets.BOTHUB_API_KEY }}
-            
-            # Соцсети [cite: 1, 2]
             VK_GROUP_TOKEN=${{ secrets.VK_GROUP_TOKEN }}
             VK_APP_ID=${{ secrets.VK_APP_ID }}
             VK_GROUP_ID=${{ secrets.VK_GROUP_ID }}
             VK_SECURE_KEY=${{ secrets.VK_SECURE_KEY }}
             VK_SERVICE_KEY=${{ secrets.VK_SERVICE_KEY }}
             OK_APP_ID=${{ secrets.OK_APP_ID }}
-            # Облака и интеграции [cite: 1, 2]
             APP_DOMAIN=${{ secrets.APP_DOMAIN }}
             YANDEX_CLIENT_ID=${{ secrets.YANDEX_CLIENT_ID }}
             YANDEX_CLIENT_SECRET=${{ secrets.YANDEX_CLIENT_SECRET }}
