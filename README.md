@@ -23,8 +23,6 @@
 Перед развертыванием необходимо настроить следующие переменные окружения в вашей Yandex.Cloud Function:
 
 **Обязательные для всех:**
-- `YDB_ENDPOINT`: Эндпоинт вашей Yandex Database.
-- `YDB_DATABASE`: Путь к вашей базе данных.
 - `TELEGRAM_TOKEN`: Токен вашего Telegram-бота.
 - `VK_GROUP_TOKEN`: Токен доступа вашего сообщества VK.
 - `VK_APP_ID`: ID вашего VK Mini App.
