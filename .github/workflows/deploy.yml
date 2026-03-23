@@ -26,6 +26,7 @@ jobs:
           runtime: 'nodejs22'
           memory: '256Mb'
           execution-timeout: '60s'
+          service-account-id: ${{ secrets.YANDEX_SERVICE_ID }}
           entrypoint: 'index.handler' # Точка входа в твоем index.js
           environment: |
             APP_DOMAIN=${{ vars.APP_DOMAIN }}
@@ -55,5 +56,6 @@ jobs:
             YANDEX_CLIENT_ID=${{ secrets.YANDEX_CLIENT_ID }}
             YANDEX_CLIENT_SECRET=${{ secrets.YANDEX_CLIENT_SECRET }}
             YANDEX_FOLDER_ID=${{ secrets.YANDEX_FOLDER_ID }}
+            YANDEX_SERVICE_ID=${{ secrets.YANDEX_SERVICE_ID }}
             YANDEX_S3_KEY_ID=${{ secrets.YANDEX_S3_KEY_ID }}
             YANDEX_S3_SECRET=${{ secrets.YANDEX_S3_SECRET }}
