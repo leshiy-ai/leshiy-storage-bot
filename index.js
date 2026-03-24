@@ -37,6 +37,7 @@ module.exports.handler = async (event, context) => {
     const request = new Request(fullUrl, { ...requestOptions });
 
     const env = {
+        ...process.env,           // Подтягиваем ВСЕ 30+ переменных из GitHub/Yandex
         USER_DB: USER_DB_ADAPTER, // Используем готовый адаптер
         FILES_DB: FILES_DB_ADAPTER,
         TypedValues: TypedValues, // Переменная из db_adapter
