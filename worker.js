@@ -8881,7 +8881,7 @@ async function handleTelegramCallback(request, env) {
   if (!cryptoLibrary) return new Response("Crypto lib not found in env", { status: 500 });
 
   // Список стандартных полей Telegram для виджета и Mini App
-  const tgFields = ['id', 'first_name', 'last_name', 'username', 'photo_url', 'auth_date', 'user'];
+  const tgFields = ['id', 'first_name', 'last_name', 'username', 'photo_url', 'auth_date'];
 
   const checkString = Object.keys(data)
     .filter(key => tgFields.includes(key)) // <--- КРИТИЧЕСКИЙ ФИЛЬТР
@@ -8907,6 +8907,7 @@ async function handleTelegramCallback(request, env) {
                             .digest('hex');
 
   if (hmac !== hash) {
+    console.log("Generated String:", checkString);
     return new Response("Invalid Hash", { status: 403 });
   }
 
