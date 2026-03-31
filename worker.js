@@ -17,8 +17,9 @@
 */
 
 // Глобальные константы
-const version = "v3.1.1 от 23.03.2026"; // актуальная версия
+const version = "v3.1.2 от 31.03.2026"; // актуальная версия
 
+const AWS = require('aws-sdk');
 const providerNames = {
     'yandex': '☁️ Яндекс Диск',
     'google': '☁️ Google Drive',
@@ -394,14 +395,29 @@ async function worker_code_fetch(request, env, ctx) {
       // --- ОБРАБОТКА ЧАТА ИИ (ДЛЯ МИНИ-АППА) ---
       if (url.searchParams.get("action") === "ai_chat") {
         const chatText = url.searchParams.get("text");
+        const platformParam = url.searchParams.get("platform"); // Передавай 'Telegram' или 'VK' из фронтенда
         if (!chatText) {
             return new Response(JSON.stringify({ answer: "Пустой запрос" }), { headers: corsHeaders });
         }
         try {
             // 1. Используем твою функцию для получения текущей модели (как в ВК-боте)
             const modelConfig = await loadActiveConfig('TEXT_TO_TEXT', env);
+
+            // 2. Безопасное получение ID пользователя. 
+            // В Мини-Аппе userData обычно создается выше после проверки initData
+            const userId = (typeof userData !== 'undefined' && userData) ? userData.id : url.searchParams.get("userId");
+
+            if (!userId) {
+                throw new Error("Не удалось определить ID пользователя");
+            }
+            // 3. Определяем платформу (приоритет параметру из URL, иначе фолбек)
+            let platform = "VK";
+            if (platformParam === 'VK' || (typeof event.body === 'object' && event.body && event.body.type)) {
+                platform = "VK";
+            }
+            
             // 2. Используем твою функцию обработки запроса
-            const responseText = await handleChatRequest(chatText, modelConfig, env);
+            const responseText = await handleChatRequest(chatText, modelConfig, env, userId, platform);
             return new Response(JSON.stringify({ answer: responseText }), { 
                 headers: corsHeaders 
             });
@@ -2365,8 +2381,12 @@ if (userState === "waiting_for_aisearch" && !text.startsWith("/")) {
   if (text && userData) {
     try {
       const modelConfig = await loadActiveConfig('TEXT_TO_TEXT', env);
+
+      // Определяем платформу
+      const platform = "Telegram"; 
+
       //const responseText = await modelConfig.FUNCTION(text, modelConfig, env);
-      const responseText = await handleChatRequest(text, modelConfig, env);
+      const responseText = await handleChatRequest(text, modelConfig, env, userId, platform);
       await sendMessage(chatId, responseText.substring(0, 4000), null, env);
     } catch (e) {
       console.error("AI Error:", e);
@@ -3311,10 +3331,13 @@ async function handleVK(body, env, hostname, ctx) {
 
       // --- ЧАТ С ИИ (Если нет других команд) ---
       if (text && !text.startsWith("/")) {
+        const userId = message.from_id; // ID того, кто прислал сообщение
+        const platform = "VK";
+
         ctx.waitUntil((async () => {
           try {
             const modelConfig = await loadActiveConfig('TEXT_TO_TEXT', env);
-            const responseText = await handleChatRequest(text, modelConfig, env);
+            const responseText = await handleChatRequest(text, modelConfig, env, userId, platform);
             await sendVKMessage(chatId, responseText, env);
           } catch (e) {}
         })());
@@ -6419,7 +6442,9 @@ function renderSuccessPage() {
  * @param {Object} env - Окружение.
  * @returns {Promise<string>} Ответ от ИИ.
  */
-async function handleChatRequest(userPrompt, modelConfig, env) {
+async function handleChatRequest(userPrompt, modelConfig, env, userId, platform) {
+  // 1. СИНХРОНИЗИРУЕМ И ПОЛУЧАЕМ ИСТОРИЮ
+  const s3History = await syncS3Chat(userId, userPrompt, 'user', env, platform);
   // --- 1. ФОРМИРУЕМ ЧАТОВУЮ ИНСТРУКЦИЮ (та же, что и в функциях) ---
   const CHAT_INSTRUCTION = `🤖 ТЫ — многофункциональный AI-ассистент "Gemini AI" от Leshiy, отвечающий на русском языке.
 Твоя задача — вести диалог, отвечать на вопросы, соблюдая контекст и используя информацию о твоих функциях.
@@ -6442,18 +6467,32 @@ async function handleChatRequest(userPrompt, modelConfig, env) {
   
   const finalPrompt = `${CHAT_INSTRUCTION}\n\nВопрос пользователя: ${userPrompt}`;
 
+  // 3. ПРЕОБРАЗУЕМ ИСТОРИЮ В ФОРМАТ ДЛЯ МОДЕЛЕЙ
+  // Большинство твоих функций в AI_MODELS ожидают историю
+  const history = s3History.map(m => ({
+    role: m.role === 'ai' ? 'model' : 'user',
+    text: m.content
+  }));
+
   // --- 3. ВЫЗЫВАЕМ СООТВЕТСТВУЮЩУЮ ФУНКЦИЮ ---
+  let aiResponse;
   // Все существующие функции принимают (prompt, config, env, userMessageText)
   // Мы передаём userPrompt как 4-й аргумент для совместимости.
   //return await modelConfig.FUNCTION(finalPrompt, modelConfig, env, userPrompt);
   if (modelConfig.SERVICE === 'WORKERS_AI') {
     // Для Workers AI передаём отдельно system и user
-    return await modelConfig.FUNCTION(CHAT_INSTRUCTION, modelConfig, env, userPrompt);
+    aiResponse = await modelConfig.FUNCTION(CHAT_INSTRUCTION, modelConfig, env, userPrompt);
   } else {
     // Для Gemini/Bothub — один общий промпт
     const finalPrompt = `${CHAT_INSTRUCTION}\n\nВопрос пользователя: ${userPrompt}`;
-    return await modelConfig.FUNCTION(finalPrompt, modelConfig, env, userPrompt);
+    aiResponse = await modelConfig.FUNCTION(finalPrompt, modelConfig, env, userPrompt);
   }
+  // 5. СОХРАНЯЕМ ОТВЕТ АЙ В S3
+  // Извлекаем чистый текст (без <think> если есть)
+  const finalResponse = aiResponse.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  await syncS3Chat(userId, finalResponse, 'assistant', env, platform);
+
+  return finalResponse;
 }
 
 /**
@@ -8046,6 +8085,48 @@ async function logDebug(text, env) {
   } catch (e) {
     console.error("Ошибка логирования админу:", e.message);
   }
+}
+
+async function syncS3Chat(userId, content, role, env, platform = "Telegram") {
+  const chatTitle = platform === "VK" ? "Чат ВКонтакте" : "Чат в Телеграм";
+  const fileName = platform === "VK" ? "chat_VK.json" : "chat_Telegram.json";
+  const encodedTitle = encodeURIComponent(chatTitle);
+
+  const s3 = new AWS.S3({
+      accessKeyId: env.YANDEX_S3_KEY_ID, 
+      secretAccessKey: env.YANDEX_S3_SECRET,
+      endpoint: 'https://storage.yandexcloud.net',
+      s3ForcePathStyle: true,
+      region: 'ru-central1',
+      apiVersion: 'latest',
+  });
+
+  const key = `users/${userId}/chats/${fileName}`;
+  let chatData = { title: chatTitle, messages: [], lastUpdate: Date.now() };
+
+  try {
+      const data = await s3.getObject({ Bucket: 'leshiy-storage-history', Key: key }).promise();
+      chatData = JSON.parse(data.Body.toString());
+  } catch (e) { console.log(`[S3] Новый чат для ${platform}`); }
+
+  chatData.messages.push({
+      role: role === 'assistant' ? 'ai' : 'user',
+      content: content,
+      id: Date.now()
+  });
+
+  if (chatData.messages.length > 50) chatData.messages = chatData.messages.slice(-50);
+  chatData.lastUpdate = Date.now();
+
+  await s3.putObject({
+      Bucket: 'leshiy-storage-history',
+      Key: key,
+      Body: JSON.stringify(chatData, null, 2),
+      ContentType: 'application/json; charset=utf-8',
+      Metadata: { 'chat-title': encodedTitle }
+  }).promise();
+
+  return chatData.messages;
 }
 
 // --- CALLBACKS ---
