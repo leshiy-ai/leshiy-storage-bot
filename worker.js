@@ -395,25 +395,36 @@ async function worker_code_fetch(request, env, ctx) {
       // --- ОБРАБОТКА ЧАТА ИИ (ДЛЯ МИНИ-АППА) ---
       if (url.searchParams.get("action") === "ai_chat") {
         const chatText = url.searchParams.get("text");
+        if (!chatText) {
+          return new Response(JSON.stringify({ answer: "Пустой запрос" }), { headers: corsHeaders });
+        }
+        
+        // Вытаскиваем все возможные варианты ID
+        const userId = url.searchParams.get("userId") || 
+            url.searchParams.get("vk_user_id") || 
+            url.searchParams.get("user_id");
+        if (!userId) {
+          return new Response(JSON.stringify({ 
+              answer: `Ошибка ИИ: Не удалось определить ID. (Параметры: ${url.search})` 
+          }), { headers: corsHeaders });
+        }
+
         // Вытаскиваем провайдера или платформу
         const authProvider = url.searchParams.get("auth_provider"); 
         const platformParam = url.searchParams.get("platform");
-        if (!chatText) {
-            return new Response(JSON.stringify({ answer: "Пустой запрос" }), { headers: corsHeaders });
+        let platform = "VK"; 
+        if (platformParam === "Telegram" || authProvider === "Telegram") {
+            platform = "Telegram";
+        } else if (authProvider === "VK") {
+            platform = "VK";
         }
+    
         try {
             // 1. Используем твою функцию для получения текущей модели (как в ВК-боте)
             const modelConfig = await loadActiveConfig('TEXT_TO_TEXT', env);
-
-            let platform = "VK"; 
-            if (platformParam === "Telegram" || authProvider === "Telegram") {
-                platform = "Telegram";
-            } else if (authProvider === "VK" || url.searchParams.has("vk_user_id")) {
-                platform = "VK";
-            }
             
             // 2. Используем твою функцию обработки запроса
-            const responseText = await handleChatRequest(chatText, modelConfig, env, vkUserId, platform);
+            const responseText = await handleChatRequest(chatText, modelConfig, env, userId, platform);
             return new Response(JSON.stringify({ answer: responseText }), { 
                 headers: corsHeaders 
             });
