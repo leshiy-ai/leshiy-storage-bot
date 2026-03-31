@@ -8893,7 +8893,7 @@ async function handleTelegramCallback(request, env) {
       const target = authData.return_to || "https://leshiy-ai.github.io";
       return new Response(null, {
         status: 302,
-        headers: { 'Location': `${target}/vk?vk_user_id=${userId}&source=telegram` }
+        headers: { 'Location': `${target}/?vk_user_id=${userId}&source=telegram` }
       });
   }
 
