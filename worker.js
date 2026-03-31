@@ -8887,6 +8887,16 @@ async function handleTelegramCallback(request, env) {
       userId = authData.id;
   }
 
+    // Редирект
+    // Если это был вход для Джемини — возвращаем на Гитхаб
+    if (authData.bot === 'gemini') {
+      const target = authData.return_to || "https://leshiy-ai.github.io";
+      return new Response(null, {
+        status: 302,
+        headers: { 'Location': `${target}/vk?vk_user_id=${userId}&source=telegram` }
+      });
+  }
+
   // Редирект (как мы договорились, через конструктор)
   const targetDomain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
   return new Response(null, {
