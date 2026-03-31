@@ -8772,6 +8772,7 @@ async function handleTelegramApp(request, env) {
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Хранилка: Вход</title>
+            <script src="https://telegram.org/js/telegram-web-app.js"></script>
             <style>
                 body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background: #212121; color: white; margin: 0; }
                 .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 2s linear infinite; margin-bottom: 20px; }
@@ -8796,10 +8797,7 @@ async function handleTelegramApp(request, env) {
             </div>
 
             <script>
-                // 1. Немедленная заглушка, чтобы код ниже не падал
-                window.Telegram = window.Telegram || {};
-                window.Telegram.WebApp = window.Telegram.WebApp || { initData: "" };
-
+                // Твоя оригинальная функция отрисовки
                 function showWidget() {
                     document.getElementById('loading').style.display = 'none';
                     document.getElementById('widget-container').style.display = 'block';
@@ -8809,57 +8807,24 @@ async function handleTelegramApp(request, env) {
                     script.src = "https://telegram.org/js/telegram-widget.js?22";
                     script.setAttribute('data-telegram-login', "${bot_name}");
                     script.setAttribute('data-size', 'large');
-                    // Твой оригинальный колбэк
                     script.setAttribute('data-auth-url', "https://${domain}/auth/telegram/callback");
                     script.setAttribute('data-request-access', 'write');
                     document.getElementById('tg-login-btn').appendChild(script);
                 }
 
-                // 2. Функция проверки авторизации (твоя логика)
-                function checkAuth() {
-                    const tg = window.Telegram.WebApp;
-                    if (tg.initData && tg.initData.length > 0) {
-                        window.location.href = "/auth/telegram/callback?" + tg.initData;
-                    } else {
-                        // Твоя задержка 300мс
-                        setTimeout(() => {
-                            if (!tg.initData || tg.initData.length === 0) {
-                                showWidget();
-                            } else {
-                                window.location.href = "/auth/telegram/callback?" + tg.initData;
-                            }
-                        }, 300);
-                    }
+                const tg = window.Telegram.WebApp;
+                
+                if (tg.initData && tg.initData.length > 0) {
+                    window.location.href = "/auth/telegram/callback?" + tg.initData;
+                } else {
+                    setTimeout(() => {
+                        if (!tg.initData || tg.initData.length === 0) {
+                            showWidget();
+                        } else {
+                            window.location.href = "/auth/telegram/callback?" + tg.initData;
+                        }
+                    }, 300);
                 }
-
-                // 3. Динамическая загрузка SDK с защитой от блокировки
-                (function() {
-                    // Если мы явно в ВК или другом месте (нет ТГ параметров), не ждем загрузки
-                    if (!window.location.search.includes('tgWebAppData') && !window.location.hash.includes('tgWebAppData')) {
-                        checkAuth();
-                        return;
-                    }
-
-                    const script = document.createElement('script');
-                    script.src = "https://telegram.org/js/telegram-web-app.js";
-                    script.async = true;
-                    
-                    // Если скрипт не загрузится за 2 секунды (бан РКН/ВК) - запускаем fallback
-                    const timeout = setTimeout(() => {
-                        console.log("Telegram SDK timeout");
-                        checkAuth();
-                    }, 2000);
-
-                    script.onload = () => {
-                        clearTimeout(timeout);
-                        checkAuth();
-                    };
-                    script.onerror = () => {
-                        clearTimeout(timeout);
-                        checkAuth();
-                    };
-                    document.head.appendChild(script);
-                })();
             </script>
         </body>
         </html>
