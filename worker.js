@@ -8845,11 +8845,7 @@ async function handleTelegramCallback(request, env) {
   const cryptoLibrary = env.nodeCrypto; 
   if (!cryptoLibrary) return new Response("Crypto lib not found in env", { status: 500 });
 
-  // ЭТИ ПОЛЯ МЫ ИГНОРИРУЕМ (они наши, а не телеграмовские)
-  const excludeKeys = ['bot', 'return_to'];
-
   const checkString = Object.keys(data)
-    .filter(key => !excludeKeys.includes(key)) // <--- КРИТИЧЕСКИЙ ФИЛЬТР
     .sort()
     .map(key => `${key}=${data[key]}`)
     .join('\n');
@@ -8872,7 +8868,6 @@ async function handleTelegramCallback(request, env) {
                             .digest('hex');
 
   if (hmac !== hash) {
-    console.log("Generated String:", checkString);
     return new Response("Invalid Hash", { status: 403 });
   }
 
