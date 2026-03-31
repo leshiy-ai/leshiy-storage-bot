@@ -398,7 +398,7 @@ async function worker_code_fetch(request, env, ctx) {
         if (!chatText) {
           return new Response(JSON.stringify({ answer: "Пустой запрос" }), { headers: corsHeaders });
         }
-        
+
         // Вытаскиваем все возможные варианты ID
         const userId = url.searchParams.get("userId") || 
             url.searchParams.get("vk_user_id") || 
@@ -4225,8 +4225,11 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       aiHistory.scrollTop = aiHistory.scrollHeight;
       try {
           const apiUrl = window.location.origin + window.location.pathname + 
-                         '?action=ai_chat&state=' + userId + '&text=' + encodeURIComponent(text);
-  
+               '?action=ai_chat' +
+               '&userId=' + userId + 
+               '&auth_provider=VK' + 
+               '&text=' + encodeURIComponent(text);
+               
           const response = await fetch(apiUrl, {
               method: 'GET',
               headers: { 'Accept': 'application/json' }
