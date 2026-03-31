@@ -8796,7 +8796,10 @@ async function handleTelegramApp(request, env) {
             </div>
 
             <script>
-                // Твоя оригинальная функция отрисовки
+                // 1. Немедленная заглушка, чтобы код ниже не падал
+                window.Telegram = window.Telegram || {};
+                window.Telegram.WebApp = window.Telegram.WebApp || { initData: "" };
+
                 function showWidget() {
                     document.getElementById('loading').style.display = 'none';
                     document.getElementById('widget-container').style.display = 'block';
@@ -8806,24 +8809,57 @@ async function handleTelegramApp(request, env) {
                     script.src = "https://telegram.org/js/telegram-widget.js?22";
                     script.setAttribute('data-telegram-login', "${bot_name}");
                     script.setAttribute('data-size', 'large');
+                    // Твой оригинальный колбэк
                     script.setAttribute('data-auth-url', "https://${domain}/auth/telegram/callback");
                     script.setAttribute('data-request-access', 'write');
                     document.getElementById('tg-login-btn').appendChild(script);
                 }
 
-                const tg = window.Telegram.WebApp;
-                
-                if (tg.initData && tg.initData.length > 0) {
-                    window.location.href = "/auth/telegram/callback?" + tg.initData;
-                } else {
-                    setTimeout(() => {
-                        if (!tg.initData || tg.initData.length === 0) {
-                            showWidget();
-                        } else {
-                            window.location.href = "/auth/telegram/callback?" + tg.initData;
-                        }
-                    }, 300);
+                // 2. Функция проверки авторизации (твоя логика)
+                function checkAuth() {
+                    const tg = window.Telegram.WebApp;
+                    if (tg.initData && tg.initData.length > 0) {
+                        window.location.href = "/auth/telegram/callback?" + tg.initData;
+                    } else {
+                        // Твоя задержка 300мс
+                        setTimeout(() => {
+                            if (!tg.initData || tg.initData.length === 0) {
+                                showWidget();
+                            } else {
+                                window.location.href = "/auth/telegram/callback?" + tg.initData;
+                            }
+                        }, 300);
+                    }
                 }
+
+                // 3. Динамическая загрузка SDK с защитой от блокировки
+                (function() {
+                    // Если мы явно в ВК или другом месте (нет ТГ параметров), не ждем загрузки
+                    if (!window.location.search.includes('tgWebAppData') && !window.location.hash.includes('tgWebAppData')) {
+                        checkAuth();
+                        return;
+                    }
+
+                    const script = document.createElement('script');
+                    script.src = "https://telegram.org/js/telegram-web-app.js";
+                    script.async = true;
+                    
+                    // Если скрипт не загрузится за 2 секунды (бан РКН/ВК) - запускаем fallback
+                    const timeout = setTimeout(() => {
+                        console.log("Telegram SDK timeout");
+                        checkAuth();
+                    }, 2000);
+
+                    script.onload = () => {
+                        clearTimeout(timeout);
+                        checkAuth();
+                    };
+                    script.onerror = () => {
+                        clearTimeout(timeout);
+                        checkAuth();
+                    };
+                    document.head.appendChild(script);
+                })();
             </script>
         </body>
         </html>
@@ -8844,7 +8880,11 @@ async function handleTelegramCallback(request, env) {
   const cryptoLibrary = env.nodeCrypto; 
   if (!cryptoLibrary) return new Response("Crypto lib not found in env", { status: 500 });
 
+  // Список стандартных полей Telegram для виджета и Mini App
+  const tgFields = ['id', 'first_name', 'last_name', 'username', 'photo_url', 'auth_date', 'user'];
+
   const checkString = Object.keys(data)
+    .filter(key => tgFields.includes(key)) // <--- КРИТИЧЕСКИЙ ФИЛЬТР
     .sort()
     .map(key => `${key}=${data[key]}`)
     .join('\n');
