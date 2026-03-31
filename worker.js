@@ -8886,6 +8886,17 @@ async function handleTelegramCallback(request, env) {
       userId = authData.id;
   }
 
+  if (bot === 'gemini') {
+    // Формируем тот самый URL с tg_data и кидаем его на return_to (Гитхаб)
+    const userData = encodeURIComponent(JSON.stringify({
+        id: userId, 
+        first_name: authData.first_name, 
+        username: authData.username, 
+        photo_url: authData.photo_url
+    }));
+    return Response.redirect(`${return_to}/?tg_data=${userData}`, 302);
+  }
+
   // Редирект (как мы договорились, через конструктор)
   const targetDomain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
   return new Response(null, {
