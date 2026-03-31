@@ -8862,12 +8862,12 @@ async function handleTelegramCallback(request, env) {
   if (authData.user) {
     // Mini App
     secretKey = cryptoLibrary.createHmac('sha256', 'WebAppData')
-                             .update(activeToken)
+                             .update(env.GEMINI_BOT_TOKEN)
                              .digest();
   } else {
     // Виджет (Браузер)
     secretKey = cryptoLibrary.createHash('sha256')
-                             .update(activeToken)
+                             .update(env.TELEGRAM_TOKEN)
                              .digest();
   }
 
