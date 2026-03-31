@@ -8867,7 +8867,7 @@ async function handleTelegramCallback(request, env) {
   } else {
     // Виджет (Браузер)
     secretKey = cryptoLibrary.createHash('sha256')
-                             .update(env.TELEGRAM_TOKEN)
+                             .update(env.GEMINI_BOT_TOKEN)
                              .digest();
   }
 
