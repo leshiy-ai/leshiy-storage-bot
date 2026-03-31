@@ -8841,6 +8841,11 @@ async function handleTelegramCallback(request, env) {
   const authData = Object.fromEntries(url.searchParams);
   const { hash, ...data } = authData;
 
+  // 1. ВЫБИРАЕМ ТОКЕН (Твоя логика подмены)
+  const activeToken = (authData.bot === 'gemini') 
+    ? env.GEMINI_BOT_TOKEN 
+    : env.TELEGRAM_TOKEN;
+    
   // Достаем nodeCrypto из env
   const cryptoLibrary = env.nodeCrypto; 
   if (!cryptoLibrary) return new Response("Crypto lib not found in env", { status: 500 });
@@ -8854,12 +8859,12 @@ async function handleTelegramCallback(request, env) {
   if (authData.user) {
     // Mini App
     secretKey = cryptoLibrary.createHmac('sha256', 'WebAppData')
-                             .update(env.TELEGRAM_TOKEN)
+                             .update(activeToken)
                              .digest();
   } else {
     // Виджет (Браузер)
     secretKey = cryptoLibrary.createHash('sha256')
-                             .update(env.TELEGRAM_TOKEN)
+                             .update(activeToken)
                              .digest();
   }
 
