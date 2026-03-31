@@ -8841,6 +8841,9 @@ async function handleTelegramCallback(request, env) {
   const authData = Object.fromEntries(url.searchParams);
   const { hash, ...data } = authData;
 
+  delete data.bot;
+  delete data.return_to;
+  
   // Достаем nodeCrypto из env
   const cryptoLibrary = env.nodeCrypto; 
   if (!cryptoLibrary) return new Response("Crypto lib not found in env", { status: 500 });
