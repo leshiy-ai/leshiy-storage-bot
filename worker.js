@@ -139,7 +139,7 @@ async function worker_code_fetch(request, env, ctx) {
       // 4. Telegram
       if (url.pathname === "/auth/telegram") {
         const domain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
-        const botId = "7856061016"; // ID бота @leshiy_storage_bot
+        const bot_id = "547043436"; // ID бота @leshiy_storage_bot
         const redirectUri = encodeURIComponent(`https://${domain}/auth/telegram/callback`);
         const target = `https://oauth.telegram.org/auth?bot_id=${botId}&origin=${encodeURIComponent('https://' + domain)}&request_access=write&return_to=${encodeURIComponent(redirectUri)}`;
         return renderRedirectPage(target, "Telegram");
@@ -8841,14 +8841,6 @@ async function handleTelegramCallback(request, env) {
   const authData = Object.fromEntries(url.searchParams);
   const { hash, ...data } = authData;
 
-  // 1. ВЫБИРАЕМ ТОКЕН (Твоя логика подмены)
-  const activeToken = (authData.bot === 'gemini') 
-    ? env.GEMINI_BOT_TOKEN 
-    : env.TELEGRAM_TOKEN;
-    
-  delete data.bot;
-  delete data.return_to;
-
   // Достаем nodeCrypto из env
   const cryptoLibrary = env.nodeCrypto; 
   if (!cryptoLibrary) return new Response("Crypto lib not found in env", { status: 500 });
@@ -8886,16 +8878,6 @@ async function handleTelegramCallback(request, env) {
   } else {
       userId = authData.id;
   }
-
-  /*/ Редирект
-  // Если это был вход для Джемини — возвращаем на Гитхаб
-  if (authData.bot === 'gemini') {
-    const target = authData.return_to || "https://leshiy-ai.github.io";
-    return new Response(null, {
-      status: 302,
-      headers: { 'Location': `${target}/?vk_user_id=${userId}&source=telegram` }
-    });
-  }*/
 
   // Редирект (как мы договорились, через конструктор)
   const targetDomain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
