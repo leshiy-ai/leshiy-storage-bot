@@ -8846,6 +8846,9 @@ async function handleTelegramCallback(request, env) {
     ? env.GEMINI_BOT_TOKEN 
     : env.TELEGRAM_TOKEN;
     
+  delete data.bot;
+  delete data.return_to;
+
   // Достаем nodeCrypto из env
   const cryptoLibrary = env.nodeCrypto; 
   if (!cryptoLibrary) return new Response("Crypto lib not found in env", { status: 500 });
