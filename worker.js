@@ -8880,11 +8880,11 @@ async function handleTelegramCallback(request, env) {
   const cryptoLibrary = env.nodeCrypto; 
   if (!cryptoLibrary) return new Response("Crypto lib not found in env", { status: 500 });
 
-  // Список стандартных полей Telegram для виджета и Mini App
-  const tgFields = ['id', 'first_name', 'last_name', 'username', 'photo_url', 'auth_date'];
+  // ЭТИ ПОЛЯ МЫ ИГНОРИРУЕМ (они наши, а не телеграмовские)
+  const excludeKeys = ['bot', 'return_to'];
 
   const checkString = Object.keys(data)
-    .filter(key => tgFields.includes(key)) // <--- КРИТИЧЕСКИЙ ФИЛЬТР
+    .filter(key => !excludeKeys.includes(key)) // <--- КРИТИЧЕСКИЙ ФИЛЬТР
     .sort()
     .map(key => `${key}=${data[key]}`)
     .join('\n');
