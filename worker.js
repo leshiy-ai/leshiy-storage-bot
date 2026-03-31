@@ -8894,7 +8894,10 @@ async function handleTelegramCallback(request, env) {
         username: authData.username, 
         photo_url: authData.photo_url
     }));
-    return Response.redirect(`${return_to}/?tg_data=${userData}`, 302);
+    return new Response(null, {
+      status: 302,
+      headers: { 'Location': `${return_to}/?tg_data=${userData}` }
+    });
   }
 
   // Редирект (как мы договорились, через конструктор)
