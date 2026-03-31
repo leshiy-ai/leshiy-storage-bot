@@ -139,7 +139,7 @@ async function worker_code_fetch(request, env, ctx) {
       // 4. Telegram
       if (url.pathname === "/auth/telegram") {
         const domain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
-        const botId = "8039751779"; // ID бота @gemini_aitg_bot
+        const botId = "7856061016"; // ID бота @leshiy_storage_bot
         const redirectUri = encodeURIComponent(`https://${domain}/auth/telegram/callback`);
         const target = `https://oauth.telegram.org/auth?bot_id=${botId}&origin=${encodeURIComponent('https://' + domain)}&request_access=write&return_to=${encodeURIComponent(redirectUri)}`;
         return renderRedirectPage(target, "Telegram");
@@ -8862,12 +8862,12 @@ async function handleTelegramCallback(request, env) {
   if (authData.user) {
     // Mini App
     secretKey = cryptoLibrary.createHmac('sha256', 'WebAppData')
-                             .update(env.GEMINI_BOT_TOKEN)
+                             .update(env.TELEGRAM_TOKEN)
                              .digest();
   } else {
     // Виджет (Браузер)
     secretKey = cryptoLibrary.createHash('sha256')
-                             .update(env.GEMINI_BOT_TOKEN)
+                             .update(env.TELEGRAM_TOKEN)
                              .digest();
   }
 
