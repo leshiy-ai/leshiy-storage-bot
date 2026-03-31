@@ -413,7 +413,7 @@ async function worker_code_fetch(request, env, ctx) {
             }
             
             // 2. Используем твою функцию обработки запроса
-            const responseText = await handleChatRequest(chatText, modelConfig, env, userId, platform);
+            const responseText = await handleChatRequest(chatText, modelConfig, env, vkUserId, platform);
             return new Response(JSON.stringify({ answer: responseText }), { 
                 headers: corsHeaders 
             });
