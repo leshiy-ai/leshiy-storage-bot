@@ -395,7 +395,7 @@ async function worker_code_fetch(request, env, ctx) {
       // --- ОБРАБОТКА ЧАТА ИИ (ДЛЯ МИНИ-АППА) ---
       if (url.searchParams.get("action") === "ai_chat") {
         const chatText = url.searchParams.get("text");
-        const platformParam = url.searchParams.get("platform"); // Передавай 'Telegram' или 'VK' из фронтенда
+        const authProvider = url.searchParams.get("auth_provider") // Передавай 'Telegram' или 'VK' из фронтенда
         if (!chatText) {
             return new Response(JSON.stringify({ answer: "Пустой запрос" }), { headers: corsHeaders });
         }
@@ -404,17 +404,26 @@ async function worker_code_fetch(request, env, ctx) {
             const modelConfig = await loadActiveConfig('TEXT_TO_TEXT', env);
 
             // 2. Безопасное получение ID пользователя. 
-            // В Мини-Аппе userData обычно создается выше после проверки initData
-            const userId = (typeof userData !== 'undefined' && userData) ? userData.id : url.searchParams.get("userId");
-
+            // 1. УМНОЕ ОПРЕДЕЛЕНИЕ ID
+            let userId = null;
+            if (authProvider === "VK") {
+                // Если пришли из ВК, берем их специфичный ID
+                userId = url.searchParams.get("vk_user_id");
+            } else {
+                // Если нет, пробуем стандартные поля
+                userId = url.searchParams.get("userId") || url.searchParams.get("user_id");
+            }
+            // Если все еще пусто, проверяем объект userData (если он создался выше при проверке подписи)
+            if (!userId && typeof userData !== 'undefined' && userData) {
+                userId = userData.id;
+            }
             if (!userId) {
-                throw new Error("Не удалось определить ID пользователя");
+                throw new Error(`Не удалось определить ID. Провайдер: ${authProvider}`);
             }
-            // 3. Определяем платформу (приоритет параметру из URL, иначе фолбек)
-            let platform = "VK";
-            if (platformParam === 'VK' || (typeof event.body === 'object' && event.body && event.body.type)) {
-                platform = "VK";
-            }
+
+            // 2. ОПРЕДЕЛЯЕМ ПЛАТФОРМУ ДЛЯ S3
+            // Если auth_provider = VK, значит платформа VK, иначе Telegram
+            const platform = (authProvider === "VK") ? "VK" : "Telegram";
             
             // 2. Используем твою функцию обработки запроса
             const responseText = await handleChatRequest(chatText, modelConfig, env, userId, platform);
