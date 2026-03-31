@@ -6472,18 +6472,23 @@ async function handleChatRequest(userPrompt, modelConfig, env, userId, platform)
 Когда пользователь спрашивает, что ты умеешь, обязательно упомяни о своих навыках.
 Ответы должны быть информативными и доброжелательными и по возможности компактными, старайся построить диалог понятно и не сильно рассуждая.`.trim();
 
-  // --- 2. ФОРМИРУЕМ ФИНАЛЬНЫЙ ПРОМПТ ---
-  // Workers AI и Bothub используют историю в формате messages, но Gemini — нет.
-  // Для простоты и совместимости используем один общий формат промпта.
-  
-  const finalPrompt = `${CHAT_INSTRUCTION}\n\nВопрос пользователя: ${userPrompt}`;
-
-  // 3. ПРЕОБРАЗУЕМ ИСТОРИЮ В ФОРМАТ ДЛЯ МОДЕЛЕЙ
-  // Большинство твоих функций в AI_MODELS ожидают историю
+  // 2. ПРЕОБРАЗУЕМ ИСТОРИЮ В ФОРМАТ ДЛЯ МОДЕЛЕЙ (Твоя переменная history)
+  // Мы создаем её ПЕРЕД промптом, чтобы сразу использовать
   const history = s3History.map(m => ({
     role: m.role === 'ai' ? 'model' : 'user',
     text: m.content
   }));
+
+  // --- 3. ФОРМИРУЕМ ФИНАЛЬНЫЙ ПРОМПТ ---
+  // Превращаем массив history обратно в текст для вклейки в промпт
+  // Берем последние 10 записей до текущего вопроса
+  const historyContext = history.slice(-11, -1).map(h => 
+    `${h.role === 'model' ? 'AI' : 'User'}: ${h.text}`
+  ).join('\n');
+
+  // --- 3. ФОРМИРУЕМ ФИНАЛЬНЫЙ ПРОМПТ (теперь с историей!) ---
+  // Добавляем блок истории между инструкцией и новым вопросом
+  const finalPrompt = `${CHAT_INSTRUCTION}\n\n### КОНТЕКСТ ДИАЛОГА:\n${historyContext}\n\nВопрос пользователя: ${userPrompt}`;
 
   // --- 3. ВЫЗЫВАЕМ СООТВЕТСТВУЮЩУЮ ФУНКЦИЮ ---
   let aiResponse;
@@ -6491,11 +6496,11 @@ async function handleChatRequest(userPrompt, modelConfig, env, userId, platform)
   // Мы передаём userPrompt как 4-й аргумент для совместимости.
   //return await modelConfig.FUNCTION(finalPrompt, modelConfig, env, userPrompt);
   if (modelConfig.SERVICE === 'WORKERS_AI') {
-    // Для Workers AI передаём отдельно system и user
-    aiResponse = await modelConfig.FUNCTION(CHAT_INSTRUCTION, modelConfig, env, userPrompt);
+    // Для Workers AI передаем инструкцию и промпт, в который мы уже вшили историю
+    const userPromptWithHistory = `Контекст:\n${historyContext}\n\nВопрос: ${userPrompt}`;
+    aiResponse = await modelConfig.FUNCTION(CHAT_INSTRUCTION, modelConfig, env, userPromptWithHistory);
   } else {
-    // Для Gemini/Bothub — один общий промпт
-    const finalPrompt = `${CHAT_INSTRUCTION}\n\nВопрос пользователя: ${userPrompt}`;
+    // Для Gemini/Bothub — используем наш обновленный finalPrompt с историей
     aiResponse = await modelConfig.FUNCTION(finalPrompt, modelConfig, env, userPrompt);
   }
   // 5. СОХРАНЯЕМ ОТВЕТ АЙ В S3
