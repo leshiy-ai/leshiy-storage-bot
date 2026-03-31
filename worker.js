@@ -8841,8 +8841,14 @@ async function handleTelegramCallback(request, env) {
   const authData = Object.fromEntries(url.searchParams);
   const { hash, ...data } = authData;
 
-  delete data.bot;
-  delete data.return_to;
+  // --- 1. ВЫБОР ТОКЕНА (ВОТ ОНО!) ---
+  // Если в URL пришло bot=gemini, используем токен джемини-бота
+  const activeToken = (authData.bot === 'gemini') 
+    ? env.GEMINI_BOT_TOKEN 
+    : env.TELEGRAM_TOKEN;
+
+    // --- 2. ОЧИСТКА ДАННЫХ ДЛЯ ПРОВЕРКИ ---
+  const { hash: _h, bot: _b, return_to: _r, ...tgData } = authData;
 
   // Достаем nodeCrypto из env
   const cryptoLibrary = env.nodeCrypto; 
@@ -8857,12 +8863,12 @@ async function handleTelegramCallback(request, env) {
   if (authData.user) {
     // Mini App
     secretKey = cryptoLibrary.createHmac('sha256', 'WebAppData')
-                             .update(env.TELEGRAM_TOKEN)
+                             .update(activeToken)
                              .digest();
   } else {
     // Виджет (Браузер)
     secretKey = cryptoLibrary.createHash('sha256')
-                             .update(env.TELEGRAM_TOKEN)
+                             .update(activeToken)
                              .digest();
   }
 
@@ -8871,7 +8877,9 @@ async function handleTelegramCallback(request, env) {
                             .digest('hex');
 
   if (hmac !== hash) {
-    return new Response("Invalid Hash", { status: 403 });
+    // Дебаг: выводим начало токена, чтобы понять, какой реально использовался
+    const tokenHint = activeToken.split(':')[0];
+    return new Response(`Invalid Hash. Bot: ${authData.bot || 'storage'}. Token ID used: ${tokenHint}`, { status: 403 });
   }
 
   // Вынимаем ID правильно
