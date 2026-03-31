@@ -4227,7 +4227,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       try {
           const apiUrl = window.location.origin + window.location.pathname + 
                '?action=ai_chat' +
-               '&userId=' + userId + 
+               '&state=' + userId + 
                '&auth_provider=VK' + 
                '&text=' + encodeURIComponent(text);
 
