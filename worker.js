@@ -138,8 +138,11 @@ async function worker_code_fetch(request, env, ctx) {
 
       // 4. Telegram
       if (url.pathname === "/auth/telegram") {
+        const isGemini = url.searchParams.get('bot') === 'gemini';
         const domain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
-        const bot_id = "547043436"; // ID бота @leshiy_storage_bot
+        //const bot_id = "547043436"; // ID бота @leshiy_storage_bot
+        // ID бота: Джемини (8039751779) или Хранилка (её ID)
+        const botId = isGemini ? "8039751779" : "7856061016"; // тут ID Хранилки
         const redirectUri = encodeURIComponent(`https://${domain}/auth/telegram/callback`);
         const target = `https://oauth.telegram.org/auth?bot_id=${botId}&origin=${encodeURIComponent('https://' + domain)}&request_access=write&return_to=${encodeURIComponent(redirectUri)}`;
         return renderRedirectPage(target, "Telegram");
@@ -8839,7 +8842,11 @@ async function handleTelegramApp(request, env) {
 async function handleTelegramCallback(request, env) {
   const url = new URL(request.url);
   const authData = Object.fromEntries(url.searchParams);
-  const { hash, ...data } = authData;
+  //const { hash, ...data } = authData;
+  const { hash, bot, return_to, ...data } = authData;
+
+  // Выбор токена
+  const token = (bot === 'gemini') ? env.GEMINI_BOT_TOKEN : env.TELEGRAM_TOKEN;
 
   // Достаем nodeCrypto из env
   const cryptoLibrary = env.nodeCrypto; 
@@ -8854,12 +8861,12 @@ async function handleTelegramCallback(request, env) {
   if (authData.user) {
     // Mini App
     secretKey = cryptoLibrary.createHmac('sha256', 'WebAppData')
-                             .update(env.TELEGRAM_TOKEN)
+                             .update(token)
                              .digest();
   } else {
     // Виджет (Браузер)
     secretKey = cryptoLibrary.createHash('sha256')
-                             .update(env.TELEGRAM_TOKEN)
+                             .update(token)
                              .digest();
   }
 
