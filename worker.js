@@ -401,6 +401,7 @@ async function worker_code_fetch(request, env, ctx) {
 
         // Вытаскиваем все возможные варианты ID
         const userId = url.searchParams.get("userId") || 
+            url.searchParams.get("state") ||
             url.searchParams.get("vk_user_id") || 
             url.searchParams.get("user_id");
         if (!userId) {
@@ -4229,7 +4230,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
                '&userId=' + userId + 
                '&auth_provider=VK' + 
                '&text=' + encodeURIComponent(text);
-               
+
           const response = await fetch(apiUrl, {
               method: 'GET',
               headers: { 'Accept': 'application/json' }
