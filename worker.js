@@ -6382,7 +6382,12 @@ const renderRedirectPage = (targetUrl, providerName, platform) => {
   // Если платформа Android, возвращаем HTML с Intent
   if (platform === 'android') {
     // ВНИМАНИЕ: Замените com.leshiy_ai.app на актуальный ID вашего Android-приложения
-    const androidIntentUrl = "intent://leshiy-ai.github.io/done" + new URL(targetUrl).search + "#Intent;scheme=https;package=com.leshiy_ai.app;end";
+    //const androidIntentUrl = "intent://leshiy-ai.github.io/done" + new URL(targetUrl).search + "#Intent;scheme=https;package=com.leshiy_ai.app;end";
+    const params = new URL(targetUrl).search;
+    const packageName = "com.leshiy_ai.app";
+    // Формируем правильный Intent. 
+    // В конце добавляем S.browser_fallback_url, чтобы Chrome не выдавал ошибку, если не найдет приложение
+    const androidIntentUrl = `intent://leshiy-ai.github.io/done${params}#Intent;scheme=https;package=${packageName};S.browser_fallback_url=${encodeURIComponent(targetUrl)};end`;
     return new Response(`
       <!DOCTYPE html>
       <html>
