@@ -117,7 +117,9 @@ async function worker_code_fetch(request, env, ctx) {
         const domain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net"
         const hostname = domain || url.hostname;
         const target = `https://oauth.yandex.ru/authorize?response_type=code&client_id=${env.YANDEX_CLIENT_ID}&state=${state}`;
-        return renderRedirectPage(target, "Яндекс Диску");
+        // Извлекаем platform из URL
+        const platform = url.searchParams.get("platform");
+        return renderRedirectPage(target, "Яндекс Диск", platform);
       }
 
       // 2. Google Drive
@@ -125,7 +127,9 @@ async function worker_code_fetch(request, env, ctx) {
         const domain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net"
         const redirectUri = encodeURIComponent(`https://${domain}/auth/google/callback`);
         const target = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${env.GOOGLE_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&scope=https://www.googleapis.com/auth/drive.file&state=${state}&access_type=offline&prompt=consent`;
-        return renderRedirectPage(target, "Google Drive");
+        // Извлекаем platform из URL
+        const platform = url.searchParams.get("platform");
+        return renderRedirectPage(target, "Google Drive", platform);
       }
 
       // 3. Dropbox
@@ -133,7 +137,9 @@ async function worker_code_fetch(request, env, ctx) {
         const domain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
         const redirectUri = encodeURIComponent(`https://${domain}/auth/dropbox/callback`);
         const target = `https://www.dropbox.com/oauth2/authorize?client_id=${env.DROPBOX_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&state=${state}`;
-        return renderRedirectPage(target, "Dropbox");
+        // Извлекаем platform из URL
+        const platform = url.searchParams.get("platform");
+        return renderRedirectPage(target, "Dropbox", platform);
       }
 
       // 4. Telegram
@@ -145,7 +151,9 @@ async function worker_code_fetch(request, env, ctx) {
         const botId = isGemini ? "8039751779" : "7856061016"; // тут ID Хранилки
         const redirectUri = encodeURIComponent(`https://${domain}/auth/telegram/callback`);
         const target = `https://oauth.telegram.org/auth?bot_id=${botId}&origin=${encodeURIComponent('https://' + domain)}&request_access=write&return_to=${encodeURIComponent(redirectUri)}`;
-        return renderRedirectPage(target, "Telegram");
+        // Извлекаем platform из URL
+        const platform = url.searchParams.get("platform");
+        return renderRedirectPage(target, "Telegram", platform);
       }
 
       if (url.searchParams.get("action") === "get-status") {
@@ -2498,9 +2506,9 @@ async function handleVK(body, env, hostname, ctx) {
         const provider = payloadData.provider;
         const domain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
         let authUrl = "";
-        if (provider === "yandex") authUrl = `https://oauth.yandex.ru/authorize?response_type=code&client_id=${env.YANDEX_CLIENT_ID}&state=${userId}`;
-        if (provider === "google") authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${env.GOOGLE_CLIENT_ID}&redirect_uri=https://${domain}/auth/google/callback&response_type=code&scope=${encodeURIComponent("https://www.googleapis.com/auth/drive.file")}&state=${userId}&access_type=offline&prompt=consent`;
-        if (provider === "dropbox") authUrl = `https://www.dropbox.com/oauth2/authorize?client_id=${env.DROPBOX_CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(`https://${domain}/auth/dropbox/callback`)}&token_access_type=offline&state=${userId}`;
+        if (provider === "yandex") authUrl = `https://oauth.yandex.ru/authorize?response_type=code&client_id=${env.YANDEX_CLIENT_ID}&state=${userId}&platform=android`;
+        if (provider === "google") authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${env.GOOGLE_CLIENT_ID}&redirect_uri=https://${domain}/auth/google/callback&response_type=code&scope=${encodeURIComponent("https://www.googleapis.com/auth/drive.file")}&state=${userId}&access_type=offline&prompt=consent&platform=android`;
+        if (provider === "dropbox") authUrl = `https://www.dropbox.com/oauth2/authorize?client_id=${env.DROPBOX_CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(`https://${domain}/auth/dropbox/callback`)}&token_access_type=offline&state=${userId}&platform=android`;
         
         await sendVKMessage(chatId, `🔗 Ссылка для авторизации ${provider}:\n${authUrl}`, env);
         return new Response("OK");
@@ -6370,7 +6378,29 @@ async function handleDownloadTelegram(data, chatId, userId, env) {
 }
 
 // Универсальная функция для генерации HTML-перехода (чтобы не дублировать код)
-const renderRedirectPage = (targetUrl, providerName) => {
+const renderRedirectPage = (targetUrl, providerName, platform) => {
+  // Если платформа Android, возвращаем HTML с Intent
+  if (platform === 'android') {
+    // ВНИМАНИЕ: Замените com.leshiy_ai.app на актуальный ID вашего Android-приложения
+    const androidIntentUrl = "intent://leshiy-ai.github.io/done" + new URL(targetUrl).search + "#Intent;scheme=https;package=com.leshiy_ai.app;end";
+    return new Response(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Возврат в приложение...</title>
+        </head>
+        <body>
+          <script>
+            window.location.href = "${androidIntentUrl}";
+          </script>
+        </body>
+      </html>
+    `, { headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
+  }
+
+  // Для всех остальных случаев (веб, iOS и т.д.) - обычный HTTP редирект
   return new Response(`
   <!DOCTYPE html>
   <html>
@@ -6380,8 +6410,8 @@ const renderRedirectPage = (targetUrl, providerName) => {
       <title>Авторизация...</title>
       <style>
         body { background: #ebedf0; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; font-family: -apple-system, system-ui, sans-serif; }
-        .loader { border: 3px solid #f3f3f3; border-top: 3px solid #2688eb; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .loader { border: 3px solid #f3f3f3; border-top: 3px solid #2688eb; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; }\
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }\
       </style>
     </head>
     <body>
@@ -6391,11 +6421,12 @@ const renderRedirectPage = (targetUrl, providerName) => {
       </div>
       <script>
         // Выполняем переход через JS, что "нравится" мобильным браузерам
-        setTimeout(() => { window.location.href = "${targetUrl}"; }, 100);
+        setTimeout(() => { window.location.href = "${targetUrl}"; }, 100);\
       </script>
     </body>
   </html>`, { headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
 };
+
 
 function renderSuccessPage() {
   return new Response(`
@@ -8709,7 +8740,7 @@ function handleVKAuthPage(request, env) {
                 const VKID = window.VKIDSDK;
                 VKID.Config.init({
                     app: 54467300,
-                    redirectUrl: 'https://d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net/auth/vk/callback',
+                    redirectUrl: 'https://d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net/auth/vk/callback?platform=android',
                     responseMode: VKID.ConfigResponseMode.Callback
                 });
 
@@ -8751,11 +8782,32 @@ function handleVKAuthPage(request, env) {
 async function handleVKCallback(request, env) {
     const url = new URL(request.url);
     const userId = url.searchParams.get('vk_user_id');
+    const platform = url.searchParams.get("platform"); // <--- ДОБАВЛЕНО: получаем параметр platform
 
     if (!userId || userId === 'undefined') {
         return new Response("Ошибка: ID не получен", { status: 400 });
     }
 
+    // Если запрос пришел с Android, делаем "умный редирект"
+    if (platform === 'android') {
+      // ВНИМАНИЕ: Замените com.leshiy_ai.app на актуальный ID вашего Android-приложения
+      const androidIntentUrl = `intent://leshiy-ai.github.io/done?vk_user_id=${userId}#Intent;scheme=https;package=com.leshiy_ai.app;end`;
+      return new Response(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Возврат в приложение...</title>
+            </head>
+            <body>
+              <script>
+                window.location.href = "${androidIntentUrl}";
+              </script>
+            </body>
+          </html>
+      `, { headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
+    }
     // Финальный прыжок в Хранилку с параметром, который поймет основной скрипт
     return new Response(null, {
         status: 302,
