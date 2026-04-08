@@ -6382,8 +6382,11 @@ const renderRedirectPage = (targetUrl, providerName, platform) => {
   // Если платформа Android, возвращаем HTML с "умным редиректом"
   if (platform === 'android') {
     const params = new URL(targetUrl).search;
-    // Формируем прямую ссылку
-    const androidAppUrl = `leshiyapp://done${params}`; 
+    const pkg = "com.leshiy_ai.app";
+    const domain = "leshiy-ai.github.io";
+
+    // Теперь androidAppUrl содержит правильный Intent для твоего нового манифеста
+    const androidAppUrl = `intent://${domain}/${params}#Intent;scheme=https;package=${pkg};end`;
 
     return new Response(`
       <!DOCTYPE html>
@@ -8805,7 +8808,11 @@ async function handleVKCallback(request, env) {
 
     // Если запрос пришел с Android, делаем "умный редирект"
     if (platform === 'android') {
-      const androidAppUrl = `leshiyapp://done?code=success&vk_user_id=${userId}`;
+      const pkg = "com.leshiy_ai.app";
+      const domain = "leshiy-ai.github.io";
+      
+      // Теперь в ней лежит Intent, который поймет новый манифест
+      const androidAppUrl = `intent://${domain}/?vk_user_id=${userId}#Intent;scheme=https;package=${pkg};end`;
 
       return new Response(`
           <!DOCTYPE html>
