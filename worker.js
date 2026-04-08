@@ -6379,26 +6379,36 @@ async function handleDownloadTelegram(data, chatId, userId, env) {
 
 // Универсальная функция для генерации HTML-перехода (чтобы не дублировать код)
 const renderRedirectPage = (targetUrl, providerName, platform) => {
-  // Если платформа Android, возвращаем HTML с Intent
+  // Если платформа Android, возвращаем HTML с "умным редиректом"
   if (platform === 'android') {
-    // ВНИМАНИЕ: Замените com.leshiy_ai.app на актуальный ID вашего Android-приложения
-    //const androidIntentUrl = "intent://leshiy-ai.github.io/done" + new URL(targetUrl).search + "#Intent;scheme=https;package=com.leshiy_ai.app;end";
     const params = new URL(targetUrl).search;
-    const packageName = "com.leshiy_ai.app";
-    // Формируем правильный Intent. 
-    // В конце добавляем S.browser_fallback_url, чтобы Chrome не выдавал ошибку, если не найдет приложение
-    const androidIntentUrl = `leshiyapp://done${params}`;
+    // Формируем прямую ссылку
+    const androidAppUrl = `leshiyapp://done${params}`; 
+
     return new Response(`
       <!DOCTYPE html>
       <html>
         <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Возврат в приложение...</title>
+          <title>Возврат в Leshiy-AI...</title>
+          <style>
+            body { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; background: #1a1a1a; color: white; }
+            .btn { padding: 15px 25px; background: #007bff; color: white; text-decoration: none; border-radius: 10px; font-weight: bold; }
+          </style>
         </head>
         <body>
+          <p>Возвращаемся в приложение...</p>
+          <a id="link" class="btn" href="${androidAppUrl}">НАЖМИ ТУТ ДЛЯ ВОЗВРАТА</a>
+
           <script>
-            window.location.href = "${androidIntentUrl}";
+            // 1. Пытаемся прыгнуть сразу
+            window.location.href = "${androidAppUrl}";
+            
+            // 2. Если через 0.5 сек не улетели — имитируем клик по кнопке
+            setTimeout(() => {
+              document.getElementById('link').click();
+            }, 500);
           </script>
         </body>
       </html>
@@ -8795,20 +8805,28 @@ async function handleVKCallback(request, env) {
 
     // Если запрос пришел с Android, делаем "умный редирект"
     if (platform === 'android') {
-      // Мы передаем vk_user_id (или code, смотря что ждет твой App.jsx) 
-      // и обязательно добавляем параметр code=, чтобы сработал твой if (event.url.includes('code='))
-      const androidIntentUrl = `leshiyapp://done?code=success&vk_user_id=${userId}`;
+      const androidAppUrl = `leshiyapp://done?code=success&vk_user_id=${userId}`;
+
       return new Response(`
           <!DOCTYPE html>
           <html>
             <head>
               <meta charset="UTF-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Возврат в приложение...</title>
+              <title>Авторизация ВК...</title>
+              <style>
+                body { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; background: #1a1a1a; color: white; }
+                .btn { padding: 15px 25px; background: #4c75a3; color: white; text-decoration: none; border-radius: 10px; font-weight: bold; }
+              </style>
             </head>
             <body>
+              <p>Вход выполнен! Переходим в приложение...</p>
+              <a id="link" class="btn" href="${androidAppUrl}">ВЕРНУТЬСЯ В ПРИЛОЖЕНИЕ</a>
               <script>
-                window.location.href = "${androidIntentUrl}";
+                window.location.href = "${androidAppUrl}";
+                setTimeout(() => {
+                  document.getElementById('link').click();
+                }, 500);
               </script>
             </body>
           </html>
