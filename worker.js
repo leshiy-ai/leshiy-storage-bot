@@ -6387,7 +6387,7 @@ const renderRedirectPage = (targetUrl, providerName, platform) => {
     const packageName = "com.leshiy_ai.app";
     // Формируем правильный Intent. 
     // В конце добавляем S.browser_fallback_url, чтобы Chrome не выдавал ошибку, если не найдет приложение
-    const androidIntentUrl = `intent://leshiy-ai.github.io/done${params}#Intent;scheme=https;package=${packageName};S.browser_fallback_url=${encodeURIComponent(targetUrl)};end`;
+    const androidIntentUrl = `leshiyapp://done${params}`;
     return new Response(`
       <!DOCTYPE html>
       <html>
@@ -8795,8 +8795,9 @@ async function handleVKCallback(request, env) {
 
     // Если запрос пришел с Android, делаем "умный редирект"
     if (platform === 'android') {
-      // ВНИМАНИЕ: Замените com.leshiy_ai.app на актуальный ID вашего Android-приложения
-      const androidIntentUrl = `intent://leshiy-ai.github.io/done?vk_user_id=${userId}#Intent;scheme=https;package=com.leshiy_ai.app;end`;
+      // Мы передаем vk_user_id (или code, смотря что ждет твой App.jsx) 
+      // и обязательно добавляем параметр code=, чтобы сработал твой if (event.url.includes('code='))
+      const androidIntentUrl = `leshiyapp://done?code=success&vk_user_id=${userId}`;
       return new Response(`
           <!DOCTYPE html>
           <html>
