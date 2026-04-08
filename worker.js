@@ -8811,6 +8811,7 @@ async function handleVKCallback(request, env) {
     const url = new URL(request.url);
     const userId = url.searchParams.get('vk_user_id');
     const platform = url.searchParams.get("platform"); // <--- ДОБАВЛЕНО: получаем параметр platform
+    const domain = "htpps://leshiy-ai.github.io";
 
     if (!userId || userId === 'undefined') {
         return new Response("Ошибка: ID не получен", { status: 400 });
@@ -8818,9 +8819,8 @@ async function handleVKCallback(request, env) {
 
     // Если запрос пришел с Android, делаем "умный редирект"
     if (platform === 'android') {
-      const targetUrl = `https://leshiy-ai.github.io/?vk_user_id=${userId}`;
+      const targetUrl = `${domain}?vk_user_id=${userId}`;
       //const pkg = "com.leshiy_ai.app";
-      //const domain = "leshiy-ai.github.io";
       
       // Теперь в ней лежит Intent, который поймет новый манифест
       //const androidAppUrl = `intent://${domain}/?vk_user_id=${userId}#Intent;scheme=https;package=${pkg};end`;
