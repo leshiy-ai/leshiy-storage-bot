@@ -6381,13 +6381,23 @@ async function handleDownloadTelegram(data, chatId, userId, env) {
 const renderRedirectPage = (targetUrl, providerName, platform) => {
   // Если платформа Android, возвращаем HTML с "умным редиректом"
   if (platform === 'android') {
-    const params = new URL(targetUrl).search;
-    const pkg = "com.leshiy_ai.app";
-    const domain = "leshiy-ai.github.io";
+    //const params = new URL(targetUrl).search;
+    //const pkg = "com.leshiy_ai.app";
+    //const domain = "leshiy-ai.github.io";
 
     // Теперь androidAppUrl содержит правильный Intent для твоего нового манифеста
-    const androidAppUrl = `intent://${domain}/${params}#Intent;scheme=https;package=${pkg};end`;
-
+    //const androidAppUrl = `intent://${domain}/${params}#Intent;scheme=https;package=${pkg};end`;
+    // targetUrl у тебя уже содержит https://leshiy-ai.github.io/?vk_user_id=...
+    // Мы просто шлем 302 статус. Android увидит домен и сам перекинет в приложение.
+    return new Response(null, {
+      status: 302,
+      headers: { 
+        'Location': targetUrl,
+        'Cache-Control': 'no-cache'
+      }
+    });
+  }
+  /*
     return new Response(`
       <!DOCTYPE html>
       <html>
@@ -6416,7 +6426,7 @@ const renderRedirectPage = (targetUrl, providerName, platform) => {
         </body>
       </html>
     `, { headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
-  }
+  }*/
 
   // Для всех остальных случаев (веб, iOS и т.д.) - обычный HTTP редирект
   return new Response(`
@@ -8808,12 +8818,22 @@ async function handleVKCallback(request, env) {
 
     // Если запрос пришел с Android, делаем "умный редирект"
     if (platform === 'android') {
-      const pkg = "com.leshiy_ai.app";
-      const domain = "leshiy-ai.github.io";
+      const targetUrl = `https://leshiy-ai.github.io/?vk_user_id=${userId}`;
+      //const pkg = "com.leshiy_ai.app";
+      //const domain = "leshiy-ai.github.io";
       
       // Теперь в ней лежит Intent, который поймет новый манифест
-      const androidAppUrl = `intent://${domain}/?vk_user_id=${userId}#Intent;scheme=https;package=${pkg};end`;
-
+      //const androidAppUrl = `intent://${domain}/?vk_user_id=${userId}#Intent;scheme=https;package=${pkg};end`;
+      // ПРЯМОЙ РЕДИРЕКТ 302
+      // Android с настроенным манифестом сам перехватит этот переход
+      return new Response(null, {
+        status: 302,
+        headers: { 
+            'Location': targetUrl,
+            'Cache-Control': 'no-cache' 
+        }
+      });
+      /*
       return new Response(`
           <!DOCTYPE html>
           <html>
@@ -8838,6 +8858,7 @@ async function handleVKCallback(request, env) {
             </body>
           </html>
       `, { headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
+      */
     }
     // Финальный прыжок в Хранилку с параметром, который поймет основной скрипт
     return new Response(null, {
