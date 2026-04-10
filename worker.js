@@ -921,7 +921,7 @@ async function worker_code_fetch(request, env, ctx) {
         return new Response(html, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
-            "Content-Security-Policy": "frame-ancestors 'self' https://ok.ru https://*.ok.ru https://*.okcdn.ru https://vk.com https://*.vk.com https://*.vk-portal.net https://id.vk.com https://connect.ok.ru https://*.mycdn.me https://*.mail.ru https://d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net https://leshiy-ai.github.io https://localhost; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://st.okcdn.ru https://*.okcdn.ru https://*.vk.ru https://*.mail.ru https://dzen.ru https://st-ok.cdn-vk.ru; img-src * data: blob:; connect-src *; style-src 'self' 'unsafe-inline' https://*.vk.ru https://*.okcdn.ru;",
+            "Content-Security-Policy": "frame-ancestors 'self' https://ok.ru https://*.ok.ru https://*.okcdn.ru https://vk.com https://*.vk.com https://*.vk-portal.net https://id.vk.com https://connect.ok.ru https://*.mycdn.me https://*.mail.ru https://d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net https://d5d2v5jjmbggp9k8qe8q.pdkwbi1w.apigw.yandexcloud.net https://leshiy-ai.github.io https://localhost; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://st.okcdn.ru https://*.okcdn.ru https://*.vk.ru https://*.mail.ru https://dzen.ru https://st-ok.cdn-vk.ru; img-src * data: blob:; connect-src *; style-src 'self' 'unsafe-inline' https://*.vk.ru https://*.okcdn.ru;",
             "Access-Control-Allow-Origin": "*",
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Pragma": "no-cache",
