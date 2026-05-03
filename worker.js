@@ -922,7 +922,7 @@ async function worker_code_fetch(request, env, ctx) {
 
         // 1. ЕСЛИ НЕТ ID — ПОКАЗЫВАЕМ СТРАНИЦУ АВТОРИЗАЦИИ ТГ
         if (!tgUserId) {
-          return handleTelegramAuthPage(request, env); 
+          return handleTelegramApp(request, env); 
         }
 
         // 2. ИЩЕМ ЮЗЕРА В БАЗЕ (как в твоем блоке /vk)
