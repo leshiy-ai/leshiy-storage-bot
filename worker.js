@@ -878,6 +878,34 @@ async function worker_code_fetch(request, env, ctx) {
       if (url.pathname === "/auth/telegram/callback") return await handleTelegramCallback(request, env);
       if (url.pathname === "/auth/vk/callback") return await handleVKCallback(request, env);
 
+      // Обработка корня — отрисовываем страницу сразу
+      if (url.pathname === "/") {
+        const params = Object.fromEntries(url.searchParams);
+        
+        // Пытаемся найти данные, если есть хоть какой-то ID в параметрах или сессии
+        let userId = params.vk_user_id || params.user_id; 
+        let userData = null;
+
+        if (userId) {
+          try {
+            const kvData = await env.USER_DB.get(`user:${userId}`);
+            userData = kvData ? (typeof kvData === 'object' ? kvData : JSON.parse(kvData)) : null;
+            if (userData) {
+              params.userName = userData.name || userData.userName;
+              params.userPhoto = userData.photo || userData.userPhoto;
+            }
+          } catch (e) { console.error("Root Auth Error:", e); }
+        }
+
+        const adminCfg = await env.USER_DB.get("admin:config", { type: "json" }) || { admins: [] };
+        const isAdmin = userId ? adminCfg.admins.includes(String(userId)) : false;
+        const listUser = await env.USER_DB.list({ prefix: "user:" });
+
+        // Возвращаем HTML страницы, а не страницу авторизации!
+        const html = renderVKMiniAppHTML(params, userData, isAdmin, listUser.keys.length, env); 
+        return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+      }
+
       // --- ТОЧКА ВХОДА TELEGRAM MINI APP ---
       if (url.pathname === "/tg") {
         // Просто вызываем функцию и возвращаем результат её работы
@@ -885,9 +913,7 @@ async function worker_code_fetch(request, env, ctx) {
       }
 
       // --- ОБРАБОТКА VK MINI APP ---
-      //if (url.pathname === "/vk" || url.pathname.startsWith("/app")) {
-      // --- ОБРАБОТКА КОРНЯ И ВК (ОБЪЕДИНЯЕМ ЛОГИКУ) ---
-      if (url.pathname === "/" || url.pathname === "/vk" || url.pathname.startsWith("/app")) {
+      if (url.pathname === "/vk" || url.pathname.startsWith("/app")) {
         const params = Object.fromEntries(url.searchParams);
         const vkUserId = params.vk_user_id;
         
