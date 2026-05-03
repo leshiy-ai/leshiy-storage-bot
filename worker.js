@@ -9114,12 +9114,14 @@ async function handleTelegramCallback(request, env) {
     });
   }
 
-  // Добавлено сохранение
+  // Вставляем этот блок перед финальным редиректом
+  const fullName = [authData.first_name, authData.last_name].filter(Boolean).join(' ');
+
   const userProfile = {
-    id: userId,
-    name: authData.first_name || "User",
-    photo: authData.photo_url || "", // Тот самый фикс для аватара
-    platform: 'telegram'
+      id: userId,
+      name: fullName, // Теперь здесь и Имя, и Фамилия
+      photo: authData.photo_url || "",
+      platform: 'telegram'
   };
   await env.USER_DB.put(`user:${userId}`, JSON.stringify(userProfile));
 
