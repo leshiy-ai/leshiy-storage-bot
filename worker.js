@@ -3601,7 +3601,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       <div class="user-auth-wrapper" style="position: relative;">
         <div id="auth-btn" class="avatar-circle" onclick="toggleAuthMenu()">
             <!-- Используем твою статику camera_100.png -->
-            <img id="user-photo" src="${params.userPhoto || '/public/camera_100.png'}" 
+            <img id="user-photo" src="'${params.userPhoto}' || '${cdn}/camera_100.png'" 
                 style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">
         </div>
 
@@ -3609,10 +3609,10 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
             <div id="menu-guest" class="${userData ? 'hidden' : ''}">
                 <div style="font-size: 11px; opacity: 0.6; margin-bottom: 8px; padding-left: 8px;">Войти через:</div>
                 <a href="/vk" class="login-row">
-                    <img src="/public/vk_logo.svg" class="menu-icon"> <span>ВКонтакте</span>
+                    <img src="${cdn}/vk_logo.svg" class="menu-icon"> <span>ВКонтакте</span>
                 </a>
                 <a href="/tg" class="login-row">
-                    <img src="/public/tg_logo.svg" class="menu-icon"> <span>Telegram</span>
+                    <img src="${cdn}/tg_logo.svg" class="menu-icon"> <span>Telegram</span>
                 </a>
             </div>
             <div id="menu-user" class="${userData ? '' : 'hidden'}">
