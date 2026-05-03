@@ -853,7 +853,7 @@ async function worker_code_fetch(request, env, ctx) {
         return new Response(receiverHtml, { headers: { "Content-Type": "text/html; charset=utf-8" } });
       }
 
-      // Обработка корня — обычный сайт
+      /*/ Обработка корня — обычный сайт
       if (url.pathname === "/") {
         return new Response(`
     <!DOCTYPE html>
@@ -868,7 +868,7 @@ async function worker_code_fetch(request, env, ctx) {
     </div>
     </body>
     </html>`, { headers: { "Content-Type": "text/html; charset=utf-8" } });
-      }
+      }*/
 
       // --- CALLBACKS авторизации ---
       if (url.pathname === "/auth/yandex/callback") return await handleYandexCallback(request, env);
@@ -885,7 +885,9 @@ async function worker_code_fetch(request, env, ctx) {
       }
 
       // --- ОБРАБОТКА VK MINI APP ---
-      if (url.pathname === "/vk" || url.pathname.startsWith("/app")) {
+      //if (url.pathname === "/vk" || url.pathname.startsWith("/app")) {
+      // --- ОБРАБОТКА КОРНЯ И ВК (ОБЪЕДИНЯЕМ ЛОГИКУ) ---
+      if (url.pathname === "/" || url.pathname === "/vk" || url.pathname.startsWith("/app")) {
         const params = Object.fromEntries(url.searchParams);
         const vkUserId = params.vk_user_id;
         
