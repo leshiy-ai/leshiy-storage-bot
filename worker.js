@@ -9166,24 +9166,24 @@ async function handleTelegramCallback(request, env) {
       status: 302,
       headers: { 'Location': `${return_to}/?tg_data=${userData}` }
     });
+  } else {
+    // Вставляем этот блок перед финальным редиректом
+    const fullName = [authData.first_name, authData.last_name].filter(Boolean).join(' ');
+
+    const userProfile = {
+        id: userId,
+        name: fullName, // Теперь здесь и Имя, и Фамилия
+        photo: authData.photo_url || "",
+        platform: 'telegram'
+    };
+    await env.USER_DB.put(`user:${userId}`, JSON.stringify(userProfile));
   }
-
-  // Вставляем этот блок перед финальным редиректом
-  const fullName = [authData.first_name, authData.last_name].filter(Boolean).join(' ');
-
-  const userProfile = {
-      id: userId,
-      name: fullName, // Теперь здесь и Имя, и Фамилия
-      photo: authData.photo_url || "",
-      platform: 'telegram'
-  };
-  await env.USER_DB.put(`user:${userId}`, JSON.stringify(userProfile));
-
   // Редирект (как мы договорились, через конструктор)
   const targetDomain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
   return new Response(null, {
     status: 302,
-    headers: { 'Location': `https://${targetDomain}/tg?user_id=${userId}` }
+    //headers: { 'Location': `https://${targetDomain}/vk?vk_user_id=${userId}&source=telegram` }
+    headers: { 'Location': `https://${targetDomain}/tg?user_id=${userId}&source=telegram` }
   });
 }
 
