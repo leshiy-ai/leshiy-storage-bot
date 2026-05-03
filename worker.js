@@ -7,6 +7,7 @@
 🌐 Это продвинутый SaaS-инструмент работающий круглосуточно 24/7 для личного использования или сообщества по обмену файлами с друзьями и родственниками.
 ✨ Основные функции: Автоматическая загрузка фото и видео на облачные платформы (Яндекс Диск, Google Drive, Dropbox, Облако Mail.Ru WebDAV, или Свои FTP/SFTP/WebDAV сервера.)
 прямо через приложение.
+🛡️ Безопасность: Мы используем технологию «цифрового моста» (OAuth). Вам не нужно доверять приложению пароль — авторизация идет на странице сервиса. Бот получает лишь временный «пропуск» (токен) для работы с файлами без доступа к управлению аккаунтом. Вы можете закрыть доступ в любой момент в настройках диска.
 🤝 Возможность предоставления доступа к Вашему хранилищу друзьям и близким просто отправив им реферальную ссылку.
 ☁️ Универсальность: Поддержка облачных провайдеров с авторизацией OAuth (Яндекс Диск, Google Drive, Dropbox) и WebDAV (Облако Mail.Ru, Yandex WebDAV и др.), а также FTP/SFTP-серверов.
 🤖 Умное именование: Сохраняет исходные имена для файлов без сжатия и генерирует имена по дате/времени для сжатых фото/видео/голосовых. Сохраняет фото и видеофайлы в современных форматах без потери качества и размера.
@@ -1631,7 +1632,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
   if (text === '/about') {
     const aboutText = `<b>Приложение «Хранилка» by Leshiy</b>
 
-  Одновременно работает как <a href='https://t.me/leshiy_storage_bot'>Telegram-бот</a>, <a href='https://t.me/leshiy_storage_bot/app'>tgApp-приложение</a>, <a href='https://vk.com/write-235249123'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010'>vkMiniApp-приложение</a> а также доступно как <a href='https://ok.ru/app/512004791160'>okMiniApp в одноклассниках</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.
+  Одновременно работает как <a href='https://t.me/leshiy_storage_bot'>Telegram-бот</a>, <a href='https://t.me/leshiy_storage_bot/app'>tgApp-приложение</a>, <a href='https://vk.com/write-235249123'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010'>vkMiniApp-приложение</a> а также доступно как <a href='https://ok.ru/app/512004791160'>okMiniApp в одноклассниках</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой. 🛡️ Безопасность: Мы используем технологию «цифрового моста» (OAuth). Вам не нужно доверять приложению пароль — авторизация идет на странице сервиса. Бот получает лишь временный «пропуск» (токен) для работы с файлами без доступа к управлению аккаунтом. Вы можете закрыть доступ в любой момент в настройках диска.
 
   ✨ <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru, WebDAV, FTP, SFTP. Можно делиться доступом с близкими!
   🧠 <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.
@@ -2918,7 +2919,7 @@ async function handleVK(body, env, hostname, ctx) {
       // Обработка команды /about
       if (command === "/about") {
         let aboutText = `Приложение «Хранилка» by Leshiy\n\n`;
-        aboutText += `Одновременно работает как Telegram-бот https://t.me/leshiy_storage_bot, Tg-приложение https://t.me/leshiy_storage_bot/app, @leshiy_ai (vk-чат-бот), и [https://vk.com/app${VK_APP_ID}|vkMiniApp-приложение] и [https://ok.ru/app/${OK_APP_ID}|okMiniApp-приложение] с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.\n`;
+        aboutText += `Одновременно работает как Telegram-бот https://t.me/leshiy_storage_bot, Tg-приложение https://t.me/leshiy_storage_bot/app, @leshiy_ai (vk-чат-бот), и [https://vk.com/app${VK_APP_ID}|vkMiniApp-приложение] и [https://ok.ru/app/${OK_APP_ID}|okMiniApp-приложение] с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.\n🛡️ Безопасность: Мы используем технологию «цифрового моста» (OAuth). Вам не нужно доверять приложению пароль — авторизация идет на странице сервиса. Бот получает лишь временный «пропуск» (токен) для работы с файлами без доступа к управлению аккаунтом. Вы можете закрыть доступ в любой момент в настройках диска.`;
         aboutText += `✨ Что я умею: Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru, WebDAV, FTP, SFTP. Можно делиться доступом с близкими!\n`;
         aboutText += `🧠 Gemini AI: Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.\n\n`;
         aboutText += `© Автор: Огорельцев Александр Валерьевич`;
@@ -3936,6 +3937,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
             tagline: "Приложение «Хранилка» by Leshiy",
             shortDesc: "Одновременно работает как <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram-бот</a>, <a href='https://t.me/leshiy_storage_bot/app' target='_blank' style='color: #4db3ff;'>tgApp-приложение</a>, <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>vkMiniApp-приложение</a> и <a href='https://ok.ru/app/512004791160' target='_blank' style='color: #4db3ff;'>okMiniApp в одноклассниках</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.",
             features: "✨ <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru и WebDAV. Можно делиться доступом с близкими!",
+            security: "🛡️ <b>Безопасность:</b> Мы используем технологию «цифрового моста» (OAuth). Вам не нужно доверять приложению пароль — авторизация идет на странице сервиса. Бот получает лишь временный «пропуск» (токен) для работы с файлами без доступа к управлению аккаунтом. Вы можете закрыть доступ в любой момент в настройках диска.",
             aiNote: "🧠 <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.",
             status: "⚙️ Связь с хранилищем:",
             connected: "Подключено:",
@@ -3948,6 +3950,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
             tagline: "App «Storage» by Leshiy",
             shortDesc: "It works simultaneously as a <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram bot</a>, <a href='https://t.me/leshiy_storage_bot/app' target='_blank' style='color: #4db3ff;'>Telegram App</a>, <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>VK chat bot</a>, and a <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>VKMiniApp</a> and <a href='https://ok.ru/app/512004791160' target='_blank' style='color: #4db3ff;'>okMiniApp</a> application with an upload/download function and a referral access system. Serves as a «bridge» between social networks and cloud storage. Allows you to save media files (photos, videos, documents) to your personal cloud storage. 24/7 at your service.",
             features: "✨ <b>Features:</b> High-quality uploads, support for Yandex, Google, Dropbox, Mail.Ru & WebDAV. Share access with your family!",
+            security: "🛡️ <b>Security:</b> We use «digital bridge» technology (OAuth). No need to share your password — authorization happens on the official service page. The bot only gets a temporary access token for file operations without account management rights. You can revoke access anytime in your cloud settings.",
             aiNote: "🧠 <b>Gemini AI:</b> Feel free to ask me anything about the bot or just chat.",
             status: "⚙️ Cloud Connection:",
             connected: "Connected to",
@@ -3979,17 +3982,20 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
                   '<div style="font-size: 13px; margin-top: 4px; opacity: 0.8;">📂 ' + lang.folder + ': ' + (isConn ? '<b>' + (data.currentFolder || '') + '</b>' : '—') + '</div>' +
               '</div>' +
 
-              // --- СЕКЦИЯ 2: РАСКРЫВАЮЩАЯСЯ (Твои тексты) ---
+              // --- СЕКЦИЯ 2: РАСКРЫВАЮЩАЯСЯ ---
               '<details>' +
                   '<summary><span class="arrow-down">▼</span></summary>' +
                   '<div style="margin-top: 10px;">' +
-                      // Твой Tagline
+                      // Tagline
                       '<div style="font-size: 12px; color: #4bb34b; margin-bottom: 2px; font-weight: 500;">' + lang.tagline + '</div>' +
-                      // Твой shortDesc
+                      // ShortDesc
                       '<div style="font-size:14px; line-height: 1.5; opacity: 0.9;">' + lang.shortDesc + '</div>' +
-                      // Блок фишек
+                      // Блок фишек и безопасности
                       '<div style="margin-top: 12px; padding: 12px; background: rgba(128,128,128,0.05); border-radius: 12px; border: 1px solid rgba(128,128,128,0.15);">' +
                           '<div style="font-size: 13px; color: var(--text-secondary);">' + lang.features + '</div>' +
+                          // НОВЫЙ БЛОК БЕЗОПАСНОСТИ
+                          '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px; color: var(--text-secondary);">' + lang.security + '</div>' +
+                          // AI Note
                           '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px;">' + lang.aiNote + '</div>' +
                       '</div>' +
                       // Автор
