@@ -3999,14 +3999,14 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     }
 
     function logout() {
-      // Очищаем локалку, чтобы при следующем входе не подтянулось старое
+      // 1. Полная очистка локальных данных
       localStorage.removeItem('leshiy_storage_user');
       
-      // Вместо жесткого редиректа, который может убить WebView ВК, 
-      // просто убираем параметры из URL и обновляем страницу внутри моста
-      const url = new URL(window.location.href);
-      url.searchParams.delete('vk_user_id');
-      window.location.href = url.pathname; 
+      // 2. Очищаем ВСЕ параметры URL (убиваем и vk_user_id, и tg_data)
+      const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+      
+      // 3. Редирект на чистую страницу
+      window.location.href = cleanUrl;
     }
 
     // Закрытие при клике по любому месту экрана
