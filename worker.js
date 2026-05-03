@@ -908,8 +908,57 @@ async function worker_code_fetch(request, env, ctx) {
 
       // --- ТОЧКА ВХОДА TELEGRAM MINI APP ---
       if (url.pathname === "/tg") {
-        // Просто вызываем функцию и возвращаем результат её работы
-        return await handleTelegramApp(request, env);
+        const params = Object.fromEntries(url.searchParams);
+        
+        // Пытаемся достать ID из параметров (tg_user_id или из распакованного tg_data)
+        let tgUserId = params.user_id || params.tg_user_id;
+        
+        if (!tgUserId && params.tg_data) {
+          try {
+            const decodedData = JSON.parse(decodeURIComponent(params.tg_data));
+            tgUserId = decodedData.id;
+          } catch (e) {}
+        }
+
+        // 1. ЕСЛИ НЕТ ID — ПОКАЗЫВАЕМ СТРАНИЦУ АВТОРИЗАЦИИ ТГ
+        if (!tgUserId) {
+          return handleTelegramAuthPage(request, env); 
+        }
+
+        // 2. ИЩЕМ ЮЗЕРА В БАЗЕ (как в твоем блоке /vk)
+        let userData = null;
+        try {
+          const kvData = await env.USER_DB.get(`user:${tgUserId}`);
+          if (kvData) {
+            userData = (typeof kvData === 'object') ? kvData : JSON.parse(kvData);
+            
+            // Наполняем params данными из базы для рендера
+            if (userData) {
+              // Склеиваем имя и фамилию для ТГ, если они есть
+              params.userName = userData.name || [userData.first_name, userData.last_name].filter(Boolean).join(' ');
+              params.userPhoto = userData.photo || userData.photo_url;
+              params.vk_user_id = tgUserId; // Подменяем для совместимости с твоим рендером
+            }
+          }
+        } catch (e) {
+          console.error("DB Error in TG App:", e);
+        }
+
+        const adminCfg = await env.USER_DB.get("admin:config", { type: "json" }) || { admins: [] };
+        const isAdmin = adminCfg.admins.includes(String(tgUserId));
+        const listUser = await env.USER_DB.list({ prefix: "user:" });
+        const countUser = listUser.keys.length;
+
+        // Используем твой стандартный рендер, он теперь увидит данные
+        const html = renderVKMiniAppHTML(params, userData, isAdmin, countUser, env); 
+        
+        return new Response(html, {
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-cache, no-store, must-revalidate"
+          }
+        });
       }
 
       // --- ОБРАБОТКА VK MINI APP ---
@@ -9134,7 +9183,7 @@ async function handleTelegramCallback(request, env) {
   const targetDomain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
   return new Response(null, {
     status: 302,
-    headers: { 'Location': `https://${targetDomain}/vk?vk_user_id=${userId}&source=telegram` }
+    headers: { 'Location': `https://${targetDomain}/tg?user_id=${userId}` }
   });
 }
 
