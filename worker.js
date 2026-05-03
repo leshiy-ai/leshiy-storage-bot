@@ -3598,27 +3598,26 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         <span id="themeIcon" style="font-size:16px;">☀️</span>
       </button>
       <!-- КНОПКА-АВАТАР -->
-      <div class="user-auth-wrapper" style="position: relative;">
-        <div id="auth-btn" class="avatar-circle" onclick="toggleAuthMenu()">
-            <!-- Используем твою статику camera_100.png -->
-            <img id="user-photo" src="'${params.userPhoto}' || '${cdn}/camera_100.png'" 
-                style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">
+      <div class="user-auth-wrapper" style="position: relative; display: inline-block;">
+        <div id="auth-btn" class="avatar-circle" onclick="toggleAuthMenu(event)" style="width: 32px; height: 32px; border-radius: 50%; cursor: pointer; overflow: hidden; border: 1px solid rgba(128,128,128,0.2); display: flex; align-items: center; justify-content: center;">
+            <img id="user-photo" src="${params.userPhoto ? params.userPhoto : cdn + '/camera_100.png'}" 
+                style="width: 100%; height: 100%; object-fit: cover;">
         </div>
 
-        <div id="auth-menu" class="dropdown-menu">
+        <div id="auth-menu" class="dropdown-menu" style="display: none; position: absolute; right: 0; top: 40px; background: var(--bg-color, #fff); border-radius: 12px; box-shadow: 0 5px 20px rgba(0,0,0,0.3); z-index: 1000; min-width: 160px; padding: 10px;">
             <div id="menu-guest" class="${userData ? 'hidden' : ''}">
                 <div style="font-size: 11px; opacity: 0.6; margin-bottom: 8px; padding-left: 8px;">Войти через:</div>
-                <a href="/vk" class="login-row">
-                    <img src="${cdn}/vk_logo.svg" class="menu-icon"> <span>ВКонтакте</span>
+                <a href="/vk" class="login-row" style="display: flex; align-items: center; padding: 8px; text-decoration: none; color: inherit;">
+                    <img src="${cdn}/vk_logo.svg" style="width: 20px; margin-right: 10px;"> <span>ВКонтакте</span>
                 </a>
-                <a href="/tg" class="login-row">
-                    <img src="${cdn}/tg_logo.svg" class="menu-icon"> <span>Telegram</span>
+                <a href="/tg" class="login-row" style="display: flex; align-items: center; padding: 8px; text-decoration: none; color: inherit;">
+                    <img src="${cdn}/tg_logo.svg" style="width: 20px; margin-right: 10px;"> <span>Telegram</span>
                 </a>
             </div>
             <div id="menu-user" class="${userData ? '' : 'hidden'}">
-                <div style="padding: 8px; font-weight: bold;">${params.userName || 'Пользователь'}</div>
+                <div style="padding: 8px; font-weight: bold; font-size: 14px;">${params.userName || 'Пользователь'}</div>
                 <hr style="border: 0; border-top: 1px solid rgba(128,128,128,0.2); margin: 5px 0;">
-                <button onclick="logout()" class="logout-btn" style="width:100%; background:#ff4d4d; color:white; border:none; padding:8px; border-radius:8px; cursor:pointer;">Выйти</button>
+                <button onclick="logout()" class="logout-btn" style="width:100%; background:#ff4d4d; color:white; border:none; padding:8px; border-radius:8px; cursor:pointer; font-weight:bold;">Выйти</button>
             </div>
         </div>
     </div>
@@ -3996,13 +3995,21 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       document.getElementById('auth-menu').classList.toggle('show');
     }
 
-    // Закрытие при клике мимо
-    window.addEventListener('click', function(e) {
+    function toggleAuthMenu(event) {
+      event.stopPropagation(); // Чтобы клик не закрывал меню сразу
+      const menu = document.getElementById('auth-menu');
+      menu.style.display = (menu.style.display === 'none' || menu.style.display === '') ? 'block' : 'none';
+    }
+
+    function logout() {
+        localStorage.removeItem('leshiy_storage_user'); // Очищаем локальные данные
+        window.location.href = window.location.origin; // Редирект на корень без параметров
+    }
+
+    // Закрытие при клике мимо меню
+    window.addEventListener('click', function() {
         const menu = document.getElementById('auth-menu');
-        const btn = document.getElementById('auth-btn');
-        if (!btn.contains(e.target) && !menu.contains(e.target)) {
-            menu.classList.remove('show');
-        }
+        if (menu) menu.style.display = 'none';
     });
 
     // Запускаем при загрузке
