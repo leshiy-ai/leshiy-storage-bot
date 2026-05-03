@@ -3998,15 +3998,20 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       menu.style.display = isVisible ? 'none' : 'block';
     }
 
-    function logout() {
-      // 1. Полная очистка локальных данных
+    async function logout() {
       localStorage.removeItem('leshiy_storage_user');
-      
-      // 2. Очищаем ВСЕ параметры URL (убиваем и vk_user_id, и tg_data)
-      const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
-      
-      // 3. Редирект на чистую страницу
-      window.location.href = cleanUrl;
+
+      // Пробуем закрыть бриджи, если они активны
+      try {
+          if (typeof vkBridge !== 'undefined') {
+              vkBridge.send("VKWebAppLogout"); 
+          } else if (window.Telegram?.WebApp) {
+              window.Telegram.WebApp.close(); 
+          }
+      } catch (e) {}
+
+      // Тот самый простой выброс на корень
+      window.location.href = window.location.origin;
     }
 
     // Закрытие при клике по любому месту экрана
