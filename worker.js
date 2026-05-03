@@ -3556,33 +3556,32 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       transform: rotate(180deg);
   }
   /* Прячем меню по умолчанию и задаем позицию */
-  .dropdown-menu {
-      display: none; 
-      position: absolute; 
-      right: 0; 
-      top: 45px; 
-      background: var(--bg-color, #fff); 
-      border: 1px solid rgba(128,128,128,0.2);
-      border-radius: 12px;
-      padding: 10px;
-      z-index: 1000;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.2);
-      min-width: 160px;
-  }
-  .dropdown-menu.show { display: block; } /* Класс для открытия */
-
-  /* Стили для иконок в меню */
-  .login-row {
-      display: flex;
-      align-items: center;
-      padding: 8px;
-      text-decoration: none;
-      color: inherit;
-      border-radius: 8px;
-      margin-bottom: 5px;
-  }
-  .login-row:hover { background: rgba(128,128,128,0.1); }
-.menu-icon { width: 24px; height: 24px; margin-right: 10px; }
+  .user-auth-wrapper { position: relative; display: inline-block; }
+  .avatar-circle {
+    width: 32px !important; /* Строго 32px */
+    height: 32px !important;
+    border-radius: 50%;
+    cursor: pointer;
+    overflow: hidden;
+    border: 1px solid rgba(128,128,128,0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+#user-photo { width: 100%; height: 100%; object-fit: cover; }
+.dropdown-menu {
+    display: none; 
+    position: absolute; 
+    right: 0; 
+    top: 40px; 
+    background: var(--bg-color, #fff); 
+    border-radius: 12px;
+    box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+    z-index: 1000;
+    min-width: 150px;
+    padding: 10px;
+}
+.dropdown-menu.show { display: block !important; }
   </style>
 </head>
 <body class="theme-bg-page">
