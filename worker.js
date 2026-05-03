@@ -3542,6 +3542,33 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       <button id="themeToggle" class="action-btn" onclick="toggleTheme()" style="background:none; border:none; cursor:pointer; padding:0;">
         <span id="themeIcon" style="font-size:16px;">☀️</span>
       </button>
+      <!-- КНОПКА-АВАТАР -->
+      <div class="user-auth-wrapper" style="display: inline-block; margin-left: 8px;">
+        <div id="auth-btn" class="avatar-circle" style="width: 30px; height: 30px; background: rgba(128,128,128,0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; border: 1px solid rgba(128,128,128,0.2);">
+          <img id="user-photo" src="" style="display:none; width: 100%; height: 100%; border-radius: 50%;">
+          <span id="auth-icon" style="font-size: 14px;">📷</span>
+        </div>
+        
+        <!-- ВЫПАДАЮЩЕЕ МЕНЮ -->
+        <div id="auth-menu" class="hidden" style="position: absolute; right: 0; top: 35px; background: var(--bg-color, #fff); border: 1px solid rgba(128,128,128,0.2); border-radius: 8px; padding: 8px; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+          <div id="menu-guest">
+            <div style="font-size: 11px; opacity: 0.6; margin-bottom: 5px;">Войти через:</div>
+            <a href="/vk" style="display: block; margin-bottom: 5px; text-decoration: none;">
+              <svg width="20" height="20" viewBox="0 0 24 24"> <!-- Твой SVG ВК из Leshiy-AI -->
+                <path fill="#0077ff" d="M13.162 18.994c-6.098 0-10.307-4.174-10.452-11.1h3.3c.1 5.093 2.337 7.25 4.113 7.693V7.894h3.102v4.394c1.895-.204 3.738-2.204 4.413-4.394h3.102c-.51 2.766-2.556 4.766-3.992 5.766 1.436.932 3.827 2.693 4.892 5.334h-3.413c-.836-2.614-2.91-4.637-5.002-4.843v4.843h-.113z"/>
+              </svg>
+            </a>
+            <a href="/tg" style="display: block; text-decoration: none;">
+              <svg width="20" height="20" viewBox="0 0 24 24"> <!-- Твой SVG ТГ из Leshiy-AI -->
+                <path fill="#24A1DE" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69.01-.03.01-.14-.07-.2-.08-.06-.19-.04-.27-.02-.11.02-1.93 1.23-5.46 3.62-.51.35-.98.52-1.4.51-.46-.01-1.35-.26-2.01-.48-.81-.27-1.45-.42-1.39-.89.03-.25.38-.51 1.07-.78 4.2-1.82 7-3.03 8.41-3.61 4.02-1.66 4.85-1.95 5.4-1.95.12 0 .38.03.55.17.14.11.18.27.2.39.02.08.03.22.01.32z"/>
+              </svg>
+            </a>
+          </div>
+          <div id="menu-user" class="hidden">
+            <button onclick="logout()" style="background:#ff4d4d; color:#fff; border:none; border-radius:4px; padding:4px 8px; font-size:12px; cursor:pointer;">Выйти</button>
+          </div>
+        </div>
+      </div>
       <div class="action-btn" id="reloadIcon" onclick="uiReload()"><b>⟳</b></div>
       <div class="action-btn close-btn" onclick="closeApp()"><b>✕</b></div>
     </div>
