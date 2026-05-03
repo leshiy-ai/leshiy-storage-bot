@@ -3991,25 +3991,28 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         applyTheme(newTheme);
     }
     
-    function toggleAuthMenu() {
-      document.getElementById('auth-menu').classList.toggle('show');
-    }
-
     function toggleAuthMenu(event) {
-      event.stopPropagation(); // Чтобы клик не закрывал меню сразу
+      event.stopPropagation();
       const menu = document.getElementById('auth-menu');
-      menu.style.display = (menu.style.display === 'none' || menu.style.display === '') ? 'block' : 'none';
+      const isVisible = menu.style.display === 'block';
+      menu.style.display = isVisible ? 'none' : 'block';
     }
 
     function logout() {
-        localStorage.removeItem('leshiy_storage_user'); // Очищаем локальные данные
-        window.location.href = window.location.origin; // Редирект на корень без параметров
+      // Очищаем локалку, чтобы при следующем входе не подтянулось старое
+      localStorage.removeItem('leshiy_storage_user');
+      
+      // Вместо жесткого редиректа, который может убить WebView ВК, 
+      // просто убираем параметры из URL и обновляем страницу внутри моста
+      const url = new URL(window.location.href);
+      url.searchParams.delete('vk_user_id');
+      window.location.href = url.pathname; 
     }
 
-    // Закрытие при клике мимо меню
+    // Закрытие при клике по любому месту экрана
     window.addEventListener('click', function() {
-        const menu = document.getElementById('auth-menu');
-        if (menu) menu.style.display = 'none';
+      const menu = document.getElementById('auth-menu');
+      if (menu) menu.style.display = 'none';
     });
 
     // Запускаем при загрузке
@@ -4043,7 +4046,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
             status: "⚙️ Связь с хранилищем:",
             connected: "Подключено:",
             folder: "Папка",
-            notSet: "Настройте подключение",
+            notSet: "Авторизуйтесь",
             notSelected: "Не выбрана"
         },
         en: {
@@ -4056,7 +4059,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
             status: "⚙️ Cloud Connection:",
             connected: "Connected to",
             folder: "Folder",
-            notSet: "Setup required",
+            notSet: "Authorize required",
             notSelected: "Not selected"
         }
       };
@@ -9110,6 +9113,15 @@ async function handleTelegramCallback(request, env) {
       headers: { 'Location': `${return_to}/?tg_data=${userData}` }
     });
   }
+
+  // Добавлено сохранение
+  const userProfile = {
+    id: userId,
+    name: authData.first_name || "User",
+    photo: authData.photo_url || "", // Тот самый фикс для аватара
+    platform: 'telegram'
+  };
+  await env.USER_DB.put(`user:${userId}`, JSON.stringify(userProfile));
 
   // Редирект (как мы договорились, через конструктор)
   const targetDomain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
