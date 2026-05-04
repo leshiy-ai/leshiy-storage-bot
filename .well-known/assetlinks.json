@@ -2,7 +2,7 @@
     "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
-      "package_name": "com.leshiy_ai.app",
+      "package_name": "com.leshiy_storage.app",
       "sha256_cert_fingerprints": [
         "24:18:63:C2:78:7C:2A:10:5E:36:6C:D4:24:C8:A1:62:90:5E:6E:71:B2:11:20:83:67:DD:80:B0:38:16:42:B6"
       ]

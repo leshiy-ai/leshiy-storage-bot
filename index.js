@@ -3,6 +3,8 @@ const nodeCrypto = require('crypto');
 const worker = require('./worker'); 
 const fetch = require('node-fetch');
 const AWS = require('aws-sdk');
+const fs = require('fs');
+const path = require('path');
 
 // Глобальные пропсы для имитации среды Cloudflare
 global.fetch = fetch;
@@ -21,6 +23,17 @@ module.exports.handler = async (event, context) => {
 
     // СБОРКА ПОЛНОГО URL
     const uri = event.headers['x-envoy-original-path'] || event.url || '/';
+
+    if (uri === '/manifest.json' || uri === '/.well-known/assetlinks.json') {
+        const fileName = uri === '/manifest.json' ? 'manifest.json' : 'assetlinks.json';
+        const content = fs.readFileSync(path.join(__dirname, fileName), 'utf8');
+        return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json' },
+            body: content
+        };
+    }
+    
     const domain = process.env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
     const fullUrl = `https://${domain}${uri}`;
     console.log("🛠 URL ДЛЯ ВОРКЕРА:", fullUrl);
