@@ -4075,7 +4075,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     }
 
     async function logout() {
-      localStorage.removeItem('leshiy_storage_user');
+      localStorage.removeItem('vk_user_id');
 
       // Пробуем закрыть бриджи, если они активны
       try {
