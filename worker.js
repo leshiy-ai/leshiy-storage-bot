@@ -8928,6 +8928,8 @@ function handleVKAuthPage(request, env) {
                 <div class="title">Вход в Хранилку</div>
                 <div class="subtitle">Используйте VK ID для безопасного доступа к вашим файлам</div>
                 <div id="vkid"></div>
+                <button onclick="window.location.href = '/'" style="width: 100%; margin-top: 15px; border: none; background: none; color: #0077ff; cursor: pointer; font-size: 14px;">Позже</button>
+
             </div>
 
             <script src="https://unpkg.com/@vkid/sdk@<3.0.0/dist-sdk/umd/index.js"></script>
@@ -9068,6 +9070,7 @@ async function handleTelegramApp(request, env) {
               <h3>Вход в Хранилку</h3>
               <p>Используйте Telegram ID для безопасного доступа к вашим файлам</p>
               <div id="tg-login-btn"></div>
+              <button onclick="window.location.href = '/'" style="width: 100%; margin-top: 15px; border: none; background: none; color: #0077ff; cursor: pointer; font-size: 14px;">Позже</button>
             </div>
 
             <script>
