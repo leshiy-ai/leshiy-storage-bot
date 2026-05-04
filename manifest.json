@@ -3,9 +3,10 @@
   "name": "Хранилка",
   "short_name": "Хранилка",
   "start_url": "/",
-  "display": "standalone",
-  "background_color": "#212121",
-  "theme_color": "#212121",
+  "scope": "/",
+  "display": "fullscreen",
+  "background_color": "#FFFFFF",
+  "theme_color": "#000000",
   "icons": [
     {
       "src": "https://storage.yandexcloud.net/leshiy-storage-images/Storage.png",
@@ -17,5 +18,9 @@
       "sizes": "512x512",
       "type": "image/png"
     }
-  ]
+  ],
+  "shortcuts": [],
+  "categories": ["utilities", "productivity"],
+  "orientation": "portrait-primary",
+  "prefer_related_applications": false
 }

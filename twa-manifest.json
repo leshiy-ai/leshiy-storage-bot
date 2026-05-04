@@ -3,26 +3,26 @@
   "host": "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net",
   "name": "Хранилка",
   "launcherName": "Хранилка",
-  "display": "standalone",
-  "themeColor": "#212121",
+  "display": "fullscreen",
+  "themeColor": "#000000",
   "themeColorDark": "#000000",
   "navigationColor": "#000000",
   "navigationColorDark": "#000000",
   "navigationDividerColor": "#000000",
   "navigationDividerColorDark": "#000000",
-  "backgroundColor": "#212121",
+  "backgroundColor": "#FFFFFF",
   "enableNotifications": true,
   "startUrl": "/",
   "iconUrl": "https://storage.yandexcloud.net/leshiy-storage-images/Storage.png",
   "maskableIconUrl": "https://storage.yandexcloud.net/leshiy-storage-images/Storage.png",
   "monochromeIconUrl": "https://storage.yandexcloud.net/leshiy-storage-images/Storage.png",
-  "splashScreenFadeOutDuration": 300,
+  "splashScreenFadeOutDuration": 200,
   "signingKey": {
     "path": "/home/user/leshiy-storage-bot/android.keystore",
     "alias": "android"
   },
-  "appVersionName": "3.1.0",
-  "appVersionCode": 3100,
+  "appVersionName": "3.1.2",
+  "appVersionCode": 3102,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net/manifest.json",
@@ -37,12 +37,18 @@
   "fullScopeUrl": "https://d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net/",
   "minSdkVersion": 21,
   "orientation": "portrait-primary",
-  "fingerprints": [],
-  "additionalTrustedOrigins": [],
+  "fingerprints": [
+    {
+      "value": "71:4B:E4:EA:68:11:F7:4B:A3:D7:52:73:DD:BB:A8:32:03:5B:6E:9C:A4:9F:07:4A:AD:2E:0E:11:8A:83:6D:D9"
+    }
+  ],
+  "additionalTrustedOrigins": [
+    "https://d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net"
+  ],
   "retainedBundles": [],
   "protocolHandlers": [],
   "fileHandlers": [],
   "launchHandlerClientMode": "",
   "displayOverride": [],
-  "appVersion": "3.1.0"
+  "appVersion": "3.1.2"
 }

@@ -16,6 +16,7 @@ storage-gateway.yml
 
 # версии
 versions
+scripts
 
 # Bubblewrap / TWA - артефакты
 .gradle/
