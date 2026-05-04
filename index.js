@@ -25,15 +25,25 @@ module.exports.handler = async (event, context) => {
     const uri = event.headers['x-envoy-original-path'] || event.url || '/';
 
     if (uri === '/manifest.json' || uri === '/.well-known/assetlinks.json') {
-        const fileName = uri === '/manifest.json' ? 'manifest.json' : 'assetlinks.json';
-        const content = fs.readFileSync(path.join(__dirname, fileName), 'utf8');
-        return {
-            statusCode: 200,
-            headers: { 'Content-Type': 'application/json' },
-            body: content
-        };
+        // Определяем правильный путь к файлу на диске
+        const relativePath = uri.startsWith('/') ? `.${uri}` : `./${uri}`;
+        const fullPath = path.join(__dirname, relativePath);
+        
+        try {
+            const content = fs.readFileSync(fullPath, 'utf8');
+            return {
+                statusCode: 200,
+                headers: { 
+                    'Content-Type': uri.endsWith('.json') ? 'application/json' : 'text/plain',
+                    'Access-Control-Allow-Origin': '*' // Важно для Bubblewrap
+                },
+                body: content
+            };
+        } catch (e) {
+            console.error("FILE READ ERROR:", fullPath, e);
+        }
     }
-    
+
     const domain = process.env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
     const fullUrl = `https://${domain}${uri}`;
     console.log("🛠 URL ДЛЯ ВОРКЕРА:", fullUrl);
