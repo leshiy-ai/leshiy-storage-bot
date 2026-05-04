@@ -21,8 +21,8 @@
     "path": "/home/user/leshiy-storage-bot/android.keystore",
     "alias": "android"
   },
-  "appVersionName": "3.1.2",
-  "appVersionCode": 3102,
+  "appVersionName": "3.1.3",
+  "appVersionCode": 3103,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net/manifest.json",
@@ -50,5 +50,5 @@
   "fileHandlers": [],
   "launchHandlerClientMode": "",
   "displayOverride": [],
-  "appVersion": "3.1.2"
+  "appVersion": "3.1.3"
 }
