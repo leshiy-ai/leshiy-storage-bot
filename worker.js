@@ -4533,8 +4533,15 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     }
 
     function goToChat() {
-      vkBridge.send("VKWebAppOpenExternalLink", { "url": "https://vk.com/write-" + groupId })
-        .catch(() => { window.open("https://vk.com/write-" + groupId, "_blank"); });
+      // ИСПРАВЛЕНО: Используем прямую и более надежную ссылку на диалог через vk.me
+      const chatUrl = 'https://vk.com/write-' + groupId;
+      
+      // Сначала пытаемся открыть ссылку через VK Bridge
+      vkBridge.send("VKWebAppOpenExternalLink", { "url": chatUrl })
+        .catch(() => { 
+            // Если Bridge не сработал (например, в браузере), используем обычный редирект
+            window.open(chatUrl, "_blank"); 
+        });
     }
 
     function openAuthLink(path) {
