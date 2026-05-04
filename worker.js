@@ -3916,7 +3916,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         const urlParams = new URLSearchParams(window.location.search);
         // Ищем ID от VK или Telegram для совместимости
         const userIdFromUrl = urlParams.get('vk_user_id') || urlParams.get('user_id');
-        const existingSessionId = localStorage.getItem('leshiy_storage_user_id');
+        const existingSessionId = localStorage.getItem('vk_user_id');
         
         // Проверяем, авторизован ли уже пользователь на текущей странице 
         // (переменная 'userId' уже есть в вашем коде)
@@ -3925,7 +3925,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         if (userIdFromUrl) {
             // Если в URL есть ID (после входа), сохраняем его
             if (userIdFromUrl !== existingSessionId) {
-                localStorage.setItem('leshiy_storage_user_id', userIdFromUrl);
+                localStorage.setItem('vk_user_id', userIdFromUrl);
             }
         } else if (existingSessionId && !isUserAlreadyOnPage) {
             // Если в URL нет ID, но он есть в хранилище, и пользователь ЕЩЕ НЕ на странице,
