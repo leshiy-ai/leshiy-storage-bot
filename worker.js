@@ -3911,6 +3911,30 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     const aiBtn = document.getElementById('send-ai-btn');
     const aiHistory = document.getElementById('ai-chat-history');
 
+    // --- ЛОГИКА СОХРАНЕНИЯ СЕССИИ ---
+    (function() {
+        const urlParams = new URLSearchParams(window.location.search);
+        // Ищем ID от VK или Telegram для совместимости
+        const userIdFromUrl = urlParams.get('vk_user_id') || urlParams.get('user_id');
+        const existingSessionId = localStorage.getItem('leshiy_storage_user_id');
+        
+        // Проверяем, авторизован ли уже пользователь на текущей странице 
+        // (переменная 'userId' уже есть в вашем коде)
+        const isUserAlreadyOnPage = typeof userId !== 'undefined' && userId && userId !== "UNKNOWN";
+
+        if (userIdFromUrl) {
+            // Если в URL есть ID (после входа), сохраняем его
+            if (userIdFromUrl !== existingSessionId) {
+                localStorage.setItem('leshiy_storage_user_id', userIdFromUrl);
+            }
+        } else if (existingSessionId && !isUserAlreadyOnPage) {
+            // Если в URL нет ID, но он есть в хранилище, и пользователь ЕЩЕ НЕ на странице,
+            // перенаправляем его, подставив ID в URL.
+            // ИСПРАВЛЕНО: Заменили шаблонную строку на обычную конкатенацию
+            window.location.replace('/?user_id=' + existingSessionId);
+        }
+    })();
+
     // Функция обновления стягиванием на мобилке
     (function() {
       let startY = 0;
