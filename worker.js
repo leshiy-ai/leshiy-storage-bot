@@ -875,7 +875,7 @@ async function worker_code_fetch(request, env, ctx) {
       if (url.pathname === "/auth/google/callback") return await handleGoogleCallback(request, env);
       if (url.pathname === "/auth/mailru/callback") return await handleMailruCallback(request, env);
       if (url.pathname === "/auth/dropbox/callback") return await handleDropboxCallback(request, env);
-      if (url.pathname === "/auth/telegram/callback") return await handleTelegramCallback(request, env);
+      if (url.pathname === "/auth/telegram/callback") return await handleTelegramCallback(request, env, ctx);
       if (url.pathname === "/auth/vk/callback") return await handleVKCallback(request, env);
 
       // Обработка корня — отрисовываем страницу сразу
@@ -9110,7 +9110,7 @@ async function handleTelegramApp(request, env) {
 }
 
 // Авторизация через Телеграм
-async function handleTelegramCallback(request, env) {
+async function handleTelegramCallback(request, env, ctx) {
   const url = new URL(request.url);
   const authData = Object.fromEntries(url.searchParams);
   //const { hash, ...data } = authData;
@@ -9169,18 +9169,30 @@ async function handleTelegramCallback(request, env) {
       status: 302,
       headers: { 'Location': `${return_to}/?tg_data=${userData}` }
     });
-  } else {
-    // Вставляем этот блок перед финальным редиректом
-    const fullName = [authData.first_name, authData.last_name].filter(Boolean).join(' ');
+  }
 
-    const userProfile = {
+  // --- ИСПРАВЛЕНИЕ: СИНХРОНИЗАЦИЯ ПРОФИЛЯ ---
+  if (userId) {
+    const fullName = [authData.first_name, authData.last_name].filter(Boolean).join(' ');
+    // 1. Получаем существующие данные из базы
+    const existingDataRaw = await env.USER_DB.get(`user:${userId}`);
+    const existingData = existingDataRaw ? (typeof existingDataRaw === 'object' ? existingDataRaw : JSON.parse(existingDataRaw)) : {};
+
+    // 2. Объединяем старые данные с новыми из Telegram
+    const newProfile = {
+        ...existingData, // Сохраняем токены и настройки дисков
         id: userId,
         name: fullName, // Теперь здесь и Имя, и Фамилия
-        photo: authData.photo_url || "",
+        username: userFromAuth.username || '',
+        photo: userFromAuth.photo_url || existingData.photo || '', // Обновляем фото, если есть новое
         platform: 'telegram'
     };
-    await env.USER_DB.put(`user:${userId}`, JSON.stringify(userProfile));
+
+    // 3. Асинхронно сохраняем обновленный профиль, не блокируя редирект
+    ctx.waitUntil(env.USER_DB.put(`user:${userId}`, JSON.stringify(newProfile)));
   }
+  // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+
   // Редирект (как мы договорились, через конструктор)
   const targetDomain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
   return new Response(null, {
