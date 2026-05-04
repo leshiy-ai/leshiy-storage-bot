@@ -3931,7 +3931,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
             // Если в URL нет ID, но он есть в хранилище, и пользователь ЕЩЕ НЕ на странице,
             // перенаправляем его, подставив ID в URL.
             // ИСПРАВЛЕНО: Заменили шаблонную строку на обычную конкатенацию
-            window.location.replace('/?user_id=' + existingSessionId);
+            window.location.replace('/vk?vk_user_id=' + existingSessionId);
         }
     })();
 
