@@ -23,15 +23,16 @@ module.exports.handler = async (event, context) => {
 
     // СБОРКА ПОЛНОГО URL
     const uri = event.headers['x-envoy-original-path'] || event.url || '/';
-
-    if (uri === '/manifest.json') {
+    const cleanPath = uri.split('?')[0]; // Теперь тут всегда чистый путь
+    
+    if (cleanPath === '/manifest.json') {
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
             body: fs.readFileSync(path.resolve(__dirname, 'manifest.json'), 'utf8')
         };
     }
-    if (uri === '/.well-known/assetlinks.json') {
+    if (cleanPath === '/.well-known/assetlinks.json') {
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
