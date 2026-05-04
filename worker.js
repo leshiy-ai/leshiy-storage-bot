@@ -4535,19 +4535,25 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     function goToChat() {
       // ИСПРАВЛЕНО: Используем прямую и более надежную ссылку на диалог через vk.me
       const chatUrl = 'https://vk.com/write-' + groupId;
-      
-      // Сначала пытаемся открыть ссылку через VK Bridge
-      vkBridge.send("VKWebAppOpenExternalLink", { "url": chatUrl })
-        .catch(() => { 
+      const platform = getLaunchParam('vk_platform') || '';
+      const isNativeApp = ['mobile_android', 'mobile_iphone', 'mobile_ipad'].includes(platform);
+
+      if (isNativeApp) {
+        // Сначала пытаемся открыть ссылку через VK Bridge
+        vkBridge.send("VKWebAppOpenExternalLink", { "url": chatUrl })
+          .catch(() => { 
             // Если Bridge не сработал (например, в браузере), используем обычный редирект
-            // Для всего остального (браузер на ПК, мобильный браузер) 
-            const link = document.createElement('a');
-            link.href = chatUrl;
-            link.target = '_blank';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            window.open(chatUrl, "_blank"); 
         });
+      } else {
+        // Для всего остального (браузер на ПК, мобильный браузер) 
+        const link = document.createElement('a');
+        link.href = chatUrl;
+        link.target = '_blank';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
     }
 
     function openAuthLink(path) {
