@@ -9151,10 +9151,13 @@ async function handleTelegramCallback(request, env, ctx) {
 
   // Вынимаем ID правильно
   let userId;
+  let userFromAuth = {};
   if (authData.user) {
-      userId = JSON.parse(authData.user).id;
+      userFromAuth = JSON.parse(authData.user);
+      userId = userFromAuth.id;
   } else {
       userId = authData.id;
+      userFromAuth = authData;
   }
 
   if (bot === 'gemini') {
