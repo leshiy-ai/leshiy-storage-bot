@@ -908,6 +908,8 @@ async function worker_code_fetch(request, env, ctx) {
 
       // --- ТОЧКА ВХОДА TELEGRAM MINI APP ---
       if (url.pathname === "/tg") {
+        return handleTelegramApp(request, env); 
+        /*
         const params = Object.fromEntries(url.searchParams);
         
         // Пытаемся достать ID из параметров (tg_user_id или из распакованного tg_data)
@@ -959,6 +961,7 @@ async function worker_code_fetch(request, env, ctx) {
             "Cache-Control": "no-cache, no-store, must-revalidate"
           }
         });
+        */
       }
 
       // --- ОБРАБОТКА VK MINI APP ---
@@ -9182,8 +9185,8 @@ async function handleTelegramCallback(request, env) {
   const targetDomain = env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
   return new Response(null, {
     status: 302,
-    //headers: { 'Location': `https://${targetDomain}/vk?vk_user_id=${userId}&source=telegram` }
-    headers: { 'Location': `https://${targetDomain}/tg?user_id=${userId}&source=telegram` }
+    headers: { 'Location': `https://${targetDomain}/vk?vk_user_id=${userId}&source=telegram` }
+    //headers: { 'Location': `https://${targetDomain}/tg?user_id=${userId}&source=telegram` }
   });
 }
 
