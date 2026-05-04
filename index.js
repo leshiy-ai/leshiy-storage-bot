@@ -24,24 +24,19 @@ module.exports.handler = async (event, context) => {
     // СБОРКА ПОЛНОГО URL
     const uri = event.headers['x-envoy-original-path'] || event.url || '/';
 
-    if (uri === '/manifest.json' || uri === '/.well-known/assetlinks.json') {
-        // Определяем правильный путь к файлу на диске
-        const relativePath = uri.startsWith('/') ? `.${uri}` : `./${uri}`;
-        const fullPath = path.join(__dirname, relativePath);
-        
-        try {
-            const content = fs.readFileSync(fullPath, 'utf8');
-            return {
-                statusCode: 200,
-                headers: { 
-                    'Content-Type': uri.endsWith('.json') ? 'application/json' : 'text/plain',
-                    'Access-Control-Allow-Origin': '*' // Важно для Bubblewrap
-                },
-                body: content
-            };
-        } catch (e) {
-            console.error("FILE READ ERROR:", fullPath, e);
-        }
+    if (uri === '/manifest.json') {
+        return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+            body: fs.readFileSync(path.resolve(__dirname, 'manifest.json'), 'utf8')
+        };
+    }
+    if (uri === '/.well-known/assetlinks.json') {
+        return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+            body: fs.readFileSync(path.resolve(__dirname, '.well-known/assetlinks.json'), 'utf8')
+        };
     }
 
     const domain = process.env.APP_DOMAIN || "d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net";
