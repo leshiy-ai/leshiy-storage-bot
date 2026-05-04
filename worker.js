@@ -1632,7 +1632,7 @@ async function handleTelegramUpdate(update, env, hostname, ctx) {
     }
 
     let welcome = `👋 <b>Привет, ${welcomeName}! Я твоя личная Хранилка.</b>\n\n` +
-                  `📁 Просто пришли мне фото или видео, и я закину их на сервер.\n\n` +
+                  `📁 Просто авторизуйся и присылай мне фото или видео, и я закину их на сервер.\n\n` +
                   `⚙️ Статус: ${statusText}\n\n` +
                   `📖 <b>Команды:</b>\n` +
                   `${isAdmin ? "/admin - 👑 Меню админа\n" : ""}` +
@@ -2873,7 +2873,7 @@ async function handleVK(body, env, hostname, ctx) {
         const userName = await getVKUserName(userId, env);
         if (userName) { firstName = userName.split(' ')[0]; }
         let welcome = `👋 Привет ${firstName}! Я твоя личная Хранилка.\n`;
-        welcome += `📁 Просто пришли мне фото или видео, и я закину их на сервер.\n`;
+        welcome += `📁 Просто авторизуйся и присылай мне фото или видео, и я закину их на сервер.\n`;
         welcome += `⚙️ Связь с хранилищем:\n${statusText}\n`;
         welcome += `\n📖 Команды:\n`;
         welcome += `/about — 💬 О приложении\n`;
@@ -3679,7 +3679,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
 
     <div id="ui-header-block" class="tg-message">
       <div style="margin-top: 12px;"><b style="font-size: 18px;">👋 Привет!</b><br> Я твоя личная Хранилка.</div>
-      <div style="margin-top: 6px; font-size: 14px; opacity: 0.9;">📁 Просто пришли мне фото или видео, и я закину их на сервер.</div>
+      <div style="margin-top: 6px; font-size: 14px; opacity: 0.9;">📁 Просто авторизуйся и присылай мне фото или видео, и я закину их на сервер.</div>
       <div class="status-group">
       <div>⚙️ Статус: ${isConnected ? `✅ <span style="color:#4bb34b; font-weight:bold;">Подключен ${providerName}</span>` : 'Не настроено'}</div>
       <div id="curFolderLabel">📂 Папка: ${isConnected ? `<b>${currentFolder}</b>` : 'Не выбрана'}</div>
@@ -4103,7 +4103,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
             status: "⚙️ Связь с хранилищем:",
             connected: "Подключено:",
             folder: "Папка",
-            notSet: "Авторизуйтесь",
+            notSet: "Настройте подключение",
             notSelected: "Не выбрана"
         },
         en: {
@@ -4116,7 +4116,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
             status: "⚙️ Cloud Connection:",
             connected: "Connected to",
             folder: "Folder",
-            notSet: "Authorize required",
+            notSet: "Setup required",
             notSelected: "Not selected"
         }
       };
