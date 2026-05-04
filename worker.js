@@ -4540,7 +4540,13 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       vkBridge.send("VKWebAppOpenExternalLink", { "url": chatUrl })
         .catch(() => { 
             // Если Bridge не сработал (например, в браузере), используем обычный редирект
-            window.open(chatUrl, "_blank"); 
+            // Для всего остального (браузер на ПК, мобильный браузер) 
+            const link = document.createElement('a');
+            link.href = chatUrl;
+            link.target = '_blank';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         });
     }
 
