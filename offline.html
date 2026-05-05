@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Хранилка - Offline</title>
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #f5f5f5;
+            font-family: sans-serif;
+            /* Предотвращаем выделение текста при нажатии */
+            -webkit-tap-highlight-color: transparent; 
+        }
+
+        .box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            padding: 20px;
+            max-width: 90%; /* Чтобы на мобилке не упиралось в края */
+        }
+
+        .icon-container {
+            width: 120px;
+            height: 120px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .app-icon {
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        h1 { margin: 10px 0; font-size: 24px; }
+        p { margin: 5px 0 20px 0; color: #333; font-size: 16px; }
+        
+        button { 
+            padding: 12px 24px; 
+            font-size: 18px; /* Увеличил, чтобы удобнее было тыкать пальцем */
+            cursor: pointer; 
+            background: #0077FF; 
+            color: white; 
+            border: none; 
+            border-radius: 8px; 
+            min-height: 44px; /* Хороший тон для кнопок на мобильных */
+        }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <div class="icon-container">
+            <img src="/Storage.png" alt="Leshiy Storage Icon" class="app-icon">
+        </div>
+        <h1>Нет соединения</h1>
+        <p>Для работы Хранилке требуется интернет.</p>
+        <button onclick="window.location.href = '/';">Попробовать снова</button>
+    </div>
+</body>
+</html>
