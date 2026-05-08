@@ -8951,103 +8951,111 @@ async function createWebDavFolder(folderName, userData) {
   return res.status === 201 || res.status === 405;
 }
 
-// Работа с ВК
 function handleVKAuthPage(request, env, origin) {
-  
-    return new Response(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-                body { background: #212121; margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; }
-                .card { 
-                    background: white; 
-                    padding: 32px 24px; 
-                    border-radius: 28px; 
-                    width: 360px; 
-                    text-align: center; 
-                    box-shadow: 0 20px 40px rgba(0,0,0,0.4);
-                }
-                .title { font: 700 20px sans-serif; margin-bottom: 8px; color: #000; }
-                .subtitle { font: 400 14px sans-serif; color: #818c99; margin-bottom: 24px; line-height: 1.4; }
-            </style>
-        </head>
-        <body>
-            <div class="card">
-                <div style="font-size: 40px; margin-bottom: 10px;">🔐</div>
-                <div class="title">Вход в Хранилку</div>
-                <div class="subtitle">Используйте VK ID для безопасного доступа к вашим файлам</div>
-                <div id="vkid"></div>
-                <button onclick="window.location.href = '/'" style="width: 100%; margin-top: 15px; border: none; background: none; color: #0077ff; cursor: pointer; font-size: 14px;">Позже</button>
+  return new Response(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <script src="https://telegram.org/js/telegram-web-app.js"></script>
+          <style>
+              body { background: #212121; margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; }
+              .card { 
+                  background: white; 
+                  padding: 32px 24px; 
+                  border-radius: 28px; 
+                  width: 360px; 
+                  text-align: center; 
+                  box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+              }
+              .title { font: 700 20px sans-serif; margin-bottom: 8px; color: #000; }
+              .subtitle { font: 400 14px sans-serif; color: #818c99; margin-bottom: 24px; line-height: 1.4; }
+          </style>
+      </head>
+      <body>
+          <div class="card">
+              <div style="font-size: 40px; margin-bottom: 10px;">🔐</div>
+              <div class="title">Вход в Хранилку</div>
+              <div class="subtitle">Используйте VK ID для безопасного доступа к вашим файлам</div>
+              <div id="vkid"></div>
+              <button onclick="window.location.href = '/'" style="width: 100%; margin-top: 15px; border: none; background: none; color: #0077ff; cursor: pointer; font-size: 14px;">Позже</button>
+          </div>
 
-            </div>
+          <script src="https://unpkg.com/@vkid/sdk@<3.0.0/dist-sdk/umd/index.js"></script>
+          <script>
+              const VKID = window.VKIDSDK;
+              const urlParams = new URLSearchParams(window.location.search);
+              
+              // Исправляем переменные (добавляем const)
+              const appOrigin = urlParams.get('origin') || window.location.origin;
+              const authComplete = urlParams.get('auth_complete');
+              const vkUserId = urlParams.get('vk_user_id');
 
-            <script src="https://unpkg.com/@vkid/sdk@<3.0.0/dist-sdk/umd/index.js"></script>
-            <script>
-                const VKID = window.VKIDSDK;
-                // ОПРЕДЕЛЯЕМ ORIGIN: откуда пришел юзер (важно для APK/TWA)
-                const urlParams = new URLSearchParams(window.location.search);
-                const appOrigin = urlParams.get('origin') || window.location.origin;
-                const authComplete = params.get('auth_complete');
+              // Если в URL есть ID — фиксируем его (этот кусок вернет юзера в апп из браузера)
+              if (vkUserId && vkUserId !== 'undefined' && vkUserId !== 'null') {
+                  localStorage.setItem('vk_user_id', vkUserId);
+                  
+                  if (window.Telegram && window.Telegram.WebApp) {
+                      window.Telegram.WebApp.ready();
+                  }
 
-                // Если в URL есть ID — фиксируем его в приложении
-                if (vkUserId && vkUserId !== 'undefined') {
-                    localStorage.setItem('vk_user_id', vkUserId);
-                    
-                    // Если мы в Telegram App, можно попробовать сообщить приложению
-                    if (window.Telegram && window.Telegram.WebApp) {
-                        window.Telegram.WebApp.ready();
-                        // Можно отправить данные боту, если нужно
-                        // window.Telegram.WebApp.sendData(vkUserId);
-                    }
+                  if (authComplete) {
+                      // Если авторизация завершена в браузере, возвращаемся в чистый корень
+                      window.location.href = '/vk?vk_user_id=' + vkUserId;
+                  }
+              }
+                  
+              VKID.Config.init({
+                  app: 54467300,
+                  redirectUrl: 'https://' + window.location.host + '/auth/vk/callback?platform=android',
+                  responseMode: VKID.ConfigResponseMode.Callback
+              });
 
-                    // Если это был редирект после логина — чистим URL и заходим
-                    if (authComplete) {
-                        window.location.href = '/vk?vk_user_id=' + vkUserId;
-                    }
-                }
-                    
-                VKID.Config.init({
-                    app: 54467300,
-                    redirectUrl: 'https://' + window.location.host + '/auth/vk/callback?platform=android',
-                    responseMode: VKID.ConfigResponseMode.Callback
-                });
+              // Проверка: если в URL уже есть code (автоприход из WebView)
+              const code = urlParams.get('code');
+              const deviceId = urlParams.get('device_id');
+              
+              if (code && deviceId) {
+                  VKID.Auth.exchangeCode(code, deviceId)
+                      .then(res => {
+                          const userId = res.user_id || (res.user && res.user.id);
+                          if (userId) {
+                              localStorage.setItem('vk_user_id', String(userId));
+                              window.location.href = '/auth/vk/callback?vk_user_id=' + userId + '&origin=' + encodeURIComponent(appOrigin);
+                          }
+                      });
+              }
 
-                const oneTap = new VKID.OneTap();
-                oneTap.render({
-                    container: document.getElementById('vkid'),
-                    showAlternativeLogin: true,
-                    oauthList: ['mail_ru', 'ok_ru'],
-                    styles: { height: 44, borderRadius: 8 }
-                })
-                .on(VKID.OneTapInternalEvents.LOGIN_SUCCESS, function(payload) {
-                    // ОБМЕН КОДА НА ID (как в твоем гитхабе)
-                    VKID.Auth.exchangeCode(payload.code, payload.device_id)
-                        .then(res => {
-                            // Берем именно user_id из того JSON, что ты прислал
-                            const userId = res.user_id || (res.user && res.user.id);
-                            if (userId) {
-                                // ПИШЕМ В LOCALSTORAGE, чтобы get-status его увидел
-                                localStorage.setItem('vk_user_id', String(userId));
-                                // РЕДИРЕКТ: добавляем origin обратно, чтобы callback знал, куда слать финальный ответ
-                                window.location.href = '/auth/vk/callback?vk_user_id=' + userId + '&origin=' + encodeURIComponent(appOrigin)
-                            }
-                        })
-                        .catch(err => {
-                            console.error(err);
-                            const backupId = payload.uuid || payload.user?.id;
-                            if (backupId) {
-                                localStorage.setItem('vk_user_id', String(backupId));
-                                window.location.href = '/auth/vk/callback?vk_user_id=' + backupId;
-                            }
-                        });
-                });
-            </script>
-        </body>
-        </html>
-    `, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+              const oneTap = new VKID.OneTap();
+              oneTap.render({
+                  container: document.getElementById('vkid'),
+                  showAlternativeLogin: true,
+                  oauthList: ['mail_ru', 'ok_ru'],
+                  styles: { height: 44, borderRadius: 8 }
+              })
+              .on(VKID.OneTapInternalEvents.LOGIN_SUCCESS, function(payload) {
+                  VKID.Auth.exchangeCode(payload.code, payload.device_id)
+                      .then(res => {
+                          const userId = res.user_id || (res.user && res.user.id);
+                          if (userId) {
+                              localStorage.setItem('vk_user_id', String(userId));
+                              window.location.href = '/auth/vk/callback?vk_user_id=' + userId + '&origin=' + encodeURIComponent(appOrigin);
+                          }
+                      })
+                      .catch(err => {
+                          console.error(err);
+                          const backupId = payload.uuid || payload.user?.id;
+                          if (backupId) {
+                              localStorage.setItem('vk_user_id', String(backupId));
+                              window.location.href = '/auth/vk/callback?vk_user_id=' + backupId;
+                          }
+                      });
+              });
+          </script>
+      </body>
+      </html>
+  `, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
 // Авторизация через ВК
