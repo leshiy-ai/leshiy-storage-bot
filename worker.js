@@ -9076,6 +9076,30 @@ async function handleVKCallback(request, env) {
         targetUrl = `/vk?vk_user_id=${userId}&auth_complete=true`;
     }
 
+    // 3. СПЕЦ-ВОЗВРАТ ДЛЯ МОБИЛОК (platform=android)
+    // Чтобы системный браузер "выплюнул" нас обратно в APK или ТГ
+    if (platform === 'android') {
+      return new Response(`
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="utf-8"></head>
+          <body>
+              <script>
+                  // Фиксируем ID в памяти браузера перед прыжком
+                  localStorage.setItem('vk_user_id', '${userId}');
+                  // Прыгаем по ссылке, которую должен перехватить APK или WebView ТГ
+                  window.location.replace('${targetUrl}');
+              </script>
+              <div style="text-align:center; padding-top:50px; font-family:sans-serif; background:#212121; color:white; height:100vh;">
+                  <p>Авторизация успешна!</p>
+                  <a href="${targetUrl}" style="color:#0077ff;">Вернуться в приложение</a>
+              </div>
+          </body>
+          </html>
+      `, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
+
+    // 4. ОБЫЧНЫЙ РЕДИРЕКТ (Для ПК)
     return new Response(null, {
         status: 302,
         headers: { 
