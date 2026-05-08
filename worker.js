@@ -971,8 +971,16 @@ async function worker_code_fetch(request, env, ctx) {
         
         // 1. ЕСЛИ МЫ В БРАУЗЕРЕ (НЕТ ID) — ПОКАЗЫВАЕМ ВИДЖЕТ АВТОРИЗАЦИИ
         if (!vkUserId) {
-            return handleVKAuthPage(request, env); 
-        }
+          // Передаем текущий URL (с которого зашли), чтобы handleVKAuthPage его запомнил
+          const authUrl = new URL(request.url);
+          // Добавляем параметр origin к запросу страницы авторизации
+          const origin = authUrl.origin + authUrl.pathname;
+          const targetAuthPage = new URL(request.url);
+          targetAuthPage.pathname = '/auth/vk_page'; // создаем алиас или просто прокидываем в handle
+          
+          // ВАЖНО: просто добавьте origin в вызов, если будете менять handleVKAuthPage
+          return handleVKAuthPage(request, env, origin); 
+      }
       
         let userData = null;
         try {
@@ -8944,7 +8952,8 @@ async function createWebDavFolder(folderName, userData) {
 }
 
 // Работа с ВК
-function handleVKAuthPage(request, env) {
+function handleVKAuthPage(request, env, origin) {
+  
     return new Response(`
         <!DOCTYPE html>
         <html>
@@ -8978,9 +8987,13 @@ function handleVKAuthPage(request, env) {
             <script src="https://unpkg.com/@vkid/sdk@<3.0.0/dist-sdk/umd/index.js"></script>
             <script>
                 const VKID = window.VKIDSDK;
+                // ОПРЕДЕЛЯЕМ ORIGIN: откуда пришел юзер (важно для APK/TWA)
+                const urlParams = new URLSearchParams(window.location.search);
+                const appOrigin = urlParams.get('origin') || window.location.origin;
+
                 VKID.Config.init({
                     app: 54467300,
-                    redirectUrl: 'https://d5dtt5rfr7nk66bbrec2.kf69zffa.apigw.yandexcloud.net/auth/vk/callback?platform=android',
+                    redirectUrl: 'https://' + window.location.host + '/auth/vk/callback?platform=android',
                     responseMode: VKID.ConfigResponseMode.Callback
                 });
 
@@ -9000,7 +9013,8 @@ function handleVKAuthPage(request, env) {
                             if (userId) {
                                 // ПИШЕМ В LOCALSTORAGE, чтобы get-status его увидел
                                 localStorage.setItem('vk_user_id', String(userId));
-                                window.location.href = '/auth/vk/callback?vk_user_id=' + userId;
+                                // РЕДИРЕКТ: добавляем origin обратно, чтобы callback знал, куда слать финальный ответ
+                                window.location.href = '/auth/vk/callback?vk_user_id=' + userId + '&origin=' + encodeURIComponent(appOrigin)
                             }
                         })
                         .catch(err => {
@@ -9023,59 +9037,32 @@ async function handleVKCallback(request, env) {
     const url = new URL(request.url);
     const userId = url.searchParams.get('vk_user_id');
     const platform = url.searchParams.get("platform"); // <--- ДОБАВЛЕНО: получаем параметр platform
-    const domain = "htpps://leshiy-ai.github.io";
+    const origin = url.searchParams.get("origin"); // Получаем origin, который пробросили выше
+    const domain = "https://leshiy-ai.github.io";
 
-    if (!userId || userId === 'undefined') {
-        return new Response("Ошибка: ID не получен", { status: 400 });
+    if (!userId || userId === 'undefined' || userId === 'null') {
+      // Если ID нет, возвращаем на корень без ошибки, чтобы не было "ID не получен"
+      return new Response(null, { status: 302, headers: { 'Location': '/' } });
     }
 
-    // Если запрос пришел с Android, делаем "умный редирект"
-    if (platform === 'android') {
-      const targetUrl = `${domain}?vk_user_id=${userId}`;
-      //const pkg = "com.leshiy_ai.app";
-      
-      // Теперь в ней лежит Intent, который поймет новый манифест
-      //const androidAppUrl = `intent://${domain}/?vk_user_id=${userId}#Intent;scheme=https;package=${pkg};end`;
-      // ПРЯМОЙ РЕДИРЕКТ 302
-      // Android с настроенным манифестом сам перехватит этот переход
-      return new Response(null, {
+    // ОПРЕДЕЛЯЕМ ЦЕЛЬ: 
+    // Если есть origin (из APK или другого домена), шлем туда. 
+    // Если нет (старый вход), шлем на дефолтную страницу /vk
+    let targetUrl;
+    if (origin) {
+        const decodedOrigin = decodeURIComponent(origin);
+        // Формируем чистую ссылку возврата в приложение
+        targetUrl = decodedOrigin + (decodedOrigin.includes('?') ? '&' : '/?') + 'vk_user_id=' + userId;
+    } else {
+        targetUrl = '/vk?vk_user_id=' + userId;
+    }
+
+    return new Response(null, {
         status: 302,
         headers: { 
             'Location': targetUrl,
-            'Cache-Control': 'no-cache' 
+            'Cache-Control': 'no-cache'
         }
-      });
-      /*
-      return new Response(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <meta charset="UTF-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Авторизация ВК...</title>
-              <style>
-                body { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; background: #1a1a1a; color: white; }
-                .btn { padding: 15px 25px; background: #4c75a3; color: white; text-decoration: none; border-radius: 10px; font-weight: bold; }
-              </style>
-            </head>
-            <body>
-              <p>Вход выполнен! Переходим в приложение...</p>
-              <a id="link" class="btn" href="${androidAppUrl}">ВЕРНУТЬСЯ В ПРИЛОЖЕНИЕ</a>
-              <script>
-                window.location.href = "${androidAppUrl}";
-                setTimeout(() => {
-                  document.getElementById('link').click();
-                }, 500);
-              </script>
-            </body>
-          </html>
-      `, { headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
-      */
-    }
-    // Финальный прыжок в Хранилку с параметром, который поймет основной скрипт
-    return new Response(null, {
-        status: 302,
-        headers: { 'Location': `/vk?vk_user_id=${userId}` }
     });
 }
 
