@@ -8990,7 +8990,25 @@ function handleVKAuthPage(request, env, origin) {
                 // ОПРЕДЕЛЯЕМ ORIGIN: откуда пришел юзер (важно для APK/TWA)
                 const urlParams = new URLSearchParams(window.location.search);
                 const appOrigin = urlParams.get('origin') || window.location.origin;
+                const authComplete = params.get('auth_complete');
 
+                // Если в URL есть ID — фиксируем его в приложении
+                if (vkUserId && vkUserId !== 'undefined') {
+                    localStorage.setItem('vk_user_id', vkUserId);
+                    
+                    // Если мы в Telegram App, можно попробовать сообщить приложению
+                    if (window.Telegram && window.Telegram.WebApp) {
+                        window.Telegram.WebApp.ready();
+                        // Можно отправить данные боту, если нужно
+                        // window.Telegram.WebApp.sendData(vkUserId);
+                    }
+
+                    // Если это был редирект после логина — чистим URL и заходим
+                    if (authComplete) {
+                        window.location.href = '/vk?vk_user_id=' + vkUserId;
+                    }
+                }
+                    
                 VKID.Config.init({
                     app: 54467300,
                     redirectUrl: 'https://' + window.location.host + '/auth/vk/callback?platform=android',
@@ -9054,7 +9072,7 @@ async function handleVKCallback(request, env) {
         // Формируем чистую ссылку возврата в приложение
         targetUrl = decodedOrigin + (decodedOrigin.includes('?') ? '&' : '/?') + 'vk_user_id=' + userId;
     } else {
-        targetUrl = '/vk?vk_user_id=' + userId;
+        targetUrl = `/vk?vk_user_id=${userId}&auth_complete=true`;
     }
 
     return new Response(null, {
