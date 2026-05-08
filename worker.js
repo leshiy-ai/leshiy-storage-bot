@@ -3922,24 +3922,22 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     // --- ЛОГИКА СОХРАНЕНИЯ СЕССИИ ---
     (function() {
         const urlParams = new URLSearchParams(window.location.search);
-        // Ищем ID от VK или Telegram для совместимости
         const userIdFromUrl = urlParams.get('vk_user_id') || urlParams.get('user_id');
         const existingSessionId = localStorage.getItem('vk_user_id');
         
-        // Проверяем, авторизован ли уже пользователь на текущей странице 
-        // (переменная 'userId' уже есть в вашем коде)
+        // userId — это то, что прислал бэкенд в HTML. 
         const isUserAlreadyOnPage = typeof userId !== 'undefined' && userId && userId !== "UNKNOWN";
 
         if (userIdFromUrl) {
-            // Если в URL есть ID (после входа), сохраняем его
+            // Сохраняем, если прилетел новый
             if (userIdFromUrl !== existingSessionId) {
                 localStorage.setItem('vk_user_id', userIdFromUrl);
             }
         } else if (existingSessionId && !isUserAlreadyOnPage) {
-            // Если в URL нет ID, но он есть в хранилище, и пользователь ЕЩЕ НЕ на странице,
-            // перенаправляем его, подставив ID в URL.
-            // ИСПРАВЛЕНО: Заменили шаблонную строку на обычную конкатенацию
-            window.location.replace('/vk?vk_user_id=' + existingSessionId);
+            // Редиректим НЕ на /vk (страницу входа), а на ТЕКУЩУЮ страницу (корень), 
+            // чтобы воркер (бэкенд) прочитал ID и выдал данные пользователя.
+            const currentPath = window.location.pathname; // Это будет "/"
+            window.location.replace(currentPath + '?vk_user_id=' + existingSessionId);
         }
     })();
 
@@ -8958,7 +8956,6 @@ function handleVKAuthPage(request, env, origin) {
       <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <script src="https://telegram.org/js/telegram-web-app.js"></script>
           <style>
               body { background: #212121; margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; }
               .card { 
@@ -8995,11 +8992,7 @@ function handleVKAuthPage(request, env, origin) {
               // Если в URL есть ID — фиксируем его (этот кусок вернет юзера в апп из браузера)
               if (vkUserId && vkUserId !== 'undefined' && vkUserId !== 'null') {
                   localStorage.setItem('vk_user_id', vkUserId);
-                  
-                  if (window.Telegram && window.Telegram.WebApp) {
-                      window.Telegram.WebApp.ready();
-                  }
-
+                
                   if (authComplete) {
                       // Если авторизация завершена в браузере, возвращаемся в чистый корень
                       window.location.href = '/vk?vk_user_id=' + vkUserId;
