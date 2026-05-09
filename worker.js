@@ -9068,26 +9068,31 @@ async function handleVKCallback(request, env) {
 
         try {
 
-            const tokenResponse = await fetch(
-                'https://id.vk.com/oauth2/public_info',
-                {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded'
-                    },
-                    body: new URLSearchParams({
-                      code: code,
-                      device_id: deviceId,
-                      client_id: '54467300'
-                  })
-                }
-            );
-
-            const data = await tokenResponse.json();
-
-            finalUserId =
-                data.user_id ||
-                (data.user && data.user.id);
+          const tokenResponse = await fetch(
+            'https://id.vk.com/oauth2/auth',
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: new URLSearchParams({
+                    grant_type: 'authorization_code',
+                    code,
+                    device_id: deviceId,
+                    client_id: '54467300',
+                    redirect_uri: 'https://' + url.host + '/auth/vk/callback?platform=android'
+                })
+            }
+        );
+        
+        const data = await tokenResponse.json();
+        
+        console.log(data);
+        
+        finalUserId =
+            data.user_id ||
+            data.user?.id ||
+            data.access_token?.user_id;
 
         } catch (e) {
             console.error('VK exchange failed:', e);
