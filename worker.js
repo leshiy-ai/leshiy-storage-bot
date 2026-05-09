@@ -9055,13 +9055,54 @@ function handleVKAuthPage(request, env, origin) {
 async function handleVKCallback(request, env) {
     const url = new URL(request.url);
     const userId = url.searchParams.get('vk_user_id');
+    const code = url.searchParams.get('code');
+    const deviceId = url.searchParams.get('device_id');
     const platform = url.searchParams.get("platform"); // <--- ДОБАВЛЕНО: получаем параметр platform
     const origin = url.searchParams.get("origin"); // Получаем origin, который пробросили выше
     const domain = "https://leshiy-ai.github.io";
 
-    if (!userId || userId === 'undefined' || userId === 'null') {
-      // Если ID нет, возвращаем на корень без ошибки, чтобы не было "ID не получен"
-      return new Response(null, { status: 302, headers: { 'Location': '/' } });
+    let finalUserId = userId;
+
+    // 🔥 Если пришёл code — обмениваем его как в /vk
+    if ((!finalUserId || finalUserId === 'undefined' || finalUserId === 'null') && code && deviceId) {
+
+        try {
+
+            const tokenResponse = await fetch(
+                'https://id.vk.com/oauth2/public_info',
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: new URLSearchParams({
+                      code: code,
+                      device_id: deviceId,
+                      client_id: '54467300'
+                  })
+                }
+            );
+
+            const data = await tokenResponse.json();
+
+            finalUserId =
+                data.user_id ||
+                (data.user && data.user.id);
+
+        } catch (e) {
+            console.error('VK exchange failed:', e);
+        }
+    }
+
+    // Если ID так и нет — уходим
+    if (!finalUserId || finalUserId === 'undefined' || finalUserId === 'null') {
+
+        return new Response(null, {
+            status: 302,
+            headers: {
+                'Location': '/'
+            }
+        });
     }
 
     // ОПРЕДЕЛЯЕМ ЦЕЛЬ: 
@@ -9071,9 +9112,9 @@ async function handleVKCallback(request, env) {
     if (origin) {
         const decodedOrigin = decodeURIComponent(origin);
         // Формируем чистую ссылку возврата в приложение
-        targetUrl = decodedOrigin + (decodedOrigin.includes('?') ? '&' : '/?') + 'vk_user_id=' + userId;
+        targetUrl = decodedOrigin + (decodedOrigin.includes('?') ? '&' : '/?') + 'vk_user_id=' + finalUserId;
     } else {
-        targetUrl = `/vk?vk_user_id=${userId}&auth_complete=true`;
+        targetUrl = `/vk?vk_user_id=${finalUserId}&auth_complete=true`;
     }
 
     // 3. СПЕЦ-ВОЗВРАТ ДЛЯ МОБИЛОК (platform=android)
@@ -9086,7 +9127,7 @@ async function handleVKCallback(request, env) {
           <body>
               <script>
                   // Фиксируем ID в памяти браузера перед прыжком
-                  localStorage.setItem('vk_user_id', '${userId}');
+                  localStorage.setItem('vk_user_id', '${finalUserId}');
                   // Прыгаем по ссылке, которую должен перехватить APK или WebView ТГ
                   window.location.replace('${targetUrl}');
               </script>
