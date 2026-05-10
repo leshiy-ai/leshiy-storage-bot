@@ -4165,7 +4165,8 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       if (headerBlock) {
         headerBlock.innerHTML = 
           // --- СЕКЦИЯ 1: ВСЕГДА ВИДИМАЯ (Приветствие и Статус) ---
-          '<div style="margin-top: 12px;">' +
+          '<div style="border-left: 3px solid ' + (isConn ? '#4bb34b' : '#eb4242') + '; padding-left: 15px; margin: 10px 0;">' +
+            '<div style="margin-top: 12px;">' +
             '<b style="font-size: 18px;">👋 ' + lang.hi + ', ' + firstName + '!</b>' +
           '</div>' +
           '<div style="margin-top: 6px; font-size: 14px; opacity: 0.9;">' + 
