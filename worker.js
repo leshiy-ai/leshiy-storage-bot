@@ -4167,28 +4167,29 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       const headerBlock = document.getElementById('ui-header-block');
       if (headerBlock) {
         headerBlock.innerHTML = 
-          // --- СЕКЦИЯ 1: ВСЕГДА ВИДИМАЯ (Приветствие и Статус) ---
-          '<div style="margin-top: 12px;"><b style="font-size: 18px;">👋 ' + lang.hi + ', ' + firstName + '!</b>' + '</div>' +
+          // --- СЕКЦИЯ 1: ВСЕГДА ВИДИМАЯ ---
+          '<div style="margin-top: 12px;"><b style="font-size: 18px;">👋 ' + lang.hi + ', ' + firstName + '!</b></div>' +
           '<div style="margin-top: 6px; font-size: 14px; opacity: 0.9;">' + lang.iAmStorage + '</div>' +
 
           '<div class="status-group" style="border-left: 3px solid ' + (isConn ? '#4bb34b' : '#eb4242') + '; margin-top: 15px; padding-left: 15px;">' +
               '<div style="font-size: 12px; opacity: 0.6;">' + lang.status + '</div>' +
               '<div style="font-size: 15px; font-weight: 600; margin-top: 2px;">' + 
-                (isConn ? '<span style="color:#4bb34b;">✅ ' + lang.connected + ' ' + (data.providerName || '') + '</span>' : '<span style="color:#eb4242;">○ ' + lang.notSet + '</span>') + 
+                  (isConn ? '<span style="color:#4bb34b;">✅ ' + lang.connected + ' ' + (data.providerName || '') + '</span>' : '<span style="color:#eb4242;">○ ' + lang.notSet + '</span>') + 
               '</div>' +
               '<div style="font-size: 13px; margin-top: 4px; opacity: 0.8;">📂 ' + lang.folder + ': ' + 
-                (isConn ? '<b>' + (data.currentFolder || '') + '</b>' : '—') + 
+                  (isConn ? '<b>' + (data.currentFolder || '') + '</b>' : '—') + 
               '</div>' +
 
-            // 2. Добавляем квоту только если подключено
+              // 2. Квота (Исправлено: добавлен + перед условием)
               '<div class="quota-card" style="margin-top: 10px;">' + 
-              (isConn ?
-                '<div style="font-size:14px; margin-bottom:4px; opacity:0.8;">☁️ Свободное место</div>' + 
-                '<div class="progress-bg"><div id="quotaBar" class="progress-fill"></div></div>' + 
-                '<div id="quotaText" style="font-size:11px; color: #818c99;">Загрузка данных...</div>' + 
-              : '') +
-              '</div>';
-      }
+                  (isConn ? 
+                      '<div style="font-size:14px; margin-bottom:4px; opacity:0.8;">☁️ Свободное место</div>' + 
+                      '<div class="progress-bg"><div id="quotaBar" class="progress-fill"></div></div>' + 
+                      '<div id="quotaText" style="font-size:11px; color: #818c99;">Загрузка данных...</div>' 
+                  : '') + 
+              '</div>' + 
+          '</div>';
+    }
     
     function renderCommands(data) {
       if (!data) return;
