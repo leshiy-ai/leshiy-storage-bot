@@ -3642,6 +3642,32 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     padding: 10px;
 }
 .dropdown-menu.show { display: block !important; }
+/* Убираем дыру и настраиваем вид меню */
+details#storage-settings {
+    background: var(--panel-bg);
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    margin: 10px 0;
+    overflow: hidden; /* Чтобы кнопки не вылезали за скругления */
+}
+
+details#storage-settings[open] summary {
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 10px;
+}
+
+.menu-content {
+    padding: 0 12px 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* Костыль для плавности, чтобы не было резкого прыжка контента */
+details summary {
+    padding: 12px;
+    user-select: none;
+}
   </style>
 </head>
 <body class="theme-bg-page">
