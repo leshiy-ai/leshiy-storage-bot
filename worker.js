@@ -3629,6 +3629,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     justify-content: center;
 }
 #user-photo { width: 100%; height: 100%; object-fit: cover; }
+.chatButton {background: var(--panel-bg);}
 .dropdown-menu {
     display: none; 
     position: absolute; 
@@ -3838,7 +3839,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     </div>
   </div>
 
-  <div id="GotoChatButton">
+  <div id="chatButton">
     <button class="btn-s" style="margin-top: 12px; background: #2688eb; color: #fff; border: none;" onclick="goToChat()">💬 Открыть чат Хранилку</button>
   </div>
 
