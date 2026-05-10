@@ -3760,15 +3760,20 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
 
   <div id="debugPanel" class="msg-bubble">
     <span class="close-x" onclick="togglePanel('debugPanel')">×</span>
-    <div class="msg-header">🛠 DEBUG INFO</div>
-    <div id="debugContent" class="msg-body">
-      <div>🗄 <b>Приложение онлайн</b></div>
-      <div>📦 <b>Версия:</b> ${version}</div>
-      <div>🔗 <b>Статус:</b> ${isConnected ? '✅ Соединение активно' : '❌ Не подключено'}</div>
-      <div>☁️ <b>Провайдер:</b> ${isConnected ? `${provider}` : '-'}</div>
-      <div>📂 <b>Папка:</b> ${isConnected ? `${currentFolder}` : '-'}</div>
-      <div>👤 <b>Твой ID:</b> ${userId}</div>
-      <div>👑 <b>Админ:</b> ${isAdmin ? 'Да' : 'Нет'}</div>
+    // Tagline
+        <div style="font-size: 12px; color: #4bb34b; margin-bottom: 2px; font-weight: 500;">Приложение «Хранилка» by Leshiy</div>
+        // ShortDesc
+        <div style="font-size:14px; line-height: 1.5; opacity: 0.9;">Одновременно работает как <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram-бот</a>, <a href='https://t.me/leshiy_storage_bot/app' target='_blank' style='color: #4db3ff;'>tgApp-приложение</a>, <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>vkMiniApp-приложение</a> и <a href='https://ok.ru/app/512004791160' target='_blank' style='color: #4db3ff;'>okMiniApp в одноклассниках</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.</div>
+        // Блок фишек и безопасности
+        <div style="margin-top: 12px; padding: 12px; background: rgba(128,128,128,0.05); border-radius: 12px; border: 1px solid rgba(128,128,128,0.15);">
+            <div style="font-size: 13px; color: var(--text-secondary);">✨ <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru и WebDAV. Можно делиться доступом с близкими!</div>
+            // НОВЫЙ БЛОК БЕЗОПАСНОСТИ
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px; color: var(--text-secondary);">🛡️ <b>Безопасность:</b> Мы используем технологию «цифрового моста» (OAuth). Вам не нужно доверять приложению пароль — авторизация идет на странице сервиса. Бот получает лишь временный «пропуск» (токен) для работы с файлами без доступа к управлению аккаунтом. Вы можете закрыть доступ в любой момент в настройках диска.</div>
+            // AI Note
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px;">🧠 <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.</div>
+        </div>
+        // Автор
+        <div style="margin-top: 12px; font-size: 11px; opacity: 0.5; text-align: right;">© Автор: Огорельцев Александр Валерьевич</div>
     </div>
   </div>
 
@@ -4217,12 +4222,12 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       var container = document.getElementById('ui-commands-block');
       if (!container) return; // Защита от падения, если элемент не найден
       var html = '';
+        html += '<span class="blue-link" onclick="togglePanel(' + "'debugPanel'" + ')">/about</span> — 💬 О приложении<br>';          
       if (data.isConnected) {
         html += '<span class="blue-link" onclick="openFolderSelector()">/folder</span> — 📂 Выбрать папку для загрузки<br>';
         html += '<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>';
         html += '<span class="blue-link" onclick="goToSearch()">/search</span> — 🔎 Поиск файлов по хранилке<br>';
       }
-        html += '<span class="blue-link" onclick="togglePanel(' + "'debugPanel'" + ')">/about</span> — 💬 О приложении<br>';    
       if (data.isConnected) {
         html += '<span class="blue-link" onclick="disconnect()" style="color:#ff3347;">/disconnect</span> — 🔌 Отключить диск<br>';    
       }
