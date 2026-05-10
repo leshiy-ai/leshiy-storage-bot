@@ -4187,8 +4187,8 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
                       '<div id="quotaText" style="font-size:11px; color: #818c99;">Загрузка данных...</div>' 
                   : '') + 
               '</div>' + 
-          '</div>' + // Закрыли status-group
-
+          '</div>';
+        headerBlock.innerHTML +=
           // --- СЕКЦИЯ 3: Выбор дисков (DETAILS) ---
           '<details id="storage-settings" style="margin-top: 10px;">' +
               '<summary style="list-style:none; cursor:pointer; text-align:center; opacity:0.6; font-size:13px;">' +
