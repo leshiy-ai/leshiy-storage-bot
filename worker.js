@@ -1396,11 +1396,7 @@ function getStartKeyboardVK(userId, hostname, env, inviteData = null, isReply = 
     ]);
 
   } else {
-    buttons.push([createBtn("🔗 Яндекс.Диск", "auth", "secondary", { provider: "yandex" })]);
-    buttons.push([createBtn("🔗 Google Drive", "auth", "secondary", { provider: "google" })]);
-    buttons.push([createBtn("🔗 Dropbox", "auth", "secondary", { provider: "dropbox" })]);
-    buttons.push([createBtn("✉️ Облако Mail.ru", "auth_mailru")]);
-    buttons.push([createBtn("🌐 Свой WebDAV", "auth_webdav")]);
+    // Кнопки подключения дисков перенесены в раздвижное меню в веб-интерфейсе
     buttons.push([createBtn("🤝 Подключить диск друга", "ask_ref_token")]);
   }
   return {
@@ -1450,12 +1446,8 @@ function getStartInlineKeyboardVK(userId, hostname, env, inviteData = null) {
     };
   };
   
-  buttons.push([createBtn("🔗 Яндекс.Диск", "auth", { provider: "yandex" })]);
-  buttons.push([createBtn("🔗 Google Drive", "auth", { provider: "google" })]);
-  buttons.push([createBtn("🔗 Dropbox", "auth", { provider: "dropbox" })]);
-  buttons.push([createBtn("✉️ Облако Mail.ru", "auth_mailru")]);
-  buttons.push([createBtn("🌐 Свой WebDAV", "auth_webdav")]);
-
+  // Кнопки подключения дисков перенесены в раздвижное меню в веб-интерфейсе (для VK оставляем только реферальные)
+  
   if (inviteData) {
     buttons.push([createBtn("🤝 Подтвердить", "confirm_ref", { token: inviteData.token })]);
     //buttons.push([{ action: { type: "text", label: "📂 Выбрать папку", payload: JSON.stringify({ cmd: "/folder" }) }, color: "primary" }]);
@@ -3697,6 +3689,15 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     <details>
         <summary><span class="arrow-down">▼</span> Развернуть для настройки дисков</summary>
         <div style="margin-top: 10px;">
+            <div style="font-size: 12px; color: #4bb34b; margin-bottom: 8px; font-weight: 500;">Подключите облачное хранилище:</div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                <button class="btn-s" onclick="window.location.href='/auth/yandex'" style="background: #fc3f1d; color: #fff; border: none;">☁️ Яндекс Диск</button>
+                <button class="btn-s" onclick="window.location.href='/auth/google'" style="background: #4285f4; color: #fff; border: none;">☁️ Google Drive</button>
+                <button class="btn-s" onclick="window.location.href='/auth/dropbox'" style="background: #0061ff; color: #fff; border: none;">☁️ Dropbox</button>
+                <button class="btn-s" onclick="window.location.href='/auth/mailru'" style="background: #0077ff; color: #fff; border: none;">✉️ Облако Mail.ru</button>
+                <button class="btn-s" onclick="togglePanel('wdForm')" style="background: #2688eb; color: #fff; border: none;">🌐 Свой WebDAV / FTP / SFTP</button>
+            </div>
+            <hr style="border:0; border-top:1px solid rgba(128,128,128,0.2); margin:12px 0;">
             <div style="font-size: 12px; color: #4bb34b; margin-bottom: 2px; font-weight: 500;">Приложение «Хранилка» by Leshiy</div>
             <div style="font-size:14px; line-height: 1.5; opacity: 0.9;">Одновременно работает как Telegram-бот, tgApp-приложение, vk-чат-бот, vkMiniApp-приложение и okMiniApp в одноклассниках с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.</div>
             <div style="margin-top: 12px; padding: 12px; background: rgba(128,128,128,0.05); border-radius: 12px; border: 1px solid rgba(128,128,128,0.15);">
