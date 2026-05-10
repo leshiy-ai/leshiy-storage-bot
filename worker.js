@@ -4190,7 +4190,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           }
           
           // Закрываем основной контейнер с линией
-          headerContent += '</div>';
+          headerBlock.innerHTML += '</div>';
 
           // --- ПОСЛЕ того как headerBlock.innerHTML обновлен, вешаем свайп: ---
           const detailsEl = document.getElementById('header-details-about');
