@@ -4161,6 +4161,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       // Обновляем саму иконку флага, чтобы она не сбрасывалась при рендере
       const langIcon = document.getElementById('langIcon');
       if (langIcon) langIcon.innerText = (currentLang === 'ru' ? '🇷🇺' : '🇺🇸');
+
       const headerBlock = document.getElementById('ui-header-block');
       if (headerBlock) {
         headerBlock.innerHTML = 
@@ -4178,19 +4179,18 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
                 (isConn ? '<span style="color:#4bb34b;">✅ ' + lang.connected + ' ' + (data.providerName || '') + '</span>' : '<span style="color:#eb4242;">○ ' + lang.notSet + '</span>') + 
               '</div>' +
               '<div style="font-size: 13px; margin-top: 4px; opacity: 0.8;">📂 ' + lang.folder + ': ' + (isConn ? '<b>' + (data.currentFolder || '') + '</b>' : '—') + '</div>' +
+
           // 2. Добавляем квоту только если подключено
           (isConn ? (
               '<div class="quota-card" style="margin-top: 10px;">' + 
-                '<div style="font-size:14px; margin-bottom:4px; opacity:0.8;">☁️ Свободное место</div>' +
-                '<div class="progress-bg"><div id="quotaBar" class="progress-fill"></div></div>' +
-                '<div id="quotaText" style="font-size:11px; color: #818c99;">Загрузка данных...</div>' +
+                '<div style="font-size:14px; margin-bottom:4px; opacity:0.8;">☁️ Свободное место</div>' + 
+                '<div class="progress-bg"><div id="quotaBar" class="progress-fill"></div></div>' + 
+                '<div id="quotaText" style="font-size:11px; color: #818c99;">Загрузка данных...</div>' + 
               '</div>'
-          ) : '') +
+          ) : '') + 
           
-          // Закрываем основной контейнер с линией
-          headerBlock.innerHTML += '</div>';
-        }
-    }
+          '</div>'; // Закрываем основной контейнер здесь одной точкой с запятой
+      }
     
     function renderCommands(data) {
       if (!data) return;
