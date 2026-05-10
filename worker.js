@@ -4133,6 +4133,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         ru: {
             hi: "Привет",
             tagline: "Приложение «Хранилка» by Leshiy",
+            iAmStorage: "'📁 Я твоя личная Хранилка. Пришли мне файлы, и я сохраню их в облако.",
             shortDesc: "Одновременно работает как <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram-бот</a>, <a href='https://t.me/leshiy_storage_bot/app' target='_blank' style='color: #4db3ff;'>tgApp-приложение</a>, <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>vkMiniApp-приложение</a> и <a href='https://ok.ru/app/512004791160' target='_blank' style='color: #4db3ff;'>okMiniApp в одноклассниках</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.",
             features: "✨ <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru и WebDAV. Можно делиться доступом с близкими!",
             security: "🛡️ <b>Безопасность:</b> Мы используем технологию «цифрового моста» (OAuth). Вам не нужно доверять приложению пароль — авторизация идет на странице сервиса. Бот получает лишь временный «пропуск» (токен) для работы с файлами без доступа к управлению аккаунтом. Вы можете закрыть доступ в любой момент в настройках диска.",
@@ -4146,6 +4147,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         en: {
             hi: "Hi",
             tagline: "App «Storage» by Leshiy",
+            iAmStorage: "📁 I am your personal Storage. Send me files to save it to the cloud.",
             shortDesc: "It works simultaneously as a <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram bot</a>, <a href='https://t.me/leshiy_storage_bot/app' target='_blank' style='color: #4db3ff;'>Telegram App</a>, <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>VK chat bot</a>, and a <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>VKMiniApp</a> and <a href='https://ok.ru/app/512004791160' target='_blank' style='color: #4db3ff;'>okMiniApp</a> application with an upload/download function and a referral access system. Serves as a «bridge» between social networks and cloud storage. Allows you to save media files (photos, videos, documents) to your personal cloud storage. 24/7 at your service.",
             features: "✨ <b>Features:</b> High-quality uploads, support for Yandex, Google, Dropbox, Mail.Ru & WebDAV. Share access with your family!",
             security: "🛡️ <b>Security:</b> We use «digital bridge» technology (OAuth). No need to share your password — authorization happens on the official service page. The bot only gets a temporary access token for file operations without account management rights. You can revoke access anytime in your cloud settings.",
@@ -4166,27 +4168,26 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       if (headerBlock) {
         headerBlock.innerHTML = 
           // --- СЕКЦИЯ 1: ВСЕГДА ВИДИМАЯ (Приветствие и Статус) ---
-          '<div style="margin-top: 12px;">' +
-            '<b style="font-size: 18px;">👋 ' + lang.hi + ', ' + firstName + '!</b>' +
-          '</div>' +
-          '<div style="margin-top: 6px; font-size: 14px; opacity: 0.9;">' + 
-            (currentLang === 'ru' ? '📁 Я твоя личная Хранилка. Пришли мне файлы, и я сохраню их в облако.' : '📁 I am your personal Storage. Send me files to save it to the cloud.') + 
-          '</div>' +
+          '<div style="margin-top: 12px;"><b style="font-size: 18px;">👋 ' + lang.hi + ', ' + firstName + '!</b>' + '</div>' +
+          '<div style="margin-top: 6px; font-size: 14px; opacity: 0.9;">' + lang.iAmStorage + '</div>' +
 
           '<div class="status-group" style="border-left: 3px solid ' + (isConn ? '#4bb34b' : '#eb4242') + '; margin-top: 15px; padding-left: 15px;">' +
               '<div style="font-size: 12px; opacity: 0.6;">' + lang.status + '</div>' +
               '<div style="font-size: 15px; font-weight: 600; margin-top: 2px;">' + 
                 (isConn ? '<span style="color:#4bb34b;">✅ ' + lang.connected + ' ' + (data.providerName || '') + '</span>' : '<span style="color:#eb4242;">○ ' + lang.notSet + '</span>') + 
               '</div>' +
-              '<div style="font-size: 13px; margin-top: 4px; opacity: 0.8;">📂 ' + lang.folder + ': ' + (isConn ? '<b>' + (data.currentFolder || '') + '</b>' : '—') + '</div>' +
+              '<div style="font-size: 13px; margin-top: 4px; opacity: 0.8;">📂 ' + lang.folder + ': ' + 
+                (isConn ? '<b>' + (data.currentFolder || '') + '</b>' : '—') + 
+              '</div>' +
 
-          // 2. Добавляем квоту только если подключено
-          (isConn ?
+            // 2. Добавляем квоту только если подключено
               '<div class="quota-card" style="margin-top: 10px;">' + 
+              (isConn ?
                 '<div style="font-size:14px; margin-bottom:4px; opacity:0.8;">☁️ Свободное место</div>' + 
                 '<div class="progress-bg"><div id="quotaBar" class="progress-fill"></div></div>' + 
                 '<div id="quotaText" style="font-size:11px; color: #818c99;">Загрузка данных...</div>' + 
-              '</div></div>' : '</div>'); 
+              : '') +
+              '</div>';
       }
     
     function renderCommands(data) {
