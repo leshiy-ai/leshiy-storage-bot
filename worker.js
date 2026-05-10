@@ -4223,7 +4223,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       if (adminContainer) {
         var adminHtml = '';
         if (data.isAdmin) {
-          adminHtml += '<span class="blue-link" onclick="togglePanel(' + '"adminPanel"' + ')" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>';
+          adminHtml += '<span class="blue-link" onclick="togglePanel(' + "'adminPanel'" + ')" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>';
         }
         adminContainer.innerHTML = adminHtml;
       }
