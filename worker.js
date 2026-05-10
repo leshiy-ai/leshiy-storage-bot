@@ -4187,32 +4187,31 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
                       '<div id="quotaText" style="font-size:11px; color: #818c99;">Загрузка данных...</div>' 
                   : '') + 
               '</div>' + 
-          '</div>' +
 
-        // --- СЕКЦИЯ 3: Выбор дисков (DETAILS) ---
-        '<details id="storage-settings" style="margin-top: 10px;">' +
-            '<summary style="list-style:none; cursor:pointer; text-align:center; opacity:0.6; font-size:13px;">' +
-                '<span>Развернуть для настройки дисков</span> <span class="arrow-down">▼</span>' +
-            '</summary>' +
-            '<div id="authButtons" style="padding: 10px 0;">' +
-                '<button class="btn-s ' + (data.provider === 'yandex' ? 'active' : '') + '" onclick="openAuthLink(\'/auth/yandex\')">' +
-                    '<img src="' + cdn + '/YandexDisk.png"> Яндекс Диск ' + (data.provider === 'yandex' ? '<span class="check-mark">✅</span>' : '') +
-                '</button>' +
-                '<button class="btn-s ' + (data.provider === 'google' ? 'active' : '') + '" onclick="openAuthLink(\'/auth/google\')">' +
-                    '<img src="' + cdn + '/GoogleDrive.png"> Google Drive ' + (data.provider === 'google' ? '<span class="check-mark">✅</span>' : '') +
-                '</button>' +
-                '<button class="btn-s ' + (data.provider === 'dropbox' ? 'active' : '') + '" onclick="openAuthLink(\'/auth/dropbox\')">' +
-                    '<img src="' + cdn + '/Dropbox.png"> Dropbox ' + (data.provider === 'dropbox' ? '<span class="check-mark">✅</span>' : '') +
-                '</button>' +
-                '<button class="btn-s ' + (data.provider === 'webdav' && data.webdav_host?.includes('mail.ru') ? 'active' : '') + '" onclick="showMailRu()">' +
-                    '<img src="' + cdn + '/CloudMailRu.png"> Облако Mail.ru ' + (data.provider === 'webdav' && data.webdav_host?.includes('mail.ru') ? '<span class="check-mark">✅</span>' : '') +
-                '</button>' +
-                '<button class="btn-s" onclick="showCustomWD()">' +
-                    '<img src="' + cdn + '/network-drive.png"> Свой FTP/SFTP/WebDAV ' + (((data.provider === 'webdav' && !data.webdav_host?.includes('mail.ru')) || data.provider === 'ftp' || data.provider === 'sftp') ? '<span class="check-mark">✅</span>' : '') +
-                '</button>' +
-                '<button class="btn-s" onclick="openFriendsStorage()">🤝 Подключить Хранилку по ссылке</button>' +
-            '</div>' +
-        '</details>';
+            // --- СЕКЦИЯ 3: Выбор дисков (DETAILS) ---
+            '<details id="storage-settings" style="margin-top: 10px;">' +
+                '<summary style="list-style:none; cursor:pointer; text-align:center; opacity:0.6; font-size:13px;">' +
+                    '<span>Развернуть для настройки дисков</span> <span class="arrow-down">▼</span>' +
+                '</summary>' +
+                '<div id="authButtons" style="padding: 10px 0;">' +
+                    '<button class="btn-s ' + (data.provider === 'yandex' ? 'active' : '') + '" onclick="openAuthLink(\'/auth/yandex\')">' +
+                        '<img src="' + cdn + '/YandexDisk.png"> Яндекс Диск ' + (data.provider === 'yandex' ? '<span class="check-mark">✅</span>' : '') +
+                    '</button>' +
+                    '<button class="btn-s ' + (data.provider === 'google' ? 'active' : '') + '" onclick="openAuthLink(\'/auth/google\')">' +
+                        '<img src="' + cdn + '/GoogleDrive.png"> Google Drive ' + (data.provider === 'google' ? '<span class="check-mark">✅</span>' : '') +
+                    '</button>' +
+                    '<button class="btn-s ' + (data.provider === 'dropbox' ? 'active' : '') + '" onclick="openAuthLink(\'/auth/dropbox\')">' +
+                        '<img src="' + cdn + '/Dropbox.png"> Dropbox ' + (data.provider === 'dropbox' ? '<span class="check-mark">✅</span>' : '') +
+                    '</button>' +
+                    '<button class="btn-s ' + (data.provider === 'webdav' && data.webdav_host?.includes('mail.ru') ? 'active' : '') + '" onclick="showMailRu()">' +
+                        '<img src="' + cdn + '/CloudMailRu.png"> Облако Mail.ru ' + (data.provider === 'webdav' && data.webdav_host?.includes('mail.ru') ? '<span class="check-mark">✅</span>' : '') +
+                    '</button>' +
+                    '<button class="btn-s" onclick="showCustomWD()">' +
+                        '<img src="' + cdn + '/network-drive.png"> Свой FTP/SFTP/WebDAV ' + (((data.provider === 'webdav' && !data.webdav_host?.includes('mail.ru')) || data.provider === 'ftp' || data.provider === 'sftp') ? '<span class="check-mark">✅</span>' : '') +
+                    '</button>' +
+                    '<button class="btn-s" onclick="openFriendsStorage()">🤝 Подключить Хранилку по ссылке</button>' +
+                '</div>' +
+            '</details>';
       }
     }
     
