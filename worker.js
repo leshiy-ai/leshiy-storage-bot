@@ -4162,7 +4162,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       // Обновляем саму иконку флага, чтобы она не сбрасывалась при рендере
       const langIcon = document.getElementById('langIcon');
       if (langIcon) langIcon.innerText = (currentLang === 'ru' ? '🇷🇺' : '🇺🇸');
-
+      const cdn = "https://storage.yandexcloud.net/leshiy-storage-images";
       const headerBlock = document.getElementById('ui-header-block');
       if (headerBlock) {
         headerBlock.innerHTML = 
