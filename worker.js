@@ -4912,15 +4912,22 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
 
     function showAbout() { 
       const w = document.getElementById('aboutPanel');
-      if (w) {
-        w.style.display = (w.style.display === 'block') ? 'none' : 'block';
+      if (!w) return;
+      // Если сейчас скрыто (none) или еще не задано ("") — ставим block. Иначе — скрываем.
+      if (w.style.display === 'none' || w.style.display === '') {
+        w.style.display = 'block';
+      } else {
+        w.style.display = 'none';
       }
     }
 
     function showAdmin() {
       const w = document.getElementById('adminPanel');
-      if (w) {
-        w.style.display = (w.style.display === 'block') ? 'none' : 'block';
+      if (!w) return;
+      if (w.style.display === 'none' || w.style.display === '') {
+        w.style.display = 'block';
+      } else {
+        w.style.display = 'none';
       }
     }
 
