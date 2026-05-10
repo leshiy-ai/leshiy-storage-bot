@@ -3700,7 +3700,6 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         ` : ''}    
       </div>
     </div>
-  </div>
 
   <details id="storage-settings">
         <summary>
