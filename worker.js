@@ -4217,14 +4217,10 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     
     function renderCommands(data) {
       if (!data) return;
-      const isAdmin = data.isAdmin
       var container = document.getElementById('ui-commands-block');
       if (!container) return; // Защита от падения, если элемент не найден
       var html = '';
-      if (isAdmin) {
-        html += '<span class="blue-link" onclick="togglePanel(' + '"adminPanel"' + ')" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>';
-      }
-        html += '<span class="blue-link" onclick="togglePanel(' + '"aboutPanel"' + ')">/about</span> — 💬 О приложении<br>';          
+        html += '<span class="blue-link" onclick="renderAbout()">/about</span> — 💬 О приложении<br>';          
       if (data.isConnected) {
         html += '<span class="blue-link" onclick="openFolderSelector()">/folder</span> — 📂 Выбрать папку для загрузки<br>';
         html += '<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>';
@@ -4285,22 +4281,19 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       }
     }
 
-    function renderDebug(data) {
-      const container = document.getElementById('debugContent');
+    function renderAbout() {
+      const container = document.getElementById('aboutContent');
       if (!container) return;
-      // Используем данные из аргумента data, а не глобальные переменные
-      const isConn = !!data.isConnected;
-      const dProv = isConn ? (data.providerName || data.provider || '-') : '-';
-      const dFold = isConn ? (data.currentFolder || 'Root') : '-';
-      const dAdmin = data.isAdmin ? 'Да' : 'Нет';
       container.innerHTML = 
-          '<div>🗄 <b>Приложение онлайн</b></div>' +
-          '<div>📦 <b>Версия:</b> ' + "${version}" + '</div>' +
-          '<div>🔗 <b>Статус:</b> ' + (isConn ? '✅ Соединение активно' : '❌ Не подключено') + '</div>' +
-          '<div>☁️ <b>Провайдер:</b> ' + (isConn ? (data.providerName || data.provider) : '-') + '</div>' +
-          '<div>📂 <b>Папка:</b> ' + (isConn ? (data.currentFolder || 'Root') : '-') + '</div>' +
-          '<div>👤 <b>Твой ID:</b> ' + userId + '</div>' + 
-          '<div>👑 <b>Админ:</b> ' + (data.isAdmin ? 'Да' : 'Нет') + '</div>';
+          '<div style="font-size: 12px; color: #4bb34b; margin-bottom: 2px; font-weight: 500;">' + lang.tagline + '</div>' +
+          '<div style="font-size:14px; line-height: 1.5; opacity: 0.9;">' + lang.shortDesc + '</div>' +
+          '<div style="margin-top: 12px; padding: 12px; background: rgba(128,128,128,0.05); border-radius: 12px; border: 1px solid rgba(128,128,128,0.15);">' +
+              '<div style="font-size: 13px; color: var(--text-secondary);">' + lang.features + '</div>' +
+              '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px; color: var(--text-secondary);">' + lang.security + '</div>' +
+              '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px;">' + lang.aiNote + '</div>' +
+          '</div>' +
+          '<div style="margin-top: 12px; font-size: 11px; opacity: 0.5; text-align: right;">© Автор: Огорельцев Александр Валерьевич</div>' +
+      '</div>';
     }
 
     function closeApp() {
@@ -4372,7 +4365,6 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           renderHeader(data);
           renderCommands(data);
           renderAuth(data);
-          renderDebug(data);
           
           // ОБНОВЛЯЕМ ГЛОБАЛЬНЫЙ ПРОВАЙДЕР
           if (data.provider) window.currentProvider = data.provider;
