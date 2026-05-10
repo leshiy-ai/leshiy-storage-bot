@@ -4189,6 +4189,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
                   : '') + 
               '</div>' + 
           '</div>';
+      }
     }
     
     function renderCommands(data) {
