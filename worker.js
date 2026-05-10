@@ -4180,7 +4180,6 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
               '<div style="font-size: 13px; margin-top: 4px; opacity: 0.8;">📂 ' + lang.folder + ': ' + (isConn ? '<b>' + (data.currentFolder || '') + '</b>' : '—') + '</div>' +
           // 2. Добавляем квоту только если подключено
           (isConn ? (
-            headerBlock.innerHTML += 
               '<div class="quota-card" style="margin-top: 10px;">' + 
                 '<div style="font-size:14px; margin-bottom:4px; opacity:0.8;">☁️ Свободное место</div>' +
                 '<div class="progress-bg"><div id="quotaBar" class="progress-fill"></div></div>' +
