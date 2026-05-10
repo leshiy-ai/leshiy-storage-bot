@@ -8949,6 +8949,7 @@ async function createWebDavFolder(folderName, userData) {
   return res.status === 201 || res.status === 405;
 }
 
+// Авторизация ВК через OneTap
 function handleVKAuthPage(request, env, origin) {
   return new Response(`
       <!DOCTYPE html>
@@ -9051,7 +9052,7 @@ function handleVKAuthPage(request, env, origin) {
   `, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
-// Авторизация через ВК
+// Калбэк-возврат с авторизации ВК
 async function handleVKCallback(request, env) {
     const url = new URL(request.url);
     const userId = url.searchParams.get('vk_user_id');
