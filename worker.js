@@ -4217,10 +4217,22 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     
     function renderCommands(data) {
       if (!data) return;
+
+      // 1. Блок админа (ui-admin-commands)
+      var adminContainer = document.getElementById('ui-admin-commands');
+      if (adminContainer) {
+        var adminHtml = '';
+        if (data.isAdmin) {
+          adminHtml += '<span class="blue-link" onclick="togglePanel(' + "'adminPanel'" + ')" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>';
+        }
+        adminContainer.innerHTML = adminHtml;
+      }
+
       var container = document.getElementById('ui-commands-block');
       if (!container) return; // Защита от падения, если элемент не найден
       var html = '';
-        html += '<span class="blue-link" onclick="renderAbout()">/about</span> — 💬 О приложении<br>';          
+      html += '<span class="blue-link" onclick="togglePanel(' + "'aboutPanel'" + ')">/about</span> — 💬 О приложении<br>';
+      
       if (data.isConnected) {
         html += '<span class="blue-link" onclick="openFolderSelector()">/folder</span> — 📂 Выбрать папку для загрузки<br>';
         html += '<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>';
