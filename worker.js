@@ -4911,23 +4911,31 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     }
 
     function showAbout() { 
-      const w = document.getElementById('aboutPanel');
-      if (!w) return;
-      // Если сейчас скрыто (none) или еще не задано ("") — ставим block. Иначе — скрываем.
-      if (w.style.display === 'none' || w.style.display === '') {
-        w.style.display = 'block';
-      } else {
+      console.log('Клик по /about'); // Увидишь это в консоли
+      var w = document.getElementById('aboutPanel');
+      if (!w) {
+        console.error('Ошибка: Элемент aboutPanel НЕ НАЙДЕН в HTML');
+        return;
+      }
+      // Самый тупой и надежный способ переключения
+      if (w.style.display === 'block') {
         w.style.display = 'none';
+      } else {
+        w.style.display = 'block';
       }
     }
 
     function showAdmin() {
-      const w = document.getElementById('adminPanel');
-      if (!w) return;
-      if (w.style.display === 'none' || w.style.display === '') {
-        w.style.display = 'block';
-      } else {
+      console.log('Клик по /admin');
+      var w = document.getElementById('adminPanel');
+      if (!w) {
+        console.error('Ошибка: Элемент adminPanel НЕ НАЙДЕН в HTML');
+        return;
+      }
+      if (w.style.display === 'block') {
         w.style.display = 'none';
+      } else {
+        w.style.display = 'block';
       }
     }
 
