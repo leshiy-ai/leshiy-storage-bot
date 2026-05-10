@@ -3783,12 +3783,10 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
 
   <div style="margin-top: 15px;">📖 <b>Команды:</b></div>
   <div id="ui-admin-commands" style="margin-top: 5px;">
-  ${isAdmin ? `<span class="blue-link" onclick="togglePanel('adminPanel')" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>` : ''}
-  </div>
-  <div id="ui-about-block" style="margin-top: 0px;">
-    <span class="blue-link" onclick="togglePanel('aboutPanel')">/about</span> — 💬 О приложении<br>
+    ${isAdmin ? `<span class="blue-link" onclick="togglePanel('adminPanel')" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>` : ''}
   </div>
   <div id="ui-commands-block" style="margin-top: 0px;">
+    <span class="blue-link" onclick="togglePanel('aboutPanel')">/about</span> — 💬 О приложении<br>
     ${isConnected ? `<span class="blue-link" onclick="openFolderSelector()">/folder</span> — 📂 Выбрать папку для загрузки<br>` : ''}
     ${isConnected ? `<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>` : ''}
     ${isConnected ? `<span class="blue-link" onclick="goToSearch()">/search</span> — 🔎 Поиск файлов по хранилке<br>` : ''}
@@ -4219,10 +4217,22 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     
     function renderCommands(data) {
       if (!data) return;
+      // 1. Блок админа (ui-admin-commands)
+      var adminContainer = document.getElementById('ui-admin-commands');
+      if (adminContainer) {
+        var adminHtml = '';
+        if (data.isAdmin) {
+          adminHtml += '<span class="blue-link" onclick="showAdmin()" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>';
+        }
+        adminContainer.innerHTML = adminHtml;
+      }
+        
       // Основной блок (ui-commands-block)
       var container = document.getElementById('ui-commands-block');
       if (!container) return;
       var html = '';
+      // Вызываем showAbout() — чисто и без кавычек внутри
+      html += '<span class="blue-link" onclick="showAbout()">/about</span> — 💬 О приложении<br>';
       if (data.isConnected) {
         html += '<span class="blue-link" onclick="openFolderSelector()">/folder</span> — 📂 Выбрать папку для загрузки<br>';
         html += '<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>';
@@ -4900,12 +4910,12 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     }
 
     function showAbout() { 
-      const w = document.getElementById('aboutWindow');
+      const w = document.getElementById('aboutPanel');
       w.style.display = w.style.display === 'block' ? 'none' : 'block';
     }
 
     function showAdmin() {
-      const w = document.getElementById('adminWindow');
+      const w = document.getElementById('adminPanel');
       if(w) w.style.display = w.style.display === 'block' ? 'none' : 'block';
     }
 
