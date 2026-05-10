@@ -4228,11 +4228,12 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         adminContainer.innerHTML = adminHtml;
       }
 
+      // 2. Основной блок (ui-commands-block)
       var container = document.getElementById('ui-commands-block');
-      if (!container) return; // Защита от падения, если элемент не найден
+      if (!container) return;
+      
       var html = '';
       html += '<span class="blue-link" onclick="togglePanel(' + "'aboutPanel'" + ')">/about</span> — 💬 О приложении<br>';
-      
       if (data.isConnected) {
         html += '<span class="blue-link" onclick="openFolderSelector()">/folder</span> — 📂 Выбрать папку для загрузки<br>';
         html += '<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>';
