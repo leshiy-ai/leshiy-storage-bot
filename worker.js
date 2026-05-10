@@ -3668,6 +3668,9 @@ details summary {
     padding: 12px;
     user-select: none;
 }
+    #aboutPanel {
+    display: none; /* Гарантируем, что по умолчанию её нет */
+}
   </style>
 </head>
 <body class="theme-bg-page">
