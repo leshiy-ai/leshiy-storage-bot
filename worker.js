@@ -48,22 +48,24 @@ async function worker_code_fetch(request, env, ctx) {
       } catch (e) { return {}; }};  
     //console.log("📥 Запрос:", request.method, request.url);
 
-    // Ссылка для проверки: https://.../debug?test=1
-    if (url.pathname.includes('/debug')) {
-        const debugInfo = {
+    // Страница /about - информация из раздвижного меню
+    if (url.pathname.includes('/about')) {
+        const aboutInfo = {
             timestamp: new Date().toISOString(),
-            url: request.url,
-            domain: domain,
-            hostname: hostname,
-            pathname: url.pathname,
-            search: url.search,
-            mode_param: url.searchParams.get("mode"),
-            all_params: Object.fromEntries(url.searchParams.entries()),
-            headers: Object.fromEntries(request.headers.entries()),
-            env_keys: Object.keys(env) // Проверим, долетают ли токены
+            version: version,
+            description: "Приложение «Хранилка» by Leshiy",
+            features: [
+                "Автоматическая загрузка фото и видео на облачные платформы",
+                "Поддержка Яндекс Диск, Google Drive, Dropbox, Mail.Ru, WebDAV, FTP/SFTP",
+                "Реферальная система доступа",
+                "Интеграция ИИ Gemini AI",
+                "Поиск файлов по хранилищу"
+            ],
+            security: "Используем технологию OAuth — вы авторизуетесь на странице сервиса, бот получает временный токен",
+            author: "Огорельцев Александр Валерьевич"
         };
         
-        return new Response(JSON.stringify(debugInfo, null, 2), {
+        return new Response(JSON.stringify(aboutInfo, null, 2), {
             status: 200,
             headers: { "Content-Type": "application/json; charset=utf-8" }
         });
@@ -3664,7 +3666,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
                 style="width: 100%; height: 100%; object-fit: cover;">
         </div>
 
-        <div id="auth-menu" class="dropdown-menu" style="display: none; position: absolute; right: 0; top: 40px; background: var(--bg-color, #fff); border-radius: 12px; box-shadow: 0 5px 20px rgba(0,0,0,0.3); z-index: 1000; min-width: 160px; padding: 10px;">
+        <div id="auth-menu" class="dropdown-menu" style="display: none; position: absolute; right: 0; top: 40px; background: var(--bg-color, #fff); border-radius: 12px; box-shadow: 0 5px 20px rgba(0,0,0,0.3); z-index: 1000; min-width: 200px; padding: 10px;">
             <div id="menu-guest" class="${userData ? 'hidden' : ''}">
                 <div style="font-size: 11px; opacity: 0.6; margin-bottom: 8px; padding-left: 8px;">Войти через:</div>
                 <a href="/vk" class="login-row" style="display: flex; align-items: center; padding: 8px; text-decoration: none; color: inherit;">
@@ -3676,6 +3678,23 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
             </div>
             <div id="menu-user" class="${userData ? '' : 'hidden'}">
                 <div style="padding: 8px; font-weight: bold; font-size: 14px;">${params.userName || 'Пользователь'}</div>
+                <hr style="border: 0; border-top: 1px solid rgba(128,128,128,0.2); margin: 5px 0;">
+                <div style="font-size: 11px; opacity: 0.6; margin-bottom: 8px; padding-left: 8px;">Подключить диск:</div>
+                <button class="btn-s" style="margin-bottom:6px;" onclick="openAuthLink('/auth/yandex')">
+                    <img src="${cdn}/YandexDisk.png" style="width:18px;height:18px;"> Яндекс Диск
+                </button>
+                <button class="btn-s" style="margin-bottom:6px;" onclick="openAuthLink('/auth/google')">
+                    <img src="${cdn}/GoogleDrive.png" style="width:18px;height:18px;"> Google Drive
+                </button>
+                <button class="btn-s" style="margin-bottom:6px;" onclick="openAuthLink('/auth/dropbox')">
+                    <img src="${cdn}/Dropbox.png" style="width:18px;height:18px;"> Dropbox
+                </button>
+                <button class="btn-s" style="margin-bottom:6px;" onclick="showMailRu()">
+                    <img src="${cdn}/CloudMailRu.png" style="width:18px;height:18px;"> Облако Mail.ru
+                </button>
+                <button class="btn-s" style="margin-bottom:6px;" onclick="showCustomWD()">
+                    <img src="${cdn}/network-drive.png" style="width:18px;height:18px;"> FTP/SFTP/WebDAV
+                </button>
                 <hr style="border: 0; border-top: 1px solid rgba(128,128,128,0.2); margin: 5px 0;">
                 <button onclick="logout()" class="logout-btn" style="width:100%; background:#ff4d4d; color:white; border:none; padding:8px; border-radius:8px; cursor:pointer; font-weight:bold;">Выйти</button>
             </div>
@@ -3692,6 +3711,19 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       <div>⚙️ Статус: ${isConnected ? `✅ <span style="color:#4bb34b; font-weight:bold;">Подключен ${providerName}</span>` : 'Не настроено'}</div>
       <div id="curFolderLabel">📂 Папка: ${isConnected ? `<b>${currentFolder}</b>` : 'Не выбрана'}</div>
     </div>
+    <details>
+        <summary><span class="arrow-down">▼</span> Развернуть для настройки дисков</summary>
+        <div style="margin-top: 10px;">
+            <div style="font-size: 12px; color: #4bb34b; margin-bottom: 2px; font-weight: 500;">Приложение «Хранилка» by Leshiy</div>
+            <div style="font-size:14px; line-height: 1.5; opacity: 0.9;">Одновременно работает как Telegram-бот, tgApp-приложение, vk-чат-бот, vkMiniApp-приложение и okMiniApp в одноклассниках с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.</div>
+            <div style="margin-top: 12px; padding: 12px; background: rgba(128,128,128,0.05); border-radius: 12px; border: 1px solid rgba(128,128,128,0.15);">
+                <div style="font-size: 13px; color: var(--text-secondary);">✨ <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru и WebDAV. Можно делиться доступом с близкими!</div>
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px; color: var(--text-secondary);">🛡️ <b>Безопасность:</b> Мы используем технологию «цифрового моста» (OAuth). Вам не нужно доверять приложению пароль — авторизация идет на странице сервиса. Бот получает лишь временный «пропуск» (токен) для работы с файлами без доступа к управлению аккаунтом. Вы можете закрыть доступ в любой момент в настройках диска.</div>
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px;">🧠 <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.</div>
+            </div>
+            <div style="margin-top: 12px; font-size: 11px; opacity: 0.5; text-align: right;">© Автор: Огорельцев Александр Валерьевич</div>
+        </div>
+    </details>
   </div>
 
   <div id="adminPanel" class="msg-bubble" style="border-left-color: #4bb34b;">
@@ -3755,11 +3787,19 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
   ${isAdmin ? `<span class="blue-link" onclick="togglePanel('adminPanel')" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>` : ''}
   </div>
     
+  <div id="ai-chat-container">
+    <div id="ai-chat-history"></div>
+    <div class="chat-input-group">
+        <input type="text" id="ai-input" placeholder="Чат с ИИ. Спроси что-нибудь..." />
+        <button id="send-ai-btn" class="button button-primary" style="padding: 8px 15px;">Отправить</button>
+    </div>
+  </div>
+
   <div id="ui-commands-block" style="margin-top: 0px;">      
     ${isConnected ? `<span class="blue-link" onclick="openFolderSelector()">/folder</span> — 📂 Выбрать папку для загрузки<br>` : ''}
     ${isConnected ? `<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>` : ''}
     ${isConnected ? `<span class="blue-link" onclick="goToSearch()">/search</span> — 🔎 Поиск файлов по хранилке<br>` : ''}
-    <span class="blue-link" onclick="togglePanel('debugPanel')">/debug</span> — 🛠️ Техническая информация<br>
+    <span class="blue-link" onclick="openAboutPage()">/about</span> — ℹ️ О приложении<br>
     ${isConnected ? `<span class="blue-link" onclick="disconnect()" style="color:#ff3347;">/disconnect</span> — 🔌 Отключить диск<br>` : ''}
   </div>
 
@@ -3781,14 +3821,6 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
   </div>
   <div id="inviterZone"></div>
   <div class="upload-container" id="dropZone" style="margin: 10px; padding: 15px; border: 2px dashed #3f8ae0; border-radius: 12px; text-align: center; transition: all 0.2s;">
-
-    <div id="ai-chat-container">
-      <div id="ai-chat-history"></div>
-      <div class="chat-input-group">
-          <input type="text" id="ai-input" placeholder="Чат с ИИ. Спроси что-нибудь..." />
-          <button id="send-ai-btn" class="button button-primary" style="padding: 8px 15px;">Отправить</button>
-      </div>
-    </div>
     <div id="uploadButton">
       <input type="file" id="vkFileInput" style="display: none;" onchange="uploadFileFromVK(this)" multiple>
       ${isConnected ? `
@@ -3809,22 +3841,6 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
   </div>
 
   <div id="authButtons">
-    <button class="btn-s ${provider === 'yandex' ? 'active' : ''}" onclick="openAuthLink('/auth/yandex')">
-      <img src="${cdn}/YandexDisk.png"> Яндекс Диск ${provider === 'yandex' ? '<span class="check-mark">✅</span>' : ''}
-    </button>
-    <button class="btn-s ${provider === 'google' ? 'active' : ''}" onclick="openAuthLink('/auth/google')">
-      <img src="${cdn}/GoogleDrive.png"> Google Drive ${provider === 'google' ? '<span class="check-mark">✅</span>' : ''}
-    </button>
-    <button class="btn-s ${provider === 'dropbox' ? 'active' : ''}" onclick="openAuthLink('/auth/dropbox')">
-      <img src="${cdn}/Dropbox.png"> Dropbox ${provider === 'dropbox' ? '<span class="check-mark">✅</span>' : ''}
-    </button>
-    <button class="btn-s ${provider === 'webdav' && userData?.webdav_host?.includes('mail.ru') ? 'active' : ''}" onclick="showMailRu()">
-      <img src="${cdn}/CloudMailRu.png"> Облако Mail.ru ${userData?.webdav_host?.includes('mail.ru') ? '<span class="check-mark">✅</span>' : ''}
-    </button>
-    <button class="btn-s" onclick="showCustomWD()">
-      <img src="${cdn}/network-drive.png"> Свой FTP/SFTP/WebDAV ${((provider === 'webdav' && !userData?.webdav_host?.includes('mail.ru')) || provider === 'ftp' || provider === 'sftp') ? '<span class="check-mark">✅</span>' : ''}
-    </button>
-    <button class="btn-s" onclick="openFriendsStorage()">🤝 Подключить Хранилку по ссылке</button>
     <button class="btn-s" style="margin-top: 12px; background: #2688eb; color: #fff; border: none;" onclick="goToChat()">💬 Открыть чат Хранилку</button>
   </div>
 
@@ -4214,7 +4230,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         html += '<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>';
         html += '<span class="blue-link" onclick="goToSearch()">/search</span> — 🔎 Поиск файлов по хранилке<br>';
       }
-        html += '<span class="blue-link" onclick="togglePanel(' + "'debugPanel'" + ')">/debug</span> — 🛠️ Техническая информация<br>';    
+        html += '<span class="blue-link" onclick="openAboutPage()">/about</span> — ℹ️ О приложении<br>';    
       if (data.isConnected) {
         html += '<span class="blue-link" onclick="disconnect()" style="color:#ff3347;">/disconnect</span> — 🔌 Отключить диск<br>';    
       }
@@ -4535,6 +4551,34 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       } else {
         el.style.display = 'none';
+      }
+    }
+
+    async function openAboutPage() {
+      try {
+        const response = await fetch('/about');
+        const data = await response.json();
+        
+        const debugPanel = document.getElementById('debugPanel');
+        if (debugPanel) {
+          const debugContent = document.getElementById('debugContent');
+          if (debugContent) {
+            debugContent.innerHTML = `
+              <div>📦 <b>Версия:</b> ${data.version || 'N/A'}</div>
+              <div>📝 <b>Описание:</b> ${data.description || ''}</div>
+              <div style="margin-top:10px;"><b>✨ Функции:</b></div>
+              <ul style="padding-left:20px;margin:5px 0;">${(data.features || []).map(f => `<li>${f}</li>`).join('')}</ul>
+              <div style="margin-top:10px;">🛡️ <b>Безопасность:</b><br>${data.security || ''}</div>
+              <div style="margin-top:10px;font-size:11px;opacity:0.6;text-align:right;">© ${data.author || ''}</div>
+            `;
+          }
+          debugPanel.style.display = 'block';
+          makeSwipable(debugPanel, null, false);
+          debugPanel.dataset.swipable = "true";
+          debugPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      } catch (e) {
+        console.error("Ошибка открытия /about:", e);
       }
     }
 

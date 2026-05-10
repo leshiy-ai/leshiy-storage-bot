@@ -1,53 +1,66 @@
-# Node
-node_modules
-npm-debug.log
+# Compiled and binary files
+*.pyc
+*.class
+*.o
+*.exe
+*.dll
+*.so
+*.a
+*.obj
+*.out
 
-# Env
-.env
-
-# Logs
-*.log
-
-# Mac
-.DS_Store
-
-# Gateway
-storage-gateway.yml
-
-# версии
-versions
-scripts
-
-# Bubblewrap / TWA - артефакты
+# Dependencies
+node_modules/
+venv/
+.venv/
+__pycache__/
+dist/
+build/
+target/
 .gradle/
-android/app/build/
-android/app/release/
-android/.gradle/
-android/local.properties
-android/captures/
-android/app/release/
-app/
-build.gradle
-settings.gradle
-gradle.properties
-gradlew
-gradlew.bat
-gradle/wrapper/
-manifest-checksum.txt
-twa-manifest.json.lock
-android.keystore
-*.keystore
-*.jks
-*.apk
-*.aab
-*.idsig
+.mypy_cache/
+.pytest_cache/
 
-# Секреты подписи (НИКОГДА не коммитьте!)
-android.keystore
-*.keystore
-*.jks
-signing.properties
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
 
-# Локальные настройки
-android/.idea/
-android/**/*.iml
+# System/Environment files
+.DS_Store
+Thumbs.db
+.env
+.env.local
+*.env.*
+
+# Logs and coverage
+*.log
+coverage/
+htmlcov/
+.coverage
+
+# Compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
