@@ -3642,35 +3642,6 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     padding: 10px;
 }
 .dropdown-menu.show { display: block !important; }
-/* Убираем дыру и настраиваем вид меню */
-details#storage-settings {
-    background: var(--panel-bg);
-    border-radius: 12px;
-    border: 1px solid var(--border-color);
-    margin: 10px 0;
-    overflow: hidden; /* Чтобы кнопки не вылезали за скругления */
-}
-
-details#storage-settings[open] summary {
-    border-bottom: 1px solid var(--border-color);
-    margin-bottom: 10px;
-}
-
-.menu-content {
-    padding: 0 12px 12px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-/* Костыль для плавности, чтобы не было резкого прыжка контента */
-details summary {
-    padding: 12px;
-    user-select: none;
-}
-    #aboutPanel {
-    display: none; /* Гарантируем, что по умолчанию её нет */
-}
   </style>
 </head>
 <body class="theme-bg-page">
@@ -3678,7 +3649,7 @@ details summary {
     <div id="ptr-loader" class="loader"></div>
     <span id="ptr-text" style="font-size:13px; color:#888;">Потяните для обновления</span>
   </div>
-  <div id="app-container" class="theme-bg-page" style="position:relative; z-index:2; min-height:100vh; transition: transform 0.2s cubic-bezier(0,0,0.2,1); will-change: transform;">
+  <div id="app-container" class="theme-bg-page" style="position:relative; z-index:2; min-height:10vh; transition: transform 0.2s cubic-bezier(0,0,0.2,1); will-change: transform;">
     <div class="header-actions">
       <button class="action-btn" onclick="toggleLanguage()" style="background:none; border:none; cursor:pointer; padding:0;">
         <span id="langIcon" style="font-size:16px;">🇷🇺</span>
