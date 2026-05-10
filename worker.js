@@ -3691,8 +3691,40 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       <div class="status-group">
       <div>⚙️ Статус: ${isConnected ? `✅ <span style="color:#4bb34b; font-weight:bold;">Подключен ${providerName}</span>` : 'Не настроено'}</div>
       <div id="curFolderLabel">📂 Папка: ${isConnected ? `<b>${currentFolder}</b>` : 'Не выбрана'}</div>
+      <div class="quota-card">
+        ${isConnected ? `
+        <div style="font-size:14px; margin-bottom:4px; opacity:0.8;">☁️ Свободное место</div>
+        <div class="progress-bg"><div id="quotaBar" class="progress-fill"></div></div>
+        <div id="quotaText" style="font-size:11px; color: #818c99;">Загрузка данных...</div>
+        ` : ''}    
+      </div>
     </div>
   </div>
+
+  <details id="storage-settings">
+        <summary>
+            <span>Развернуть для настройки дисков</span>
+            <span class="arrow-down">▼</span>
+        </summary>
+        <div id="authButtons" style="padding: 10px 0;">
+            <button class="btn-s ${provider === 'yandex' ? 'active' : ''}" onclick="openAuthLink('/auth/yandex')">
+              <img src="${cdn}/YandexDisk.png"> Яндекс Диск ${provider === 'yandex' ? '<span class="check-mark">✅</span>' : ''}
+            </button>
+            <button class="btn-s ${provider === 'google' ? 'active' : ''}" onclick="openAuthLink('/auth/google')">
+              <img src="${cdn}/GoogleDrive.png"> Google Drive ${provider === 'google' ? '<span class="check-mark">✅</span>' : ''}
+            </button>
+            <button class="btn-s ${provider === 'dropbox' ? 'active' : ''}" onclick="openAuthLink('/auth/dropbox')">
+              <img src="${cdn}/Dropbox.png"> Dropbox ${provider === 'dropbox' ? '<span class="check-mark">✅</span>' : ''}
+            </button>
+            <button class="btn-s ${provider === 'webdav' && userData?.webdav_host?.includes('mail.ru') ? 'active' : ''}" onclick="showMailRu()">
+              <img src="${cdn}/CloudMailRu.png"> Облако Mail.ru ${userData?.webdav_host?.includes('mail.ru') ? '<span class="check-mark">✅</span>' : ''}
+            </button>
+            <button class="btn-s" onclick="showCustomWD()">
+              <img src="${cdn}/network-drive.png"> Свой FTP/SFTP/WebDAV ${((provider === 'webdav' && !userData?.webdav_host?.includes('mail.ru')) || provider === 'ftp' || provider === 'sftp') ? '<span class="check-mark">✅</span>' : ''}
+            </button>
+            <button class="btn-s" onclick="openFriendsStorage()">🤝 Подключить Хранилку по ссылке</button>
+        </div>
+    </details>
 
   <div id="adminPanel" class="msg-bubble" style="border-left-color: #4bb34b;">
     <span class="close-x" onclick="togglePanel('adminPanel')">×</span>
@@ -3702,7 +3734,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       <div>🚀 <b>Версия:</b> ${version}</div>
       <div style="margin-top:12px;">Выбери раздел настроек:</div>
       <div class="chat-btn" onclick="openAiSettings()">🧠 Настройки ИИ</div>
-      <div class="chat-btn-secondary" onclick="togglePanel('debugPanel')">📊 Статистика</div>
+      <div class="chat-btn-secondary" onclick="togglePanel('debugPanel')">💬 О приложении</div>
     </div>
   </div>
 
@@ -3755,11 +3787,11 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
   ${isAdmin ? `<span class="blue-link" onclick="togglePanel('adminPanel')" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>` : ''}
   </div>
     
-  <div id="ui-commands-block" style="margin-top: 0px;">      
+  <div id="ui-commands-block" style="margin-top: 0px;">
+    <span class="blue-link" onclick="togglePanel('debugPanel')">/about</span> — 💬 О приложении<br>
     ${isConnected ? `<span class="blue-link" onclick="openFolderSelector()">/folder</span> — 📂 Выбрать папку для загрузки<br>` : ''}
     ${isConnected ? `<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>` : ''}
     ${isConnected ? `<span class="blue-link" onclick="goToSearch()">/search</span> — 🔎 Поиск файлов по хранилке<br>` : ''}
-    <span class="blue-link" onclick="togglePanel('debugPanel')">/debug</span> — 🛠️ Техническая информация<br>
     ${isConnected ? `<span class="blue-link" onclick="disconnect()" style="color:#ff3347;">/disconnect</span> — 🔌 Отключить диск<br>` : ''}
   </div>
 
@@ -3808,23 +3840,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     </div>
   </div>
 
-  <div id="authButtons">
-    <button class="btn-s ${provider === 'yandex' ? 'active' : ''}" onclick="openAuthLink('/auth/yandex')">
-      <img src="${cdn}/YandexDisk.png"> Яндекс Диск ${provider === 'yandex' ? '<span class="check-mark">✅</span>' : ''}
-    </button>
-    <button class="btn-s ${provider === 'google' ? 'active' : ''}" onclick="openAuthLink('/auth/google')">
-      <img src="${cdn}/GoogleDrive.png"> Google Drive ${provider === 'google' ? '<span class="check-mark">✅</span>' : ''}
-    </button>
-    <button class="btn-s ${provider === 'dropbox' ? 'active' : ''}" onclick="openAuthLink('/auth/dropbox')">
-      <img src="${cdn}/Dropbox.png"> Dropbox ${provider === 'dropbox' ? '<span class="check-mark">✅</span>' : ''}
-    </button>
-    <button class="btn-s ${provider === 'webdav' && userData?.webdav_host?.includes('mail.ru') ? 'active' : ''}" onclick="showMailRu()">
-      <img src="${cdn}/CloudMailRu.png"> Облако Mail.ru ${userData?.webdav_host?.includes('mail.ru') ? '<span class="check-mark">✅</span>' : ''}
-    </button>
-    <button class="btn-s" onclick="showCustomWD()">
-      <img src="${cdn}/network-drive.png"> Свой FTP/SFTP/WebDAV ${((provider === 'webdav' && !userData?.webdav_host?.includes('mail.ru')) || provider === 'ftp' || provider === 'sftp') ? '<span class="check-mark">✅</span>' : ''}
-    </button>
-    <button class="btn-s" onclick="openFriendsStorage()">🤝 Подключить Хранилку по ссылке</button>
+  <div id="GotoChatButton">
     <button class="btn-s" style="margin-top: 12px; background: #2688eb; color: #fff; border: none;" onclick="goToChat()">💬 Открыть чат Хранилку</button>
   </div>
 
@@ -3837,14 +3853,6 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     <input type="password" id="wdPass" placeholder="Пароль приложения">
     <input type="text" id="wdFolder" placeholder="Папка для сохранения">
     <button id="saveBtn" class="chat-btn" style="width:100%; border:none;" onclick="saveWebDAV()">📥 Подключиться</button>
-  </div>
-
-  <div class="quota-card">
-    ${isConnected ? `
-    <div style="font-size:14px; margin-bottom:4px; opacity:0.8;">☁️ Свободное место</div>
-    <div class="progress-bg"><div id="quotaBar" class="progress-fill"></div></div>
-    <div id="quotaText" style="font-size:11px; color: #818c99;">Загрузка данных...</div>
-    ` : ''}    
   </div>
 
   <div id="folderModal" class="modal-overlay" onclick="closeFolders()">
@@ -4214,7 +4222,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         html += '<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>';
         html += '<span class="blue-link" onclick="goToSearch()">/search</span> — 🔎 Поиск файлов по хранилке<br>';
       }
-        html += '<span class="blue-link" onclick="togglePanel(' + "'debugPanel'" + ')">/debug</span> — 🛠️ Техническая информация<br>';    
+        html += '<span class="blue-link" onclick="togglePanel(' + "'debugPanel'" + ')">/about</span> — 💬 О приложении<br>';    
       if (data.isConnected) {
         html += '<span class="blue-link" onclick="disconnect()" style="color:#ff3347;">/disconnect</span> — 🔌 Отключить диск<br>';    
       }
