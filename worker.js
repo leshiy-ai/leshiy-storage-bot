@@ -4217,7 +4217,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     
     function renderCommands(data) {
       if (!data) return;
-      // 1. Блок админа (ui-admin-commands)
+      // 1. Блок админа
       var adminContainer = document.getElementById('ui-admin-commands');
       if (adminContainer) {
         var adminHtml = '';
@@ -4226,12 +4226,13 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         }
         adminContainer.innerHTML = adminHtml;
       }
-        
-      // Основной блок (ui-commands-block)
+
+      // 2. Основной блок
       var container = document.getElementById('ui-commands-block');
       if (!container) return;
+
       var html = '';
-      // Вызываем showAbout() — чисто и без кавычек внутри
+      // Вызываем функцию без аргументов — это 100% стабильно
       html += '<span class="blue-link" onclick="showAbout()">/about</span> — 💬 О приложении<br>';
       if (data.isConnected) {
         html += '<span class="blue-link" onclick="openFolderSelector()">/folder</span> — 📂 Выбрать папку для загрузки<br>';
@@ -4911,12 +4912,16 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
 
     function showAbout() { 
       const w = document.getElementById('aboutPanel');
-      w.style.display = w.style.display === 'block' ? 'none' : 'block';
+      if (w) {
+        w.style.display = (w.style.display === 'block') ? 'none' : 'block';
+      }
     }
 
     function showAdmin() {
       const w = document.getElementById('adminPanel');
-      if(w) w.style.display = w.style.display === 'block' ? 'none' : 'block';
+      if (w) {
+        w.style.display = (w.style.display === 'block') ? 'none' : 'block';
+      }
     }
 
     function openAiSettings() {
