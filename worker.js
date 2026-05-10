@@ -4899,8 +4899,8 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       }, 400);
     }
 
-    function showDebug() { 
-      const w = document.getElementById('debugWindow');
+    function showAbout() { 
+      const w = document.getElementById('aboutWindow');
       w.style.display = w.style.display === 'block' ? 'none' : 'block';
     }
 
