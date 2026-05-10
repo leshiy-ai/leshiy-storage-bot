@@ -3679,23 +3679,6 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
             <div id="menu-user" class="${userData ? '' : 'hidden'}">
                 <div style="padding: 8px; font-weight: bold; font-size: 14px;">${params.userName || 'Пользователь'}</div>
                 <hr style="border: 0; border-top: 1px solid rgba(128,128,128,0.2); margin: 5px 0;">
-                <div style="font-size: 11px; opacity: 0.6; margin-bottom: 8px; padding-left: 8px;">Подключить диск:</div>
-                <button class="btn-s" style="margin-bottom:6px;" onclick="openAuthLink('/auth/yandex')">
-                    <img src="${cdn}/YandexDisk.png" style="width:18px;height:18px;"> Яндекс Диск
-                </button>
-                <button class="btn-s" style="margin-bottom:6px;" onclick="openAuthLink('/auth/google')">
-                    <img src="${cdn}/GoogleDrive.png" style="width:18px;height:18px;"> Google Drive
-                </button>
-                <button class="btn-s" style="margin-bottom:6px;" onclick="openAuthLink('/auth/dropbox')">
-                    <img src="${cdn}/Dropbox.png" style="width:18px;height:18px;"> Dropbox
-                </button>
-                <button class="btn-s" style="margin-bottom:6px;" onclick="showMailRu()">
-                    <img src="${cdn}/CloudMailRu.png" style="width:18px;height:18px;"> Облако Mail.ru
-                </button>
-                <button class="btn-s" style="margin-bottom:6px;" onclick="showCustomWD()">
-                    <img src="${cdn}/network-drive.png" style="width:18px;height:18px;"> FTP/SFTP/WebDAV
-                </button>
-                <hr style="border: 0; border-top: 1px solid rgba(128,128,128,0.2); margin: 5px 0;">
                 <button onclick="logout()" class="logout-btn" style="width:100%; background:#ff4d4d; color:white; border:none; padding:8px; border-radius:8px; cursor:pointer; font-weight:bold;">Выйти</button>
             </div>
         </div>
@@ -3760,15 +3743,12 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
 
   <div id="debugPanel" class="msg-bubble">
     <span class="close-x" onclick="togglePanel('debugPanel')">×</span>
-    <div class="msg-header">🛠 DEBUG INFO</div>
+    <div class="msg-header">ℹ️ О приложении Хранилка</div>
     <div id="debugContent" class="msg-body">
-      <div>🗄 <b>Приложение онлайн</b></div>
-      <div>📦 <b>Версия:</b> ${version}</div>
-      <div>🔗 <b>Статус:</b> ${isConnected ? '✅ Соединение активно' : '❌ Не подключено'}</div>
-      <div>☁️ <b>Провайдер:</b> ${isConnected ? `${provider}` : '-'}</div>
-      <div>📂 <b>Папка:</b> ${isConnected ? `${currentFolder}` : '-'}</div>
-      <div>👤 <b>Твой ID:</b> ${userId}</div>
-      <div>👑 <b>Админ:</b> ${isAdmin ? 'Да' : 'Нет'}</div>
+      <div style="font-size:14px; line-height:1.5;"><b>Хранилка</b> — защищенный шлюз для управления вашими облачными дисками.</div>
+      <div style="margin-top:8px; font-size:13px; opacity:0.8;">Версия: ${version} | Пользователей: ${countUser}</div>
+      <hr style="border:0; border-top:1px solid rgba(128,128,128,0.2); margin:10px 0;">
+      <div style="font-size:13px; line-height:1.5;">Здесь вы можете подключать диски, просматривать медиафайлы и использовать ИИ-ассистента для работы с контентом.</div>
     </div>
   </div>
 
@@ -3786,7 +3766,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
   <div id="ui-admin-commands" style="margin-top: 5px;">
   ${isAdmin ? `<span class="blue-link" onclick="togglePanel('adminPanel')" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>` : ''}
   </div>
-    
+
   <div id="ai-chat-container">
     <div id="ai-chat-history"></div>
     <div class="chat-input-group">
@@ -3795,6 +3775,15 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     </div>
   </div>
 
+  <div style="margin-top: 12px; margin-bottom:8px; font-size:13px; opacity:0.8;">📌 Быстрые команды (нажми для отправки):</div>
+  <div id="quick-commands" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;">
+    <span class="chat-btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="handleCommandClick('/status')">📊 Статус</span>
+    <span class="chat-btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="handleCommandClick('/folder')">📂 Папки</span>
+    <span class="chat-btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="handleCommandClick('/share')">👤 Поделиться</span>
+    <span class="chat-btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="handleCommandClick('/search')">🔎 Поиск</span>
+    <span class="chat-btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="handleCommandClick('/about')">ℹ️ О приложении</span>
+  </div>
+    
   <div id="ui-commands-block" style="margin-top: 0px;">      
     ${isConnected ? `<span class="blue-link" onclick="openFolderSelector()">/folder</span> — 📂 Выбрать папку для загрузки<br>` : ''}
     ${isConnected ? `<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>` : ''}
@@ -4414,6 +4403,14 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       }
     }
 
+    function handleCommandClick(cmdText) {
+      const chatInput = document.getElementById('ai-input');
+      if (chatInput) {
+        chatInput.value = cmdText;
+        sendToAI();
+      }
+    }
+
     async function sendToAI() {
       const input = document.getElementById('ai-input');
       const text = input.value.trim();
@@ -4454,6 +4451,11 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
                '&state=' + userId + 
                '&auth_provider=VK' + 
                '&text=' + encodeURIComponent(text);
+          
+          // Для команд типа /status, /folder и т.д. — обрабатываем specially
+          if (text.startsWith('/')) {
+              // Отправляем как обычное сообщение, бэкенд сам разберется
+          }
 
           const response = await fetch(apiUrl, {
               method: 'GET',
@@ -4564,8 +4566,10 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           const debugContent = document.getElementById('debugContent');
           if (debugContent) {
             debugContent.innerHTML = `
-              <div>📦 <b>Версия:</b> ${data.version || 'N/A'}</div>
-              <div>📝 <b>Описание:</b> ${data.description || ''}</div>
+              <div style="font-size:14px; line-height:1.5;"><b>Хранилка</b> — защищенный шлюз для управления вашими облачными дисками.</div>
+              <div style="margin-top:8px; font-size:13px; opacity:0.8;">Версия: ${data.version || 'N/A'} | ${data.userCount || ''}</div>
+              <hr style="border:0; border-top:1px solid rgba(128,128,128,0.2); margin:10px 0;">
+              <div style="font-size:13px; line-height:1.5;">${data.description || ''}</div>
               <div style="margin-top:10px;"><b>✨ Функции:</b></div>
               <ul style="padding-left:20px;margin:5px 0;">${(data.features || []).map(f => `<li>${f}</li>`).join('')}</ul>
               <div style="margin-top:10px;">🛡️ <b>Безопасность:</b><br>${data.security || ''}</div>
