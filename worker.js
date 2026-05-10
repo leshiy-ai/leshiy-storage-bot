@@ -4158,46 +4158,43 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         }
       };
       const lang = i18n[currentLang];
+      // Обновляем саму иконку флага, чтобы она не сбрасывалась при рендере
       const langIcon = document.getElementById('langIcon');
       if (langIcon) langIcon.innerText = (currentLang === 'ru' ? '🇷🇺' : '🇺🇸');
-
       const headerBlock = document.getElementById('ui-header-block');
       if (headerBlock) {
-        // 1. Формируем базовую часть (Приветствие и Статус)
-        // ВАЖНО: В конце этой строки должна быть точка с запятой!
-        let headerContent =
-            '<div style="margin-top: 12px;">' +
-                '<b style="font-size: 18px;">👋 ' + lang.hi + ', ' + (firstName || '') + '!</b>' +
-            '</div>' +
-            '<div style="margin-top: 6px; font-size: 14px; opacity: 0.9;">' + 
-                (currentLang === 'ru' ? '📁 Я твоя личная Хранилка. Пришли мне файлы, и я сохраню их в облако.' : '📁 I am your personal Storage. Send me files to save it to the cloud.') + 
-            '</div>' +
+          headerBlock.innerHTML = 
+              // --- СЕКЦИЯ 1: ВСЕГДА ВИДИМАЯ (Приветствие и Статус) ---
+              '<div style="margin-top: 12px;">' +
+                  '<b style="font-size: 18px;">👋 ' + lang.hi + ', ' + firstName + '!</b>' +
+              '</div>' +
+              '<div style="margin-top: 6px; font-size: 14px; opacity: 0.9;">' + 
+                  (currentLang === 'ru' ? '📁 Я твоя личная Хранилка. Пришли мне файлы, и я сохраню их в облако.' : '📁 I am your personal Storage. Send me files to save it to the cloud.') + 
+              '</div>' +
 
-            '<div class="status-group" style="border-left: 3px solid ' + (isConn ? '#4bb34b' : '#eb4242') + '; margin-top: 15px; padding-left: 15px;">' +
-                '<div style="font-size: 12px; opacity: 0.6;">' + lang.status + '</div>' +
-                '<div style="font-size: 15px; font-weight: 600; margin-top: 2px;">' + 
-                    (isConn ? '<span style="color:#4bb34b;">✅ ' + lang.connected + ' ' + (data.providerName || '') + '</span>' : '<span style="color:#eb4242;">○ ' + lang.notSet + '</span>') + 
-                '</div>' +
-                '<div style="font-size: 13px; margin-top: 4px; opacity: 0.8;">📂 ' + lang.folder + ': ' + (isConn ? '<b>' + (data.currentFolder || '') + '</b>' : '—') + '</div>' +
-            '</div>'; // <--- ВОТ ТУТ СТАВИМ ТОЧКУ С ЗАПЯТОЙ
-
-        // 2. Добавляем квоту только если подключено
-        if (isConn) {
-            headerContent += 
-                '<div class="quota-card" style="margin-top: 10px;">' + 
-                    '<div style="font-size:14px; margin-bottom:4px; opacity:0.8;">☁️ Свободное место</div>' +
-                    '<div class="progress-bg"><div id="quotaBar" class="progress-fill"></div></div>' +
-                    '<div id="quotaText" style="font-size:11px; color: #818c99;">Загрузка данных...</div>' +
-                '</div>';
-        }
-        
-        // 3. Применяем всё в конце
-        headerBlock.innerHTML = headerContent;
-
-        // Вешаем свайп после того, как HTML применился
-        const detailsEl = document.getElementById('header-details-about');
-        if (detailsEl && typeof makeSwipable === "function") {
-            makeSwipable(detailsEl, null, false);
+              '<div class="status-group" style="border-left: 3px solid ' + (isConn ? '#4bb34b' : '#eb4242') + '; margin-top: 15px; padding-left: 15px;">' +
+                  '<div style="font-size: 12px; opacity: 0.6;">' + lang.status + '</div>' +
+                  '<div style="font-size: 15px; font-weight: 600; margin-top: 2px;">' + 
+                      (isConn ? '<span style="color:#4bb34b;">✅ ' + lang.connected + ' ' + (data.providerName || '') + '</span>' : '<span style="color:#eb4242;">○ ' + lang.notSet + '</span>') + 
+                  '</div>' +
+                  '<div style="font-size: 13px; margin-top: 4px; opacity: 0.8;">📂 ' + lang.folder + ': ' + (isConn ? '<b>' + (data.currentFolder || '') + '</b>' : '—') + '</div>' +
+              '</div>' +
+              // 2. Добавляем квоту только если подключено
+              if (isConn) {
+                      '<div class="quota-card" style="margin-top: 10px;">' + 
+                          '<div style="font-size:14px; margin-bottom:4px; opacity:0.8;">☁️ Свободное место</div>' +
+                          '<div class="progress-bg"><div id="quotaBar" class="progress-fill"></div></div>' +
+                          '<div id="quotaText" style="font-size:11px; color: #818c99;">Загрузка данных...</div>' +
+                      '</div>';
+              }
+              
+              // --- ПОСЛЕ того как headerBlock.innerHTML обновлен, вешаем свайп: ---
+              const detailsEl = document.getElementById('header-details-about');
+              if (detailsEl && typeof makeSwipable === "function") {
+                // Вешаем свайп на раскрытый блок
+                makeSwipable(detailsEl, null, false);
+                console.log("[Header] Информация свернута свайпом");
+              }
         }
     }
     
