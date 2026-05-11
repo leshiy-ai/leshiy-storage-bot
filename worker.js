@@ -3687,7 +3687,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     </div>
 
     <div id="ui-header-block" class="tg-message">
-      <div style="margin-top: 12px;"><b style="font-size: 18px;">👋 Привет!</b><br> Я твоя личная Хранилка.</div>
+      <div style="margin-top: 20px;"><b style="font-size: 18px;">👋 Привет!</b><br> Я твоя личная Хранилка.</div>
       <div style="margin-top: 6px; font-size: 14px; opacity: 0.9;">📁 Просто авторизуйся и присылай мне фото или видео, и я закину их на сервер.</div>
       <div class="status-group">
       <div>⚙️ Статус: ${isConnected ? `✅ <span style="color:#4bb34b; font-weight:bold;">Подключен ${providerName}</span>` : 'Не настроено'}</div>
@@ -4188,7 +4188,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       if (headerBlock) {
         headerBlock.innerHTML = 
           // --- СЕКЦИЯ 1: ВСЕГДА ВИДИМАЯ ---
-          '<div style="margin-top: 12px;"><b style="font-size: 18px;">👋 ' + lang.hi + ', ' + firstName + '!</b></div>' +
+          '<div style="margin-top: 20px;"><b style="font-size: 18px;">👋 ' + lang.hi + ', ' + firstName + '!</b></div>' +
           '<div style="margin-top: 6px; font-size: 14px; opacity: 0.9;">' + lang.iAmStorage + '</div>' +
 
           '<div class="status-group" style="border-left: 3px solid ' + (isConn ? '#4bb34b' : '#eb4242') + '; margin-top: 15px; padding-left: 15px;">' +
