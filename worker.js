@@ -3702,29 +3702,29 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     </div>
 
   <details id="storage-settings">
-  <summary>
-      <span>Развернуть для настройки дисков</span>
-      <span class="arrow-down">▼</span>
-  </summary>
-  <div id="authButtons" style="padding: 10px 0;">
-      <button class="btn-s ${provider === 'yandex' ? 'active' : ''}" onclick="openAuthLink('/auth/yandex')">
-        <img src="${cdn}/YandexDisk.png"> Яндекс Диск ${provider === 'yandex' ? '<span class="check-mark">✅</span>' : ''}
-      </button>
-      <button class="btn-s ${provider === 'google' ? 'active' : ''}" onclick="openAuthLink('/auth/google')">
-        <img src="${cdn}/GoogleDrive.png"> Google Drive ${provider === 'google' ? '<span class="check-mark">✅</span>' : ''}
-      </button>
-      <button class="btn-s ${provider === 'dropbox' ? 'active' : ''}" onclick="openAuthLink('/auth/dropbox')">
-        <img src="${cdn}/Dropbox.png"> Dropbox ${provider === 'dropbox' ? '<span class="check-mark">✅</span>' : ''}
-      </button>
-      <button class="btn-s ${provider === 'webdav' && userData?.webdav_host?.includes('mail.ru') ? 'active' : ''}" onclick="showMailRu()">
-        <img src="${cdn}/CloudMailRu.png"> Облако Mail.ru ${userData?.webdav_host?.includes('mail.ru') ? '<span class="check-mark">✅</span>' : ''}
-      </button>
-      <button class="btn-s" onclick="showCustomWD()">
-        <img src="${cdn}/network-drive.png"> Свой FTP/SFTP/WebDAV ${((provider === 'webdav' && !userData?.webdav_host?.includes('mail.ru')) || provider === 'ftp' || provider === 'sftp') ? '<span class="check-mark">✅</span>' : ''}
-      </button>
-      <button class="btn-s" onclick="openFriendsStorage()">🤝 Подключить Хранилку по ссылке</button>
-    </div>
-  </details>
+        <summary>
+            <span>Развернуть для настройки дисков</span>
+            <span class="arrow-down">▼</span>
+        </summary>
+        <div id="authButtons" style="padding: 10px 0;">
+            <button class="btn-s ${provider === 'yandex' ? 'active' : ''}" onclick="openAuthLink('/auth/yandex')">
+              <img src="${cdn}/YandexDisk.png"> Яндекс Диск ${provider === 'yandex' ? '<span class="check-mark">✅</span>' : ''}
+            </button>
+            <button class="btn-s ${provider === 'google' ? 'active' : ''}" onclick="openAuthLink('/auth/google')">
+              <img src="${cdn}/GoogleDrive.png"> Google Drive ${provider === 'google' ? '<span class="check-mark">✅</span>' : ''}
+            </button>
+            <button class="btn-s ${provider === 'dropbox' ? 'active' : ''}" onclick="openAuthLink('/auth/dropbox')">
+              <img src="${cdn}/Dropbox.png"> Dropbox ${provider === 'dropbox' ? '<span class="check-mark">✅</span>' : ''}
+            </button>
+            <button class="btn-s ${provider === 'webdav' && userData?.webdav_host?.includes('mail.ru') ? 'active' : ''}" onclick="showMailRu()">
+              <img src="${cdn}/CloudMailRu.png"> Облако Mail.ru ${userData?.webdav_host?.includes('mail.ru') ? '<span class="check-mark">✅</span>' : ''}
+            </button>
+            <button class="btn-s" onclick="showCustomWD()">
+              <img src="${cdn}/network-drive.png"> Свой FTP/SFTP/WebDAV ${((provider === 'webdav' && !userData?.webdav_host?.includes('mail.ru')) || provider === 'ftp' || provider === 'sftp') ? '<span class="check-mark">✅</span>' : ''}
+            </button>
+            <button class="btn-s" onclick="openFriendsStorage()">🤝 Подключить Хранилку по ссылке</button>
+        </div>
+    </details>
 
   <div id="adminPanel" class="msg-bubble" style="border-left-color: #4bb34b;">
     <span class="close-x" onclick="togglePanel('adminPanel')">×</span>
@@ -3758,6 +3758,19 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     <div id="modelsList" style="margin-top: 16px; display: none;"></div>
   </div>
 
+  <div id="aboutPanel" class="msg-bubble">
+    <span class="close-x" onclick="togglePanel('aboutPanel')">×</span>
+        <div style="font-size: 12px; color: #4bb34b; margin-bottom: 2px; font-weight: 500;">Приложение «Хранилка» by Leshiy</div>
+        <div style="font-size:14px; line-height: 1.5; opacity: 0.9;">Одновременно работает как <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram-бот</a>, <a href='https://t.me/leshiy_storage_bot/app' target='_blank' style='color: #4db3ff;'>tgApp-приложение</a>, <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>vkMiniApp-приложение</a> и <a href='https://ok.ru/app/512004791160' target='_blank' style='color: #4db3ff;'>okMiniApp в одноклассниках</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.</div>
+        <div style="margin-top: 12px; padding: 12px; background: rgba(128,128,128,0.05); border-radius: 12px; border: 1px solid rgba(128,128,128,0.15);">
+            <div style="font-size: 13px; color: var(--text-secondary);">✨ <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru и WebDAV. Можно делиться доступом с близкими!</div>
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px; color: var(--text-secondary);">🛡️ <b>Безопасность:</b> Мы используем технологию «цифрового моста» (OAuth). Вам не нужно доверять приложению пароль — авторизация идет на странице сервиса. Бот получает лишь временный «пропуск» (токен) для работы с файлами без доступа к управлению аккаунтом. Вы можете закрыть доступ в любой момент в настройках диска.</div>
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px;">🧠 <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.</div>
+        </div>
+        <div style="margin-top: 12px; font-size: 11px; opacity: 0.5; text-align: right;">© Автор: Огорельцев Александр Валерьевич</div>
+    </div>
+  </div>
+
   <div id="sharePanel" class="theme-bg-panel theme-border" style="display:none; position:fixed; top: 32%; left: 50%; transform: translate(-50%, -50%); width:90%; max-width:400px; background:#fff; border:2px solid #0077ff; border-radius:12px; z-index:1000; padding:15px; box-shadow:0 10px 25px rgba(0,0,0,0.2); font-family:sans-serif;">
     <h3 class="modal-title-bright" style="margin:0 0 10px 0; font-size:16px;">Предпросмотр инвайта</h3>
     <div id="shareContent" class="theme-bg-panel theme-border" style="font-size:13px; color:#666; margin-bottom:15px; line-height:1.4;">
@@ -3778,19 +3791,6 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     ${isConnected ? `<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>` : ''}
     ${isConnected ? `<span class="blue-link" onclick="goToSearch()">/search</span> — 🔎 Поиск файлов по хранилке<br>` : ''}
     ${isConnected ? `<span class="blue-link" onclick="disconnect()" style="color:#ff3347;">/disconnect</span> — 🔌 Отключить диск<br>` : ''}
-  </div>
-
-  <div id="aboutPanel" class="msg-bubble">
-    <span class="close-x" onclick="togglePanel('aboutPanel')">×</span>
-        <div style="font-size: 12px; color: #4bb34b; margin-bottom: 2px; font-weight: 500;">Приложение «Хранилка» by Leshiy</div>
-        <div style="font-size:14px; line-height: 1.5; opacity: 0.9;">Одновременно работает как <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram-бот</a>, <a href='https://t.me/leshiy_storage_bot/app' target='_blank' style='color: #4db3ff;'>tgApp-приложение</a>, <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>vkMiniApp-приложение</a> и <a href='https://ok.ru/app/512004791160' target='_blank' style='color: #4db3ff;'>okMiniApp в одноклассниках</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.</div>
-        <div style="margin-top: 12px; padding: 12px; background: rgba(128,128,128,0.05); border-radius: 12px; border: 1px solid rgba(128,128,128,0.15);">
-            <div style="font-size: 13px; color: var(--text-secondary);">✨ <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru и WebDAV. Можно делиться доступом с близкими!</div>
-            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px; color: var(--text-secondary);">🛡️ <b>Безопасность:</b> Мы используем технологию «цифрового моста» (OAuth). Вам не нужно доверять приложению пароль — авторизация идет на странице сервиса. Бот получает лишь временный «пропуск» (токен) для работы с файлами без доступа к управлению аккаунтом. Вы можете закрыть доступ в любой момент в настройках диска.</div>
-            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px;">🧠 <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.</div>
-        </div>
-        <div style="margin-top: 12px; font-size: 11px; opacity: 0.5; text-align: right;">© Автор: Огорельцев Александр Валерьевич</div>
-    </div>
   </div>
 
   <div id="searchModal" class="modal-overlay" onclick="closeSearch()">
@@ -4223,7 +4223,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         var adminHtml = '';
         if (data.isAdmin) {
           // ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ
-          adminHtml += '<span class="blue-link" onclick="showAdminPanel()" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>';
+          html += '<span class="blue-link" onclick="togglePanel(' + "'aboutPanel'" + ')" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>';
         }
         adminContainer.innerHTML = adminHtml;
       }
@@ -4234,13 +4234,14 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
 
       var html = '';
       // ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ
-      html += '<span class="blue-link" onclick="showAboutPanel()">/about</span> — 💬 О приложении<br>';
+      html += '<span class="blue-link" onclick="togglePanel(' + "'aboutPanel'" + ')">/about</span> — 💬 О приложении<br>';
 
       if (data.isConnected) {
         html += '<span class="blue-link" onclick="openFolderSelector()">/folder</span> — 📂 Выбрать папку для загрузки<br>';
         html += '<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>';
         html += '<span class="blue-link" onclick="goToSearch()">/search</span> — 🔎 Поиск файлов по хранилке<br>';
       }
+        html += '<span class="blue-link" onclick="togglePanel(' + "'debugPanel'" + ')">/debug</span> — 🛠️ Техническая информация<br>';
       if (data.isConnected) {
         html += '<span class="blue-link" onclick="disconnect()" style="color:#ff3347;">/disconnect</span> — 🔌 Отключить диск<br>';    
       }
@@ -4912,12 +4913,19 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       }, 400);
     }
 
-    function showAdminPanel() {
-      togglePanel('adminPanel');
+    function showDebug() { 
+      const w = document.getElementById('debugWindow');
+      w.style.display = w.style.display === 'block' ? 'none' : 'block';
     }
 
-    function showAboutPanel() {
-      togglePanel('aboutPanel');
+    function showAdmin() {
+      const w = document.getElementById('adminWindow');
+      if(w) w.style.display = w.style.display === 'block' ? 'none' : 'block';
+    }
+
+    function showAbout() {
+      const w = document.getElementById('aboutWindow');
+      if(w) w.style.display = w.style.display === 'block' ? 'none' : 'block';
     }
 
     function openAiSettings() {
