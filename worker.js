@@ -18,7 +18,7 @@
 */
 
 // Глобальные константы
-const version = "v3.1.3 от 04.05.2026"; // актуальная версия
+const version = "v3.1.4 от 11.05.2026"; // актуальная версия
 
 const AWS = require('aws-sdk');
 const providerNames = {
@@ -3772,7 +3772,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       <div style="margin-top: 12px; font-size: 11px; opacity: 0.5; text-align: right;">© Автор: Огорельцев Александр Валерьевич</div>
     </div>
   </div>
-  
+
   <div id="debugPanel" class="msg-bubble">
     <span class="close-x" onclick="togglePanel('debugPanel')">×</span>
     <div class="msg-header">🛠 DEBUG INFO</div>
@@ -4155,6 +4155,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
             security: "🛡️ <b>Безопасность:</b> Мы используем технологию «цифрового моста» (OAuth). Вам не нужно доверять приложению пароль — авторизация идет на странице сервиса. Бот получает лишь временный «пропуск» (токен) для работы с файлами без доступа к управлению аккаунтом. Вы можете закрыть доступ в любой момент в настройках диска.",
             aiNote: "🧠 <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.",
             status: "⚙️ Связь с хранилищем:",
+            storageSpace: "☁️ Свободное место",
             connected: "Подключено:",
             folder: "Папка",
             notSet: "Настройте подключение",
@@ -4169,6 +4170,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
             security: "🛡️ <b>Security:</b> We use «digital bridge» technology (OAuth). No need to share your password — authorization happens on the official service page. The bot only gets a temporary access token for file operations without account management rights. You can revoke access anytime in your cloud settings.",
             aiNote: "🧠 <b>Gemini AI:</b> Feel free to ask me anything about the bot or just chat.",
             status: "⚙️ Cloud Connection:",
+            storageSpace: "☁️ Free space",
             connected: "Connected to",
             folder: "Folder",
             notSet: "Setup required",
@@ -4199,7 +4201,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
               // 2. Квота (Исправлено: добавлен + перед условием)
               '<div class="quota-card" style="margin-top: 10px;">' + 
                   (isConn ? 
-                      '<div style="font-size:14px; margin-bottom:4px; opacity:0.8;">☁️ Свободное место</div>' + 
+                      '<div style="font-size:14px; margin-bottom:4px; opacity:0.8;">' + lang.storageSpace + '</div>' + 
                       '<div class="progress-bg"><div id="quotaBar" class="progress-fill"></div></div>' + 
                       '<div id="quotaText" style="font-size:11px; color: #818c99;">Загрузка данных...</div>' 
                   : '') + 
