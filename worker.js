@@ -4283,8 +4283,6 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       html += '<img src="' + UI_CDN + '/network-drive.png">' + btnText + (isCustomWD ? '<span class="check-mark">✅</span>' : '') + '</button>';
       // Друг
       html += '<button class="btn-s" onclick="openFriendsStorage()">🤝 Подключить Хранилку друга</button>';
-      // Чат
-      html += '<button class="btn-s" style="margin-top: 12px; background: #2688eb; color: #fff; border: none;" onclick="goToChat()">💬 Открыть чат Хранилку</button>';
       container.innerHTML = html;
 
       // === ПРОВЕРКА УВЕДОМЛЕНИЯ О ПОДКЛЮЧЕНИИ ДРУГА ===
