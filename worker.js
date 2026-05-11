@@ -9081,7 +9081,7 @@ function handleVKAuthPage(request, env, origin) {
                   
               VKID.Config.init({
                   app: 54467300,
-                  redirectUrl: 'https://' + window.location.host + '/vk?platform=android',
+                  redirectUrl: 'https://' + window.location.host + '/auth/vk/callback?platform=android',
                   responseMode: VKID.ConfigResponseMode.Callback
               });
 
@@ -9095,7 +9095,7 @@ function handleVKAuthPage(request, env, origin) {
                           const userId = res.user_id || (res.user && res.user.id);
                           if (userId) {
                               localStorage.setItem('vk_user_id', String(userId));
-                              window.location.href = '/vk?vk_user_id=' + userId + '&origin=' + encodeURIComponent(appOrigin);
+                              window.location.href = '/auth/vk/callback?vk_user_id=' + userId + '&origin=' + encodeURIComponent(appOrigin);
                           }
                       });
               }
@@ -9113,7 +9113,7 @@ function handleVKAuthPage(request, env, origin) {
                           const userId = res.user_id || (res.user && res.user.id);
                           if (userId) {
                               localStorage.setItem('vk_user_id', String(userId));
-                              window.location.href = '/vk?vk_user_id=' + userId + '&origin=' + encodeURIComponent(appOrigin);
+                              window.location.href = '/auth/vk/callback?vk_user_id=' + userId + '&origin=' + encodeURIComponent(appOrigin);
                           }
                       })
                       .catch(err => {
@@ -9121,7 +9121,7 @@ function handleVKAuthPage(request, env, origin) {
                           const backupId = payload.uuid || payload.user?.id;
                           if (backupId) {
                               localStorage.setItem('vk_user_id', String(backupId));
-                              window.location.href = '/vk?vk_user_id=' + backupId;
+                              window.location.href = '/auth/vk/callback?vk_user_id=' + backupId;
                           }
                       });
               });
@@ -9160,7 +9160,7 @@ async function handleVKCallback(request, env) {
                     code,
                     device_id: deviceId,
                     client_id: '54467300',
-                    redirect_uri: 'https://' + url.host + '/vk?platform=android'
+                    redirect_uri: 'https://' + url.host + '/auth/vk/callback?platform=android'
                 })
             }
         );
