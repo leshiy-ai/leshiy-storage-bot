@@ -3726,6 +3726,33 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         </div>
     </details>
 
+  <div id="debugPanel" class="msg-bubble">
+    <span class="close-x" onclick="togglePanel('debugPanel')">×</span>
+    <div class="msg-header">🛠 DEBUG INFO</div>
+    <div id="debugContent" class="msg-body">
+      <div>🗄 <b>Приложение онлайн</b></div>
+      <div>📦 <b>Версия:</b> ${version}</div>
+      <div>🔗 <b>Статус:</b> ${isConnected ? '✅ Соединение активно' : '❌ Не подключено'}</div>
+      <div>☁️ <b>Провайдер:</b> ${isConnected ? `${provider}` : '-'}</div>
+      <div>📂 <b>Папка:</b> ${isConnected ? `${currentFolder}` : '-'}</div>
+      <div>👤 <b>Твой ID:</b> ${userId}</div>
+      <div>👑 <b>Админ:</b> ${isAdmin ? 'Да' : 'Нет'}</div>
+    </div>
+  </div>
+
+  <div id="aboutPanel" class="msg-bubble">
+    <span class="close-x" onclick="togglePanel('aboutPanel')">×</span>
+        <div style="font-size: 12px; color: #4bb34b; margin-bottom: 2px; font-weight: 500;">Приложение «Хранилка» by Leshiy</div>
+        <div style="font-size:14px; line-height: 1.5; opacity: 0.9;">Одновременно работает как <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram-бот</a>, <a href='https://t.me/leshiy_storage_bot/app' target='_blank' style='color: #4db3ff;'>tgApp-приложение</a>, <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>vkMiniApp-приложение</a> и <a href='https://ok.ru/app/512004791160' target='_blank' style='color: #4db3ff;'>okMiniApp в одноклассниках</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.</div>
+        <div style="margin-top: 12px; padding: 12px; background: rgba(128,128,128,0.05); border-radius: 12px; border: 1px solid rgba(128,128,128,0.15);">
+            <div style="font-size: 13px; color: var(--text-secondary);">✨ <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru и WebDAV. Можно делиться доступом с близкими!</div>
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px; color: var(--text-secondary);">🛡️ <b>Безопасность:</b> Мы используем технологию «цифрового моста» (OAuth). Вам не нужно доверять приложению пароль — авторизация идет на странице сервиса. Бот получает лишь временный «пропуск» (токен) для работы с файлами без доступа к управлению аккаунтом. Вы можете закрыть доступ в любой момент в настройках диска.</div>
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px;">🧠 <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.</div>
+        </div>
+        <div style="margin-top: 12px; font-size: 11px; opacity: 0.5; text-align: right;">© Автор: Огорельцев Александр Валерьевич</div>
+    </div>
+  </div>
+
   <div id="adminPanel" class="msg-bubble" style="border-left-color: #4bb34b;">
     <span class="close-x" onclick="togglePanel('adminPanel')">×</span>
     <div class="msg-header">⚙️ Панель администратора</div>
@@ -3757,34 +3784,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     <div class="chat-btn-secondary" id="VIDEO_TO_ANALYSIS" onclick="loadModels(this)">🎞️ Видео → Анализ</div>
     <div id="modelsList" style="margin-top: 16px; display: none;"></div>
   </div>
-
-  <div id="aboutPanel" class="msg-bubble">
-    <span class="close-x" onclick="togglePanel('aboutPanel')">×</span>
-        <div style="font-size: 12px; color: #4bb34b; margin-bottom: 2px; font-weight: 500;">Приложение «Хранилка» by Leshiy</div>
-        <div style="font-size:14px; line-height: 1.5; opacity: 0.9;">Одновременно работает как <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram-бот</a>, <a href='https://t.me/leshiy_storage_bot/app' target='_blank' style='color: #4db3ff;'>tgApp-приложение</a>, <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>vkMiniApp-приложение</a> и <a href='https://ok.ru/app/512004791160' target='_blank' style='color: #4db3ff;'>okMiniApp в одноклассниках</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.</div>
-        <div style="margin-top: 12px; padding: 12px; background: rgba(128,128,128,0.05); border-radius: 12px; border: 1px solid rgba(128,128,128,0.15);">
-            <div style="font-size: 13px; color: var(--text-secondary);">✨ <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru и WebDAV. Можно делиться доступом с близкими!</div>
-            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px; color: var(--text-secondary);">🛡️ <b>Безопасность:</b> Мы используем технологию «цифрового моста» (OAuth). Вам не нужно доверять приложению пароль — авторизация идет на странице сервиса. Бот получает лишь временный «пропуск» (токен) для работы с файлами без доступа к управлению аккаунтом. Вы можете закрыть доступ в любой момент в настройках диска.</div>
-            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px;">🧠 <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.</div>
-        </div>
-        <div style="margin-top: 12px; font-size: 11px; opacity: 0.5; text-align: right;">© Автор: Огорельцев Александр Валерьевич</div>
-    </div>
-  </div>
-
-  <div id="debugPanel" class="msg-bubble">
-    <span class="close-x" onclick="togglePanel('debugPanel')">×</span>
-    <div class="msg-header">🛠 DEBUG INFO</div>
-    <div id="debugContent" class="msg-body">
-      <div>🗄 <b>Приложение онлайн</b></div>
-      <div>📦 <b>Версия:</b> ${version}</div>
-      <div>🔗 <b>Статус:</b> ${isConnected ? '✅ Соединение активно' : '❌ Не подключено'}</div>
-      <div>☁️ <b>Провайдер:</b> ${isConnected ? `${provider}` : '-'}</div>
-      <div>📂 <b>Папка:</b> ${isConnected ? `${currentFolder}` : '-'}</div>
-      <div>👤 <b>Твой ID:</b> ${userId}</div>
-      <div>👑 <b>Админ:</b> ${isAdmin ? 'Да' : 'Нет'}</div>
-    </div>
-  </div>
-
+  
   <div id="sharePanel" class="theme-bg-panel theme-border" style="display:none; position:fixed; top: 32%; left: 50%; transform: translate(-50%, -50%); width:90%; max-width:400px; background:#fff; border:2px solid #0077ff; border-radius:12px; z-index:1000; padding:15px; box-shadow:0 10px 25px rgba(0,0,0,0.2); font-family:sans-serif;">
     <h3 class="modal-title-bright" style="margin:0 0 10px 0; font-size:16px;">Предпросмотр инвайта</h3>
     <div id="shareContent" class="theme-bg-panel theme-border" style="font-size:13px; color:#666; margin-bottom:15px; line-height:1.4;">
@@ -4320,19 +4320,17 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           return html;
     }
 
-    function renderAbout(lang) {
-      if (!lang) { 
-        lang = { tagline: '', shortDesc: '', features: '', security: '', aiNote: '' };
-      }
+    function renderAbout(data) {
       const container = document.getElementById('aboutContent');
       if (!container) return;
+      // Используем данные из аргумента data, а не глобальные переменные
       container.innerHTML = 
-          '<div style="font-size: 12px; color: #4bb34b; margin-bottom: 2px; font-weight: 500;">' + lang.tagline + '</div>' +
-          '<div style="font-size:14px; line-height: 1.5; opacity: 0.9;">' + lang.shortDesc + '</div>' +
+          '<div style="font-size: 12px; color: #4bb34b; margin-bottom: 2px; font-weight: 500;">' + data.lang.tagline + '</div>' +
+          '<div style="font-size:14px; line-height: 1.5; opacity: 0.9;">' + data.lang.shortDesc + '</div>' +
           '<div style="margin-top: 12px; padding: 12px; background: rgba(128,128,128,0.05); border-radius: 12px; border: 1px solid rgba(128,128,128,0.15);">' +
-              '<div style="font-size: 13px; color: var(--text-secondary);">' + lang.features + '</div>' +
-              '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px; color: var(--text-secondary);">' + lang.security + '</div>' +
-              '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px;">' + lang.aiNote + '</div>' +
+              '<div style="font-size: 13px; color: var(--text-secondary);">' + data.lang.features + '</div>' +
+              '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px; color: var(--text-secondary);">' + data.lang.security + '</div>' +
+              '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px;">' + data.lang.aiNote + '</div>' +
           '</div>' +
           '<div style="margin-top: 12px; font-size: 11px; opacity: 0.5; text-align: right;">© Автор: Огорельцев Александр Валерьевич</div>' +
       '</div>';
