@@ -4353,8 +4353,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
               '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px; color: var(--text-secondary);">' + lang.security + '</div>' +
               '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px;">' + lang.aiNote + '</div>' +
           '</div>' +
-          '<div style="margin-top: 12px; font-size: 11px; opacity: 0.5; text-align: right;">© Автор: Огорельцев Александр Валерьевич</div>' +
-      '</div>';
+          '<div style="margin-top: 12px; font-size: 11px; opacity: 0.5; text-align: right;">© Автор: Огорельцев Александр Валерьевич</div>';
     }
 
     function closeApp() {
