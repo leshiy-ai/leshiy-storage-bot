@@ -4323,14 +4323,35 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     function renderAbout(data) {
       const container = document.getElementById('aboutContent');
       if (!container) return;
+      // 1. Создаем словарь текстов, как в renderHeader.
+      const i18n = {
+        ru: {
+            tagline: "Приложение «Хранилка» by Leshiy",
+            shortDesc: "Одновременно работает как <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram-бот</a>, <a href='https://t.me/leshiy_storage_bot/app' target='_blank' style='color: #4db3ff;'>tgApp-приложение</a>, <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>vk-чат-бот</a>, и <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>vkMiniApp-приложение</a> и <a href='https://ok.ru/app/512004791160' target='_blank' style='color: #4db3ff;'>okMiniApp в одноклассниках</a> с функцией аплоад/доунлоад с реферальной системой доступа. Служит «мостом» между социальными сетями и облачными хранилищами. Позволяет сохранять медиафайлы (фото, видео, документы) в личные облака. 24/7 под рукой.",
+            features: "✨ <b>Что я умею:</b> Загружаю медиа без сжатия, поддерживаю Яндекс, Google, Dropbox, Mail.Ru и WebDAV. Можно делиться доступом с близкими!",
+            security: "🛡️ <b>Безопасность:</b> Мы используем технологию «цифрового моста» (OAuth). Вам не нужно доверять приложению пароль — авторизация идет на странице сервиса. Бот получает лишь временный «пропуск» (токен) для работы с файлами без доступа к управлению аккаунтом. Вы можете закрыть доступ в любой момент в настройках диска.",
+            aiNote: "🧠 <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю."
+        },
+        en: {
+            tagline: "App «Storage» by Leshiy",
+            shortDesc: "It works simultaneously as a <a href='https://t.me/leshiy_storage_bot' target='_blank' style='color: #4db3ff;'>Telegram bot</a>, <a href='https://t.me/leshiy_storage_bot/app' target='_blank' style='color: #4db3ff;'>Telegram App</a>, <a href='https://vk.com/write-235249123' target='_blank' style='color: #4db3ff;'>VK chat bot</a>, and a <a href='https://vk.com/app54419010' target='_blank' style='color: #4db3ff;'>VKMiniApp</a> and <a href='https://ok.ru/app/512004791160' target='_blank' style='color: #4db3ff;'>okMiniApp</a> application with an upload/download function and a referral access system. Serves as a «bridge» between social networks and cloud storage. Allows you to save media files (photos, videos, documents) to your personal cloud storage. 24/7 at your service.",
+            features: "✨ <b>Features:</b> High-quality uploads, support for Yandex, Google, Dropbox, Mail.Ru & WebDAV. Share access with your family!",
+            security: "🛡️ <b>Security:</b> We use «digital bridge» technology (OAuth). No need to share your password — authorization happens on the official service page. The bot only gets a temporary access token for file operations without account management rights. You can revoke access anytime in your cloud settings.",
+            aiNote: "🧠 <b>Gemini AI:</b> Feel free to ask me anything about the bot or just chat."
+        }
+      };
+      
+      // 2. Выбираем нужный язык из глобальной переменной window.currentLang
+      const lang = i18n[window.currentLang] || i18n['ru'];
+
       // Используем данные из аргумента data, а не глобальные переменные
       container.innerHTML = 
-          '<div style="font-size: 12px; color: #4bb34b; margin-bottom: 2px; font-weight: 500;">' + data.lang.tagline + '</div>' +
-          '<div style="font-size:14px; line-height: 1.5; opacity: 0.9;">' + data.lang.shortDesc + '</div>' +
+          '<div style="font-size: 12px; color: #4bb34b; margin-bottom: 2px; font-weight: 500;">' + lang.tagline + '</div>' +
+          '<div style="font-size:14px; line-height: 1.5; opacity: 0.9;">' + lang.shortDesc + '</div>' +
           '<div style="margin-top: 12px; padding: 12px; background: rgba(128,128,128,0.05); border-radius: 12px; border: 1px solid rgba(128,128,128,0.15);">' +
-              '<div style="font-size: 13px; color: var(--text-secondary);">' + data.lang.features + '</div>' +
-              '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px; color: var(--text-secondary);">' + data.lang.security + '</div>' +
-              '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px;">' + data.lang.aiNote + '</div>' +
+              '<div style="font-size: 13px; color: var(--text-secondary);">' + lang.features + '</div>' +
+              '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px; color: var(--text-secondary);">' + lang.security + '</div>' +
+              '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(128,128,128,0.1); font-size: 13px;">' + lang.aiNote + '</div>' +
           '</div>' +
           '<div style="margin-top: 12px; font-size: 11px; opacity: 0.5; text-align: right;">© Автор: Огорельцев Александр Валерьевич</div>' +
       '</div>';
