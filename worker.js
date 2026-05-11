@@ -4222,7 +4222,8 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       if (adminContainer) {
         var adminHtml = '';
         if (data.isAdmin) {
-          adminHtml += '<span class="blue-link" onclick="showAdmin()" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>';
+          // ИСПРАВЛЕНО: Используем onclick="togglePanel('adminPanel')" как в серверном HTML
+          adminHtml += '<span class="blue-link" onclick="togglePanel(\'adminPanel\')" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>';
         }
         adminContainer.innerHTML = adminHtml;
       }
@@ -4232,8 +4233,9 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       if (!container) return;
 
       var html = '';
-      // Вызываем функцию без аргументов — это 100% стабильно
-      html += '<span class="blue-link" onclick="showAbout()">/about</span> — 💬 О приложении<br>';
+      // ДОБАВЛЕНО: Команда /about, которая всегда видима
+      html += '<span class="blue-link" onclick="togglePanel(\'aboutPanel\')">/about</span> — 💬 О приложении<br>';
+
       if (data.isConnected) {
         html += '<span class="blue-link" onclick="openFolderSelector()">/folder</span> — 📂 Выбрать папку для загрузки<br>';
         html += '<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>';
