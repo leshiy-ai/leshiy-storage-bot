@@ -4212,13 +4212,13 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
                   '<span>Развернуть для настройки дисков</span> <span class="arrow-down">▼</span>' +
               '</summary>' +
               '<div id="authButtons" style="padding: 10px 0;">' +
-                  '<button class="btn-s ' + (data.provider === 'yandex' ? 'active' : '') + '" onclick="openAuthLink(\"/auth/yandex\")">' +
+                  '<button class="btn-s ' + (data.provider === 'yandex' ? 'active' : '') + '" onclick="openAuthLink(' + "'/auth/yandex'" + ')">' +
                       '<img src="' + cdn + '/YandexDisk.png"> Яндекс Диск ' + (data.provider === 'yandex' ? '<span class="check-mark">✅</span>' : '') +
                   '</button>' +
-                  '<button class="btn-s ' + (data.provider === 'google' ? 'active' : '') + '" onclick="openAuthLink(\"/auth/google\")">' +
+                  '<button class="btn-s ' + (data.provider === 'google' ? 'active' : '') + '" onclick="openAuthLink(' + "'/auth/google'" + ')">' +
                       '<img src="' + cdn + '/GoogleDrive.png"> Google Drive ' + (data.provider === 'google' ? '<span class="check-mark">✅</span>' : '') +
                   '</button>' +
-                  '<button class="btn-s ' + (data.provider === 'dropbox' ? 'active' : '') + '" onclick="openAuthLink(\"/auth/dropbox\")">' +
+                  '<button class="btn-s ' + (data.provider === 'dropbox' ? 'active' : '') + '" onclick="openAuthLink(' + "'/auth/dropbox'" + ')">' +
                       '<img src="' + cdn + '/Dropbox.png"> Dropbox ' + (data.provider === 'dropbox' ? '<span class="check-mark">✅</span>' : '') +
                   '</button>' +
                   '<button class="btn-s ' + (data.provider === 'webdav' && data.webdav_host?.includes('mail.ru') ? 'active' : '') + '" onclick="showMailRu()">' +
