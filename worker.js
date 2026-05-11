@@ -3771,6 +3771,20 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     </div>
   </div>
 
+  <div id="debugPanel" class="msg-bubble">
+    <span class="close-x" onclick="togglePanel('debugPanel')">×</span>
+    <div class="msg-header">🛠 DEBUG INFO</div>
+    <div id="debugContent" class="msg-body">
+      <div>🗄 <b>Приложение онлайн</b></div>
+      <div>📦 <b>Версия:</b> ${version}</div>
+      <div>🔗 <b>Статус:</b> ${isConnected ? '✅ Соединение активно' : '❌ Не подключено'}</div>
+      <div>☁️ <b>Провайдер:</b> ${isConnected ? `${provider}` : '-'}</div>
+      <div>📂 <b>Папка:</b> ${isConnected ? `${currentFolder}` : '-'}</div>
+      <div>👤 <b>Твой ID:</b> ${userId}</div>
+      <div>👑 <b>Админ:</b> ${isAdmin ? 'Да' : 'Нет'}</div>
+    </div>
+  </div>
+
   <div id="sharePanel" class="theme-bg-panel theme-border" style="display:none; position:fixed; top: 32%; left: 50%; transform: translate(-50%, -50%); width:90%; max-width:400px; background:#fff; border:2px solid #0077ff; border-radius:12px; z-index:1000; padding:15px; box-shadow:0 10px 25px rgba(0,0,0,0.2); font-family:sans-serif;">
     <h3 class="modal-title-bright" style="margin:0 0 10px 0; font-size:16px;">Предпросмотр инвайта</h3>
     <div id="shareContent" class="theme-bg-panel theme-border" style="font-size:13px; color:#666; margin-bottom:15px; line-height:1.4;">
@@ -3790,6 +3804,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     ${isConnected ? `<span class="blue-link" onclick="openFolderSelector()">/folder</span> — 📂 Выбрать папку для загрузки<br>` : ''}
     ${isConnected ? `<span class="blue-link" onclick="shareApp()">/share</span> — 👤 Ссылка для друга<br>` : ''}
     ${isConnected ? `<span class="blue-link" onclick="goToSearch()">/search</span> — 🔎 Поиск файлов по хранилке<br>` : ''}
+    <span class="blue-link" onclick="togglePanel('debugPanel')">/debug</span> — 🛠️ Техническая информация<br>
     ${isConnected ? `<span class="blue-link" onclick="disconnect()" style="color:#ff3347;">/disconnect</span> — 🔌 Отключить диск<br>` : ''}
   </div>
 
@@ -4217,20 +4232,9 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     
     function renderCommands(data) {
       if (!data) return;
-      // 1. Блок админа
-      var adminContainer = document.getElementById('ui-admin-commands');
-      if (adminContainer) {
-        var adminHtml = '';
-        if (data.isAdmin) {
-          // ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ
-          html += '<span class="blue-link" onclick="togglePanel(' + "'aboutPanel'" + ')" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>';
-        }
-        adminContainer.innerHTML = adminHtml;
-      }
-
-      // 2. Основной блок
+      
       var container = document.getElementById('ui-commands-block');
-      if (!container) return;
+      if (!container) return; // Защита от падения, если элемент не найден
 
       var html = '';
       // ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ
@@ -4295,6 +4299,24 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           }
         }, 1500);
       }
+    }
+
+    function renderDebug(data) {
+      const container = document.getElementById('debugContent');
+      if (!container) return;
+      // Используем данные из аргумента data, а не глобальные переменные
+      const isConn = !!data.isConnected;
+      const dProv = isConn ? (data.providerName || data.provider || '-') : '-';
+      const dFold = isConn ? (data.currentFolder || 'Root') : '-';
+      const dAdmin = data.isAdmin ? 'Да' : 'Нет';
+      container.innerHTML = 
+          '<div>🗄 <b>Приложение онлайн</b></div>' +
+          '<div>📦 <b>Версия:</b> ' + "${version}" + '</div>' +
+          '<div>🔗 <b>Статус:</b> ' + (isConn ? '✅ Соединение активно' : '❌ Не подключено') + '</div>' +
+          '<div>☁️ <b>Провайдер:</b> ' + (isConn ? (data.providerName || data.provider) : '-') + '</div>' +
+          '<div>📂 <b>Папка:</b> ' + (isConn ? (data.currentFolder || 'Root') : '-') + '</div>' +
+          '<div>👤 <b>Твой ID:</b> ' + userId + '</div>' + 
+          '<div>👑 <b>Админ:</b> ' + (data.isAdmin ? 'Да' : 'Нет') + '</div>';
     }
 
     function renderAbout() {
