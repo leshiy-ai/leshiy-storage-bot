@@ -4404,7 +4404,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           // Обновляем только UI блоки, чат ИИ не трогаем
           renderHeader(data);
           renderCommands(data);
-          renderAuth(data);
+          //renderAuth(data);
           
           // ОБНОВЛЯЕМ ГЛОБАЛЬНЫЙ ПРОВАЙДЕР
           if (data.provider) window.currentProvider = data.provider;
