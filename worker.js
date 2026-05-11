@@ -4156,6 +4156,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
             aiNote: "🧠 <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.",
             status: "⚙️ Связь с хранилищем:",
             storageSpace: "☁️ Свободное место",
+            spaceLoading: "Загрузка данных...",     
             connected: "Подключено:",
             folder: "Папка",
             notSet: "Настройте подключение",
@@ -4171,6 +4172,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
             aiNote: "🧠 <b>Gemini AI:</b> Feel free to ask me anything about the bot or just chat.",
             status: "⚙️ Cloud Connection:",
             storageSpace: "☁️ Free space",
+            spaceLoading: "Loading data...",
             connected: "Connected to",
             folder: "Folder",
             notSet: "Setup required",
@@ -4201,9 +4203,9 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
               // 2. Квота (Исправлено: добавлен + перед условием)
               '<div class="quota-card" style="margin-top: 10px;">' + 
                   (isConn ? 
-                      '<div style="font-size:14px; margin-bottom:4px; opacity:0.8;">'☁️ Свободное место'</div>' + 
+                      '<div style="font-size:14px; margin-bottom:4px; opacity:0.8;">' + lang.storageSpace + '</div>' + 
                       '<div class="progress-bg"><div id="quotaBar" class="progress-fill"></div></div>' + 
-                      '<div id="quotaText" style="font-size:11px; color: #818c99;">Загрузка данных...</div>' 
+                      '<div id="quotaText" style="font-size:11px; color: #818c99;">' + lang.spaceLoading + '</div>' 
                   : '') + 
               '</div>' + 
           '</div>' +
@@ -6021,6 +6023,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
 
     // Запуск при полной загрузке страницы
     window.addEventListener('DOMContentLoaded', function() {
+      uiReload();
       checkReferral();
     });
   </script>
