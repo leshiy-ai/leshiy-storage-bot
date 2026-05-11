@@ -4317,9 +4317,13 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           '<div>📂 <b>Папка:</b> ' + (isConn ? (data.currentFolder || 'Root') : '-') + '</div>' +
           '<div>👤 <b>Твой ID:</b> ' + userId + '</div>' + 
           '<div>👑 <b>Админ:</b> ' + (data.isAdmin ? 'Да' : 'Нет') + '</div>';
+          return html;
     }
 
-    function renderAbout() {
+    function renderAbout(lang) {
+      if (!lang) { 
+        lang = { tagline: '', shortDesc: '', features: '', security: '', aiNote: '' };
+      }
       const container = document.getElementById('aboutContent');
       if (!container) return;
       container.innerHTML = 
@@ -4332,6 +4336,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           '</div>' +
           '<div style="margin-top: 12px; font-size: 11px; opacity: 0.5; text-align: right;">© Автор: Огорельцев Александр Валерьевич</div>' +
       '</div>';
+      return html;
     }
 
     function closeApp() {
