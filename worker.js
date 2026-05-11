@@ -9135,12 +9135,11 @@ function handleVKAuthPage(request, env, origin) {
 async function handleVKCallback(request, env) {
     const url = new URL(request.url);
     const userId = url.searchParams.get('vk_user_id');
+    const VK_CLIENT_SECRET = env.VK_CLIENT_SECRET;
     const code = url.searchParams.get('code');
     const deviceId = url.searchParams.get('device_id');
     const platform = url.searchParams.get("platform"); // <--- ДОБАВЛЕНО: получаем параметр platform
     const origin = url.searchParams.get("origin"); // Получаем origin, который пробросили выше
-    const domain = "https://leshiy-ai.github.io";
-
     let finalUserId = userId;
 
     // 🔥 Если пришёл code — обмениваем его как в /vk
@@ -9149,7 +9148,7 @@ async function handleVKCallback(request, env) {
         try {
 
           const tokenResponse = await fetch(
-            'https://id.vk.com/oauth2/auth',
+            'https://id.vk.com/oauth2/access_token', 
             {
                 method: 'POST',
                 headers: {
@@ -9157,9 +9156,11 @@ async function handleVKCallback(request, env) {
                 },
                 body: new URLSearchParams({
                     grant_type: 'authorization_code',
-                    code,
+                    code: code,
                     device_id: deviceId,
                     client_id: '54467300',
+                    client_secret: env.VK_CLIENT_SECRET, // <--- ТОТ САМЫЙ СЕКРЕТ
+                    // redirect_uri должен быть ОДИН В ОДИН как при вызове окна
                     redirect_uri: 'https://' + url.host + '/auth/vk/callback?platform=android'
                 })
             }
@@ -9169,10 +9170,10 @@ async function handleVKCallback(request, env) {
         
         console.log(data);
         
-        finalUserId =
-            data.user_id ||
-            data.user?.id ||
-            data.access_token?.user_id;
+        finalUserId = 
+                data.user_id || 
+                (data.user && data.user.id) || 
+                (data.access_token && typeof data.access_token === 'object' ? data.access_token.user_id : null);
 
         } catch (e) {
             console.error('VK exchange failed:', e);

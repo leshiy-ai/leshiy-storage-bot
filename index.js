@@ -86,6 +86,7 @@ module.exports.handler = async (event, context) => {
         VK_APP_ID: process.env.VK_APP_ID,
         VK_GROUP_ID: process.env.VK_GROUP_ID,
         VK_GROUP_TOKEN: process.env.VK_GROUP_TOKEN,
+        VK_CLIENT_SECRET: process.env.VK_CLIENT_SECRET,
         VK_SECURE_KEY: process.env.VK_SECURE_KEY,
         VK_SERVICE_KEY: process.env.VK_SERVICE_KEY,
         YANDEX_API_KEY: process.env.YANDEX_API_KEY,
