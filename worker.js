@@ -4222,8 +4222,8 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       if (adminContainer) {
         var adminHtml = '';
         if (data.isAdmin) {
-          // ИСПРАВЛЕНО: Используем onclick="togglePanel('adminPanel')" как в серверном HTML
-          adminHtml += '<span class="blue-link" onclick="togglePanel(\'adminPanel\')" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>';
+          // ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ
+          adminHtml += '<span class="blue-link" onclick="showAdminPanel()" style="color:#4bb34b;">/admin</span> — 👑 Меню админа<br>';
         }
         adminContainer.innerHTML = adminHtml;
       }
@@ -4233,8 +4233,8 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       if (!container) return;
 
       var html = '';
-      // ДОБАВЛЕНО: Команда /about, которая всегда видима
-      html += '<span class="blue-link" onclick="togglePanel(\'aboutPanel\')">/about</span> — 💬 О приложении<br>';
+      // ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ
+      html += '<span class="blue-link" onclick="showAboutPanel()">/about</span> — 💬 О приложении<br>';
 
       if (data.isConnected) {
         html += '<span class="blue-link" onclick="openFolderSelector()">/folder</span> — 📂 Выбрать папку для загрузки<br>';
@@ -4912,33 +4912,12 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       }, 400);
     }
 
-    function showAbout() { 
-      console.log('Клик по /about'); // Увидишь это в консоли
-      var w = document.getElementById('aboutPanel');
-      if (!w) {
-        console.error('Ошибка: Элемент aboutPanel НЕ НАЙДЕН в HTML');
-        return;
-      }
-      // Самый тупой и надежный способ переключения
-      if (w.style.display === 'block') {
-        w.style.display = 'none';
-      } else {
-        w.style.display = 'block';
-      }
+    function showAdminPanel() {
+      togglePanel('adminPanel');
     }
 
-    function showAdmin() {
-      console.log('Клик по /admin');
-      var w = document.getElementById('adminPanel');
-      if (!w) {
-        console.error('Ошибка: Элемент adminPanel НЕ НАЙДЕН в HTML');
-        return;
-      }
-      if (w.style.display === 'block') {
-        w.style.display = 'none';
-      } else {
-        w.style.display = 'block';
-      }
+    function showAboutPanel() {
+      togglePanel('aboutPanel');
     }
 
     function openAiSettings() {
