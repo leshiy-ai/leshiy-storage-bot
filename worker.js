@@ -4156,7 +4156,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
             aiNote: "🧠 <b>Gemini AI:</b> Спрашивай меня о чём угодно — я помогу разобраться в функциях или просто поболтаю.",
             status: "⚙️ Связь с хранилищем:",
             storageSpace: "☁️ Свободное место",
-            spaceLoading: "Загрузка данных...",     
+            spaceLoading: "⏳ Загрузка данных...",     
             connected: "Подключено:",
             folder: "Папка",
             notSet: "Настройте подключение",
@@ -4172,7 +4172,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
             aiNote: "🧠 <b>Gemini AI:</b> Feel free to ask me anything about the bot or just chat.",
             status: "⚙️ Cloud Connection:",
             storageSpace: "☁️ Free space",
-            spaceLoading: "Loading data...",
+            spaceLoading: "⏳ Loading data...",
             connected: "Connected to",
             folder: "Folder",
             notSet: "Setup required",
@@ -4383,6 +4383,8 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       }
   
       if (window.lastHeaderData) renderHeader(window.lastHeaderData);
+      renderAbout()
+      uiReload();
     };
   
     function updateLanguageUI() {
