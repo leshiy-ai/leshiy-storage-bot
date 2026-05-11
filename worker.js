@@ -4201,7 +4201,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
               // 2. Квота (Исправлено: добавлен + перед условием)
               '<div class="quota-card" style="margin-top: 10px;">' + 
                   (isConn ? 
-                      '<div style="font-size:14px; margin-bottom:4px; opacity:0.8;">' + lang.storageSpace + '</div>' + 
+                      '<div style="font-size:14px; margin-bottom:4px; opacity:0.8;">'☁️ Свободное место'</div>' + 
                       '<div class="progress-bg"><div id="quotaBar" class="progress-fill"></div></div>' + 
                       '<div id="quotaText" style="font-size:11px; color: #818c99;">Загрузка данных...</div>' 
                   : '') + 
