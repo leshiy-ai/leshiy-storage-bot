@@ -3726,20 +3726,6 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         </div>
     </details>
 
-  <div id="debugPanel" class="msg-bubble">
-    <span class="close-x" onclick="togglePanel('debugPanel')">×</span>
-    <div class="msg-header">🛠 DEBUG INFO</div>
-    <div id="debugContent" class="msg-body">
-      <div>🗄 <b>Приложение онлайн</b></div>
-      <div>📦 <b>Версия:</b> ${version}</div>
-      <div>🔗 <b>Статус:</b> ${isConnected ? '✅ Соединение активно' : '❌ Не подключено'}</div>
-      <div>☁️ <b>Провайдер:</b> ${isConnected ? `${provider}` : '-'}</div>
-      <div>📂 <b>Папка:</b> ${isConnected ? `${currentFolder}` : '-'}</div>
-      <div>👤 <b>Твой ID:</b> ${userId}</div>
-      <div>👑 <b>Админ:</b> ${isAdmin ? 'Да' : 'Нет'}</div>
-    </div>
-  </div>
-
   <div id="aboutPanel" class="msg-bubble">
     <span class="close-x" onclick="togglePanel('aboutPanel')">×</span>
       <div class="msg-header">🗄️ Приложение «Хранилка»</div>
@@ -3786,6 +3772,20 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     <div class="chat-btn-secondary" id="DOCUMENT_TO_TEXT" onclick="loadModels(this)">📄 Документ → Текст</div>
     <div class="chat-btn-secondary" id="VIDEO_TO_ANALYSIS" onclick="loadModels(this)">🎞️ Видео → Анализ</div>
     <div id="modelsList" style="margin-top: 16px; display: none;"></div>
+  </div>
+  
+  <div id="debugPanel" class="msg-bubble">
+    <span class="close-x" onclick="togglePanel('debugPanel')">×</span>
+    <div class="msg-header">🛠 DEBUG INFO</div>
+    <div id="debugContent" class="msg-body">
+      <div>🗄 <b>Приложение онлайн</b></div>
+      <div>📦 <b>Версия:</b> ${version}</div>
+      <div>🔗 <b>Статус:</b> ${isConnected ? '✅ Соединение активно' : '❌ Не подключено'}</div>
+      <div>☁️ <b>Провайдер:</b> ${isConnected ? `${provider}` : '-'}</div>
+      <div>📂 <b>Папка:</b> ${isConnected ? `${currentFolder}` : '-'}</div>
+      <div>👤 <b>Твой ID:</b> ${userId}</div>
+      <div>👑 <b>Админ:</b> ${isAdmin ? 'Да' : 'Нет'}</div>
+    </div>
   </div>
   
   <div id="sharePanel" class="theme-bg-panel theme-border" style="display:none; position:fixed; top: 32%; left: 50%; transform: translate(-50%, -50%); width:90%; max-width:400px; background:#fff; border:2px solid #0077ff; border-radius:12px; z-index:1000; padding:15px; box-shadow:0 10px 25px rgba(0,0,0,0.2); font-family:sans-serif;">
