@@ -4319,7 +4319,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           '<div>👑 <b>Админ:</b> ' + (data.isAdmin ? 'Да' : 'Нет') + '</div>';
     }
 
-    function renderAbout(data) {
+    function renderAbout() {
       const container = document.getElementById('aboutContent');
       if (!container) return;
       // 1. Создаем словарь текстов, как в renderHeader.
@@ -4424,7 +4424,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           renderCommands(data);
           renderAuth(data);
           renderDebug(data);
-          renderAbout(data);
+          renderAbout();
           
           // ОБНОВЛЯЕМ ГЛОБАЛЬНЫЙ ПРОВАЙДЕР
           if (data.provider) window.currentProvider = data.provider;
