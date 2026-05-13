@@ -9143,41 +9143,49 @@ async function handleVKCallback(request, env) {
     let finalUserId = userId;
 
     // 🔥 Если пришёл code — обмениваем его как в /vk
-    if ((!finalUserId || finalUserId === 'undefined' || finalUserId === 'null') && code && deviceId) {
+    // 🔥 Если пришёл code — обмениваем его
+    if ((!finalUserId || finalUserId === 'undefined' || finalUserId === 'null') && code) {
+      try {
+          // ВАЖНО: redirect_uri должен быть СТРОГО таким же, какой был в VKID.Config.init
+          // Если там был чистый урл без platform=android, то и здесь он должен быть чистым.
+          const baseRedirectUri = 'https://' + url.host + '/auth/vk/callback?platform=android';
+          
+          const exchangeParams = new URLSearchParams({
+              grant_type: 'authorization_code',
+              code: code,
+              client_id: '54467300',
+              client_secret: env.VK_CLIENT_SECRET,
+              redirect_uri: baseRedirectUri // Попробуй сначала ЧИСТЫЙ, без platform
+          });
 
-        try {
+          if (deviceId) exchangeParams.append('device_id', deviceId);
 
-          const tokenResponse = await fetch(
-            'https://id.vk.com/oauth2/access_token', 
-            {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                },
-                body: new URLSearchParams({
-                    grant_type: 'authorization_code',
-                    code: code,
-                    device_id: deviceId,
-                    client_id: '54467300',
-                    client_secret: env.VK_CLIENT_SECRET, // <--- ТОТ САМЫЙ СЕКРЕТ
-                    // redirect_uri должен быть ОДИН В ОДИН как при вызове окна
-                    redirect_uri: 'https://' + url.host + '/auth/vk/callback?platform=android'
-                })
-            }
-        );
-        
-        const data = await tokenResponse.json();
-        
-        console.log(data);
-        
-        finalUserId = 
-                data.user_id || 
-                (data.user && data.user.id) || 
-                (data.access_token && typeof data.access_token === 'object' ? data.access_token.user_id : null);
+          const tokenResponse = await fetch('https://oauth.vk.com/access_token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: exchangeParams
+          });
+          
+          const data = await tokenResponse.json();
+          
+          // Если ВК вернул ошибку — выводим её прямо в ответ, чтобы ты увидел в Хроме/WebView
+          if (data.error) {
+              return new Response(`VK Exchange Error: ${data.error_description || data.error}. Redirect used: ${baseRedirectUri}`, { status: 400 });
+          }
+          
+          // Извлекаем ID (ВК может положить его в корень или в объект user)
+          finalUserId = data.user_id || (data.user && data.user.id);
 
-        } catch (e) {
-            console.error('VK exchange failed:', e);
-        }
+          // Если пришел токен, но нет ID — дотягиваем через API
+          if (!finalUserId && data.access_token) {
+              const userRes = await fetch(`https://api.vk.com/method/users.get?access_token=${data.access_token}&v=5.131`);
+              const userData = await userRes.json();
+              finalUserId = userData?.response?.[0]?.id;
+          }
+
+      } catch (e) {
+          return new Response(`Fetch Exception: ${e.message}`, { status: 500 });
+      }
     }
 
     // Если ID так и нет — уходим
