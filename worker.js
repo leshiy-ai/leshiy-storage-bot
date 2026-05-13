@@ -9064,19 +9064,12 @@ function handleVKAuthPage(request, env, origin) {
               const VKID = window.VKIDSDK;
               const urlParams = new URLSearchParams(window.location.search);
               
-              // Исправляем переменные (добавляем const)
               const appOrigin = urlParams.get('origin') || window.location.origin;
-              const authComplete = urlParams.get('auth_complete');
               const vkUserId = urlParams.get('vk_user_id');
 
-              // Если в URL есть ID — фиксируем его (этот кусок вернет юзера в апп из браузера)
+              // Если в URL уже есть ID — фиксируем его
               if (vkUserId && vkUserId !== 'undefined' && vkUserId !== 'null') {
                   localStorage.setItem('vk_user_id', vkUserId);
-                
-                  if (authComplete) {
-                      // Если авторизация завершена в браузере, возвращаемся в чистый корень
-                      window.location.href = '/vk?vk_user_id=' + vkUserId;
-                  }
               }
                   
               VKID.Config.init({
@@ -9084,21 +9077,6 @@ function handleVKAuthPage(request, env, origin) {
                   redirectUrl: 'https://' + window.location.host + '/auth/vk/callback',
                   responseMode: VKID.ConfigResponseMode.Callback
               });
-
-              // Проверка: если в URL уже есть code (автоприход из WebView)
-              const code = urlParams.get('code');
-              const deviceId = urlParams.get('device_id');
-              
-              if (code && deviceId) {
-                  VKID.Auth.exchangeCode(code, deviceId)
-                      .then(res => {
-                          const userId = res.user_id || (res.user && res.user.id);
-                          if (userId) {
-                              localStorage.setItem('vk_user_id', String(userId));
-                              window.location.href = '/auth/vk/callback?vk_user_id=' + userId + '&origin=' + encodeURIComponent(appOrigin);
-                          }
-                      });
-              }
 
               const oneTap = new VKID.OneTap();
               oneTap.render({
@@ -9108,22 +9086,13 @@ function handleVKAuthPage(request, env, origin) {
                   styles: { height: 44, borderRadius: 8 }
               })
               .on(VKID.OneTapInternalEvents.LOGIN_SUCCESS, function(payload) {
-                  VKID.Auth.exchangeCode(payload.code, payload.device_id)
-                      .then(res => {
-                          const userId = res.user_id || (res.user && res.user.id);
-                          if (userId) {
-                              localStorage.setItem('vk_user_id', String(userId));
-                              window.location.href = '/auth/vk/callback?vk_user_id=' + userId + '&origin=' + encodeURIComponent(appOrigin);
-                          }
-                      })
-                      .catch(err => {
-                          console.error(err);
-                          const backupId = payload.uuid || payload.user?.id;
-                          if (backupId) {
-                              localStorage.setItem('vk_user_id', String(backupId));
-                              window.location.href = '/auth/vk/callback?vk_user_id=' + backupId;
-                          }
-                      });
+                  // ПЕРЕДАЕМ СЫРОЙ КОД НА КОЛБЭК, НЕ СЖИГАЯ ЕГО ТУТ
+                  const callbackUrl = new URL('https://' + window.location.host + '/auth/vk/callback');
+                  callbackUrl.searchParams.set('code', payload.code);
+                  callbackUrl.searchParams.set('device_id', payload.device_id);
+                  if (appOrigin) callbackUrl.searchParams.set('origin', appOrigin);
+                  
+                  window.location.href = callbackUrl.toString();
               });
           </script>
       </body>
