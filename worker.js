@@ -9061,39 +9061,49 @@ function handleVKAuthPage(request, env, origin) {
 
           <script src="https://unpkg.com/@vkid/sdk@<3.0.0/dist-sdk/umd/index.js"></script>
           <script>
+            if ('VKIDSDK' in window) {
               const VKID = window.VKIDSDK;
               const urlParams = new URLSearchParams(window.location.search);
-              
               const appOrigin = urlParams.get('origin') || window.location.origin;
-              const vkUserId = urlParams.get('vk_user_id');
 
-              // Если в URL уже есть ID — фиксируем его
-              if (vkUserId && vkUserId !== 'undefined' && vkUserId !== 'null') {
-                  localStorage.setItem('vk_user_id', vkUserId);
-              }
-                  
               VKID.Config.init({
-                  app: 54467300,
-                  redirectUrl: 'https://' + window.location.host + '/auth/vk/callback',
-                  responseMode: VKID.ConfigResponseMode.Callback
+                app: 54467300,
+                redirectUrl: 'https://' + window.location.host + '/auth/vk/callback',
+                responseMode: VKID.ConfigResponseMode.Callback,
+                source: VKID.ConfigSource.LOWCODE,
               });
 
               const oneTap = new VKID.OneTap();
+
               oneTap.render({
-                  container: document.getElementById('vkid'),
-                  showAlternativeLogin: true,
-                  oauthList: ['mail_ru', 'ok_ru'],
-                  styles: { height: 44, borderRadius: 8 }
+                container: document.getElementById('vkid'),
+                showAlternativeLogin: true,
+                oauthList: ['mail_ru', 'ok_ru'],
+                styles: { height: 44, borderRadius: 8 }
               })
-              .on(VKID.OneTapInternalEvents.LOGIN_SUCCESS, function(payload) {
-                  // ПЕРЕДАЕМ СЫРОЙ КОД НА КОЛБЭК, НЕ СЖИГАЯ ЕГО ТУТ
-                  const callbackUrl = new URL('https://' + window.location.host + '/auth/vk/callback');
-                  callbackUrl.searchParams.set('code', payload.code);
-                  callbackUrl.searchParams.set('device_id', payload.device_id);
-                  if (appOrigin) callbackUrl.searchParams.set('origin', appOrigin);
-                  
-                  window.location.href = callbackUrl.toString();
+              .on(VKID.OneTapInternalEvents.LOGIN_SUCCESS, function (payload) {
+                const code = payload.code;
+                const deviceId = payload.device_id;
+
+                // Обмениваем код прямо здесь, чтобы SDK сама применила PKCE-верификатор
+                VKID.Auth.exchangeCode(code, deviceId)
+                  .then(function(data) {
+                    const userId = data.user_id || (data.user && data.user.id);
+                    if (userId) {
+                      // Сохраняем и летим на колбэк, передавая уже готовый ID
+                      localStorage.setItem('vk_user_id', String(userId));
+                      window.location.href = '/auth/vk/callback?vk_user_id=' + userId + 
+                                           '&device_id=' + deviceId + 
+                                           '&origin=' + encodeURIComponent(appOrigin);
+                    }
+                  })
+                  .catch(function(err) {
+                    console.error('Ошибка VK ID:', err);
+                    // Если обмен не вышел, пробуем хотя бы прокинуть code как запасной вариант
+                    window.location.href = '/auth/vk/callback?code=' + code + '&device_id=' + deviceId + '&origin=' + encodeURIComponent(appOrigin);
+                  });
               });
+            }
           </script>
       </body>
       </html>
