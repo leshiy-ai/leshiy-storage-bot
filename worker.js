@@ -9081,7 +9081,7 @@ function handleVKAuthPage(request, env, origin) {
                   
               VKID.Config.init({
                   app: 54467300,
-                  redirectUrl: 'https://' + window.location.host + '/auth/vk/callback?platform=android',
+                  redirectUrl: 'https://' + window.location.host + '/auth/vk/callback',
                   responseMode: VKID.ConfigResponseMode.Callback
               });
 
@@ -9147,8 +9147,7 @@ async function handleVKCallback(request, env) {
     if ((!finalUserId || finalUserId === 'undefined' || finalUserId === 'null') && code) {
       try {
           // ВАЖНО: redirect_uri должен быть СТРОГО таким же, какой был в VKID.Config.init
-          // Если там был чистый урл без platform=android, то и здесь он должен быть чистым.
-          const baseRedirectUri = 'https://' + url.host + '/auth/vk/callback?platform=android';
+          const baseRedirectUri = 'https://' + url.host + '/auth/vk/callback';
           
           const exchangeParams = new URLSearchParams({
               grant_type: 'authorization_code',
@@ -9211,23 +9210,26 @@ async function handleVKCallback(request, env) {
         targetUrl = `/vk?vk_user_id=${finalUserId}&auth_complete=true`;
     }
 
-    // 3. СПЕЦ-ВОЗВРАТ ДЛЯ МОБИЛОК (platform=android)
-    // Чтобы системный браузер "выплюнул" нас обратно в APK или ТГ
-    if (platform === 'android') {
+    // // 3. СПЕЦ-ВОЗВРАТ ДЛЯ МОБИЛОК (APK / WebView)
+    // Если есть deviceId или origin — значит, мы в процессе мобильной авторизации
+    if (deviceId || origin) {
       return new Response(`
           <!DOCTYPE html>
           <html>
           <head><meta charset="utf-8"></head>
-          <body>
+          <body style="background:#212121; color:white; font-family:sans-serif; text-align:center; padding-top:50px; height:100vh; margin:0;">
               <script>
-                  // Фиксируем ID в памяти браузера перед прыжком
+                  // Сохраняем ID в localStorage браузера (на всякий случай для кук/сессий)
                   localStorage.setItem('vk_user_id', '${finalUserId}');
-                  // Прыгаем по ссылке, которую должен перехватить APK или WebView ТГ
+                  
+                  // Мгновенный прыжок обратно в приложение по targetUrl
+                  // (targetUrl уже содержит vk_user_id, который APK перехватит)
                   window.location.replace('${targetUrl}');
               </script>
-              <div style="text-align:center; padding-top:50px; font-family:sans-serif; background:#212121; color:white; height:100vh;">
+              <div>
                   <p>Авторизация успешна!</p>
-                  <a href="${targetUrl}" style="color:#0077ff;">Вернуться в приложение</a>
+                  <p style="font-size:14px; color:#818c99;">Возвращаемся в Хранилку...</p>
+                  <a href="${targetUrl}" style="color:#0077ff; text-decoration:none;">Нажмите здесь, если не вернулись</a>
               </div>
           </body>
           </html>
