@@ -2877,10 +2877,8 @@ async function handleVK(body, env, hostname, ctx) {
 
         // Возвращаем классическое приветствие с командами
         let firstName = "Пользователь";
-        try {
-            // Берем имя напрямую из нашей базы KV, а не просим у VK API
-            const userName = await getVKUserName(userId, env);
-            if (userName) { firstName = userName.split(' ')[0]; }
+        const userName = await getVKUserName(userId, env);
+        if (userName) { firstName = userName.split(' ')[0]; }
         let welcome = `👋 Привет ${firstName}! Я твоя личная Хранилка.\n`;
         welcome += `📁 Просто авторизуйся и присылай мне фото или видео, и я закину их на сервер.\n`;
         welcome += `⚙️ Связь с хранилищем:\n${statusText}\n`;
