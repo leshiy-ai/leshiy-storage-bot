@@ -2877,8 +2877,18 @@ async function handleVK(body, env, hostname, ctx) {
 
         // Возвращаем классическое приветствие с командами
         let firstName = "Пользователь";
-        const userName = await getVKUserName(userId, env);
-        if (userName) { firstName = userName.split(' ')[0]; }
+        try {
+            // Берем имя напрямую из нашей базы KV, а не просим у VK API
+            const kvData = await env.USER_DB.get(`user:${userId}`);
+            if (kvData) {
+                const user = JSON.parse(kvData);
+                if (user.name) {
+                    firstName = user.name.split(' ')[0];
+                }
+            }
+        } catch (e) {
+            console.error("Error fetching user name from KV:", e);
+        }
         let welcome = `👋 Привет ${firstName}! Я твоя личная Хранилка.\n`;
         welcome += `📁 Просто авторизуйся и присылай мне фото или видео, и я закину их на сервер.\n`;
         welcome += `⚙️ Связь с хранилищем:\n${statusText}\n`;
@@ -4140,7 +4150,8 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       const pName = data.providerName || (currentLang === 'ru' ? 'Не настроено' : 'Not configured');
       const folder = data.currentFolder || (currentLang === 'ru' ? 'Не выбрано' : 'Not selected');
       
-      const fullName = data.userName || (currentLang === 'ru' ? "Пользователь" : "User");
+      const storedName = localStorage.getItem('vk_user_name');
+      const fullName = storedName || data.userName || (currentLang === 'ru' ? "Пользователь" : "User");
       const firstName = fullName.split(' ')[0];
   
       // Словарь текстов
@@ -4409,8 +4420,14 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           return;
       }
       try {
-          const nameParam = window.userName ? '&name=' + encodeURIComponent(window.userName) : '';
-          const photoParam = window.userPhoto ? '&photo=' + encodeURIComponent(window.userPhoto) : '';
+                    // Берем имя сначала из window, а если там пусто - из localStorage (куда его сохранил Воркер после Гитхаба)
+          const currentName = window.userName || localStorage.getItem('vk_user_name');
+          const currentPhoto = window.userPhoto || localStorage.getItem('vk_user_photo');
+          
+          // Не отправляем дефолтные значения, чтобы не перезаписать реальное имя в базе на "Пользователь"
+          const nameParam = (currentName && currentName !== 'Пользователь') ? '&name=' + encodeURIComponent(currentName) : '';
+          const photoParam = (currentPhoto && currentPhoto !== '/tg_logo.svg') ? '&photo=' + encodeURIComponent(currentPhoto) : '';
+          
           const response = await fetch('?action=get-status&userId=' + userId + nameParam + photoParam + '&t=' + Date.now());
           // ПРОВЕРКА: Если сервер ответил ошибкой (500, 404 и т.д.)
           if (!response.ok) {
