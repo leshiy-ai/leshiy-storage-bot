@@ -9028,7 +9028,7 @@ async function createWebDavFolder(folderName, userData) {
 }
 
 // Авторизация ВК через OneTap
-// --- Страница авторизации ВК (Умный диспетчер) ---
+// --- 1. Страница авторизации ВК (Умный диспетчер) ---
 async function handleVKAuthPage(request, env) {
   const url = new URL(request.url);
   const params = Object.fromEntries(url.searchParams);
@@ -9045,31 +9045,38 @@ async function handleVKAuthPage(request, env) {
                       const data = ${safeData};
                       localStorage.setItem('vk_user_id', data.userId);
                       localStorage.setItem('auth_provider', 'VK');
-                      window.location.replace('/'); // Уходим на главную Хранилки
+                      window.location.replace('/'); // Уходим на главную
                   } catch(e) {}
               </script>
           </body></html>
       `, { headers: { "Content-Type": "text/html; charset=utf-8" } });
   }
 
-  // Определяем, это мобильное приложение/APK или обычный веб
-  const origin = params.origin || '';
-  const platform = params.platform || '';
+  // ---------------------------------------------------------
+  // ОПРЕДЕЛЯЕМ, КУДА ОТПРАВЛЯТЬ ЮЗЕРА
+  // ---------------------------------------------------------
+  
+  // 1. Явный параметр для принудительного редиректа (используем в APK и ссылках ТГ бота)
+  const isForceGithub = params.platform === 'android';
+  
+  // 2. Проверка на Telegram Mini App (ТГ передает свой параметр запуска)
+  const isTelegramWebApp = url.toString().includes('tgWebAppData') || params.vk_platform;
+  
+  // 3. Проверка на мобильный браузер (на случай, если зашли без параметра)
+  const userAgent = request.headers.get('User-Agent') || '';
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(userAgent);
 
-  // УСЛОВИЕ: Если есть Deep Link (origin содержит ://) или указана платформа android
-  if (origin.includes('://') || platform === 'android') {
+  // Если хоть одно условие истинно — летим на GitHub!
+  if (isForceGithub || isTelegramWebApp || isMobile) {
       const currentHost = url.host;
-      // Формируем, куда GitHub должен вернуть пользователя после авторизации
-      // Если есть deep link, возвращаем прямо в APK. Если нет - возвращаем на Яндекс
-      const returnTo = origin || `https://${currentHost}/vk`;
+      const returnTo = `https://${currentHost}/vk`;
       const githubAuthUrl = `https://leshiy-ai.github.io/vk.html?returnTo=${encodeURIComponent(returnTo)}`;
       
-      // Редиректим на GitHub!
       return new Response(null, { status: 302, headers: { 'Location': githubAuthUrl } });
   }
 
   // ---------------------------------------------------------
-  // ЕСЛИ ЭТО ОБЫЧНЫЙ ВЕБ (ПК / Браузер мобилки) - Рисуем виджет прямо тут
+  // ЕСЛИ ЭТО ОБЫЧНЫЙ ПК - Рисуем виджет прямо тут
   // ---------------------------------------------------------
   const clientId = env.VK_CLIENT_ID || 54467300;
   const error = params.error;
@@ -9131,7 +9138,7 @@ async function handleVKAuthPage(request, env) {
   `, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
-// --- VK-авторизация Калбэк-возврат (Принимает готовый vk_user_id) ---
+// --- 2. Калбэк-возврат (Принимает готовый vk_user_id от Гитхаба или ПК-виджета) ---
 async function handleVKCallback(request, env) {
   const url = new URL(request.url);
   const params = Object.fromEntries(url.searchParams);
