@@ -978,8 +978,7 @@ async function worker_code_fetch(request, env, ctx) {
           const targetAuthPage = new URL(request.url);
           targetAuthPage.pathname = '/auth/vk_page'; // создаем алиас или просто прокидываем в handle
           
-          // ВАЖНО: просто добавьте origin в вызов, если будете менять handleVKAuthPage
-          return handleVKAuthPage(request, env, origin); 
+          return handleVKAuthPage(request, env); 
       }
       
         let userData = null;
@@ -9029,7 +9028,54 @@ async function createWebDavFolder(folderName, userData) {
 }
 
 // Авторизация ВК через OneTap
-function handleVKAuthPage(request, env, origin) {
+// --- Страница авторизации ВК (Умный диспетчер) ---
+async function handleVKAuthPage(request, env) {
+  const url = new URL(request.url);
+  const params = Object.fromEntries(url.searchParams);
+  
+  // Если мы вернулись с GitHub или от ВК уже с готовым ID
+  if (params.vk_user_id) {
+      const safeData = JSON.stringify({ userId: String(params.vk_user_id) });
+      return new Response(`
+          <!DOCTYPE html>
+          <html><head><meta charset="utf-8"></head>
+          <body style="background:#212121; color:white; font-family:sans-serif; text-align:center; padding-top:50px;">
+              <script>
+                  try {
+                      const data = ${safeData};
+                      localStorage.setItem('vk_user_id', data.userId);
+                      localStorage.setItem('auth_provider', 'VK');
+                      window.location.replace('/'); // Уходим на главную Хранилки
+                  } catch(e) {}
+              </script>
+          </body></html>
+      `, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+  }
+
+  // Определяем, это мобильное приложение/APK или обычный веб
+  const origin = params.origin || '';
+  const platform = params.platform || '';
+
+  // УСЛОВИЕ: Если есть Deep Link (origin содержит ://) или указана платформа android
+  if (origin.includes('://') || platform === 'android') {
+      const currentHost = url.host;
+      // Формируем, куда GitHub должен вернуть пользователя после авторизации
+      // Если есть deep link, возвращаем прямо в APK. Если нет - возвращаем на Яндекс
+      const returnTo = origin || `https://${currentHost}/vk`;
+      const githubAuthUrl = `https://leshiy-ai.github.io/vk.html?returnTo=${encodeURIComponent(returnTo)}`;
+      
+      // Редиректим на GitHub!
+      return new Response(null, { status: 302, headers: { 'Location': githubAuthUrl } });
+  }
+
+  // ---------------------------------------------------------
+  // ЕСЛИ ЭТО ОБЫЧНЫЙ ВЕБ (ПК / Браузер мобилки) - Рисуем виджет прямо тут
+  // ---------------------------------------------------------
+  const clientId = env.VK_CLIENT_ID || 54467300;
+  const error = params.error;
+  let errorHtml = '';
+  if (error) errorHtml = `<div style="color:red; margin-bottom:10px; font-size:14px;">Ошибка: ${error.replace(/</g, '&lt;')}</div>`;
+
   return new Response(`
       <!DOCTYPE html>
       <html>
@@ -9038,14 +9084,7 @@ function handleVKAuthPage(request, env, origin) {
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <style>
               body { background: #212121; margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; }
-              .card { 
-                  background: white; 
-                  padding: 32px 24px; 
-                  border-radius: 28px; 
-                  width: 360px; 
-                  text-align: center; 
-                  box-shadow: 0 20px 40px rgba(0,0,0,0.4);
-              }
+              .card { background: white; padding: 32px 24px; border-radius: 28px; width: 360px; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.4); }
               .title { font: 700 20px sans-serif; margin-bottom: 8px; color: #000; }
               .subtitle { font: 400 14px sans-serif; color: #818c99; margin-bottom: 24px; line-height: 1.4; }
           </style>
@@ -9054,7 +9093,8 @@ function handleVKAuthPage(request, env, origin) {
           <div class="card">
               <div style="font-size: 40px; margin-bottom: 10px;">🔐</div>
               <div class="title">Вход в Хранилку</div>
-              <div class="subtitle">Используйте VK ID для безопасного доступа к вашим файлам</div>
+              <div class="subtitle">Используйте VK ID для безопасного доступа</div>
+              ${errorHtml}
               <div id="vkid"></div>
               <button onclick="window.location.href = '/'" style="width: 100%; margin-top: 15px; border: none; background: none; color: #0077ff; cursor: pointer; font-size: 14px;">Позже</button>
           </div>
@@ -9063,18 +9103,14 @@ function handleVKAuthPage(request, env, origin) {
           <script>
             if ('VKIDSDK' in window) {
               const VKID = window.VKIDSDK;
-              const urlParams = new URLSearchParams(window.location.search);
-              const appOrigin = urlParams.get('origin') || window.location.origin;
-
               VKID.Config.init({
-                app: 54467300,
-                redirectUrl: 'https://' + window.location.host + '/auth/vk/callback',
+                app: ${clientId},
+                redirectUrl: 'https://${url.host}/auth/vk/callback',
                 responseMode: VKID.ConfigResponseMode.Callback,
                 source: VKID.ConfigSource.LOWCODE,
               });
 
               const oneTap = new VKID.OneTap();
-
               oneTap.render({
                 container: document.getElementById('vkid'),
                 showAlternativeLogin: true,
@@ -9082,25 +9118,10 @@ function handleVKAuthPage(request, env, origin) {
                 styles: { height: 44, borderRadius: 8 }
               })
               .on(VKID.OneTapInternalEvents.LOGIN_SUCCESS, function (payload) {
-                const code = payload.code;
-                const deviceId = payload.device_id;
-
-                // Обмениваем код прямо здесь, чтобы SDK сама применила PKCE-верификатор
-                VKID.Auth.exchangeCode(code, deviceId)
+                VKID.Auth.exchangeCode(payload.code, payload.device_id)
                   .then(function(data) {
                     const userId = data.user_id || (data.user && data.user.id);
-                    if (userId) {
-                      // Сохраняем и летим на колбэк, передавая уже готовый ID
-                      localStorage.setItem('vk_user_id', String(userId));
-                      window.location.href = '/auth/vk/callback?vk_user_id=' + userId + 
-                                           '&device_id=' + deviceId + 
-                                           '&origin=' + encodeURIComponent(appOrigin);
-                    }
-                  })
-                  .catch(function(err) {
-                    console.error('Ошибка VK ID:', err);
-                    // Если обмен не вышел, пробуем хотя бы прокинуть code как запасной вариант
-                    window.location.href = '/auth/vk/callback?code=' + code + '&device_id=' + deviceId + '&origin=' + encodeURIComponent(appOrigin);
+                    if (userId) window.location.href = '/auth/vk/callback?vk_user_id=' + userId;
                   });
               });
             }
@@ -9110,95 +9131,39 @@ function handleVKAuthPage(request, env, origin) {
   `, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
-// Калбэк-возврат с авторизации ВК
+// --- VK-авторизация Калбэк-возврат (Принимает готовый vk_user_id) ---
 async function handleVKCallback(request, env) {
   const url = new URL(request.url);
   const params = Object.fromEntries(url.searchParams);
-  const host = request.headers.get('host') || url.host;
   
-  // Все возможные входные данные
-  let code = params.code;
-  let accessToken = params.access_token;
-  let deviceId = params.device_id || "";
   let userId = params.vk_user_id || params.user_id;
 
-  // 1. Если прилетел code, но нет userId — меняем code на токен (и ID)
-  if (code && !userId) {
-      try {
-          const tokenRes = await fetch('https://oauth.vk.com/access_token', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-              body: new URLSearchParams({
-                  grant_type: 'authorization_code',
-                  code: code,
-                  client_id: '54467300', // Твой основной ID
-                  client_secret: env.VK_CLIENT_SECRET,
-                  redirect_uri: `https://${host}/auth/vk/callback`
-              })
-          });
-          const data = await tokenRes.json();
-          if (data.user_id) userId = data.user_id;
-          if (data.access_token) accessToken = data.access_token;
-      } catch (e) { console.error("Exchange error:", e); }
-  }
-
-  // 2. Если userId всё еще нет, но есть accessToken (кейс APK) — лезем в API за ID
-  if (accessToken && !userId) {
-      try {
-          const userRes = await fetch(`https://api.vk.com/method/users.get?access_token=${accessToken}&v=5.131`);
-          const userData = await userRes.json();
-          if (userData.response && userData.response[0]) {
-              userId = userData.response[0].id;
-          }
-      } catch (e) { console.error("API error:", e); }
-  }
-
-  // 3. Если это Mini App (авторизация по sign) — вытаскиваем из параметров
+  // Поддержка Mini Apps (на всякий случай)
   if (!userId && params.sign && (params.vk_user_id || params.viewer_id)) {
       userId = params.vk_user_id || params.viewer_id;
   }
 
-  // КРИТИЧЕСКАЯ ОШИБКА: Если нихера не добыли
+  // Ошибка: ID так и не получен
   if (!userId || userId === 'null' || userId === 'undefined') {
-      return new Response(null, { 
-          status: 302, 
-          headers: { 'Location': '/vk?error=auth_failed_no_id' } 
-      });
+      return new Response(null, { status: 302, headers: { 'Location': '/vk?error=auth_failed_no_id' } });
   }
 
-  // ФОРМИРУЕМ ПРИЗЕМЛЕНИЕ
-  const origin = params.origin ? decodeURIComponent(params.origin) : '';
-  let targetUrl;
-
-  if (origin) {
-      // Если летим в APK или на другой домен
-      targetUrl = origin + (origin.includes('?') ? '&' : '?') + 'vk_user_id=' + userId;
-  } else {
-      // Обычный возврат на главную
-      targetUrl = `/vk?vk_user_id=${userId}`;
-  }
-
-  // Рендерим страницу, которая ставит localStorage и редиректит
+  // Сохраняем ID в localStorage и уходим на главную
+  const safeData = JSON.stringify({ userId: String(userId) });
   return new Response(`
       <!DOCTYPE html>
-      <html>
-      <head><meta charset="utf-8"></head>
+      <html><head><meta charset="utf-8"></head>
       <body style="background:#212121; color:white; font-family:sans-serif; text-align:center; padding-top:50px;">
           <script>
               try {
-                  localStorage.setItem('vk_user_id', '${userId}');
+                  const data = ${safeData};
+                  localStorage.setItem('vk_user_id', data.userId);
                   localStorage.setItem('auth_provider', 'VK');
+                  window.location.replace('/');
               } catch(e) {}
-              window.location.replace('${targetUrl}');
           </script>
-          <div style="padding: 20px;">
-              <p>Авторизация успешна!</p>
-              <p style="color:#818c99; font-size:14px;">Возвращаемся в приложение...</p>
-              <a href="${targetUrl}" style="color:#0077ff; text-decoration:none;">Нажмите здесь, если переход не произошел</a>
-          </div>
-      </body>
-      </html>`, 
-  { headers: { "Content-Type": "text/html; charset=utf-8" } });
+      </body></html>
+  `, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
 // Работа с Телеграм
