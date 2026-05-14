@@ -9034,8 +9034,13 @@ async function handleVKAuthPage(request, env) {
   const params = Object.fromEntries(url.searchParams);
   
   // Если мы вернулись с GitHub или от ВК уже с готовым ID
-  if (params.vk_user_id) {
-      const safeData = JSON.stringify({ userId: String(params.vk_user_id) });
+    // Если мы вернулись с GitHub или от ВК уже с готовым ID
+    if (params.vk_user_id) {
+      const safeData = JSON.stringify({ 
+          userId: String(params.vk_user_id),
+          userName: params.vk_user_name || '',   // ДОБАВЛЕНО: сохраняем имя
+          userPhoto: params.vk_user_photo || ''  // ДОБАВЛЕНО: сохраняем фото
+      });
       return new Response(`
           <!DOCTYPE html>
           <html><head><meta charset="utf-8"></head>
@@ -9045,7 +9050,10 @@ async function handleVKAuthPage(request, env) {
                       const data = ${safeData};
                       localStorage.setItem('vk_user_id', data.userId);
                       localStorage.setItem('auth_provider', 'VK');
-                      window.location.replace('/'); // Уходим на главную
+                      // Сохраняем имя и фото, если они пришли
+                      if (data.userName) localStorage.setItem('vk_user_name', data.userName);
+                      if (data.userPhoto) localStorage.setItem('vk_user_photo', data.userPhoto);
+                      window.location.replace('/'); 
                   } catch(e) {}
               </script>
           </body></html>
