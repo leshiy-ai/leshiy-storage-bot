@@ -9086,8 +9086,9 @@ async function handleVKAuthPage(request, env) {
       const currentHost = url.host;
       const returnTo = `https://${currentHost}/vk`;
       const githubAuthUrl = `https://leshiy-ai.github.io/vk.html?returnTo=${encodeURIComponent(returnTo)}`;
-      
-      return new Response(null, { status: 302, headers: { 'Location': githubAuthUrl } });
+      const yandexAuthUrl = `https://leshiy-auth-ai.website.yandexcloud.net/vk.html?returnTo=${encodeURIComponent(returnTo)}`;
+  
+      return new Response(null, { status: 302, headers: { 'Location': yandexAuthUrl } });
   }
 
   // ---------------------------------------------------------
