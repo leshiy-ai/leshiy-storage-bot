@@ -18,7 +18,7 @@
 */
 
 // Глобальные константы
-const version = "v3.1.4 от 11.05.2026"; // актуальная версия
+const version = "v3.1.4 от 15.05.2026"; // актуальная версия
 
 const AWS = require('aws-sdk');
 const providerNames = {
