@@ -6072,16 +6072,20 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         const progressDiv = document.getElementById('uploadProgress');
         const progressText = document.getElementById('progressText');
         const progressBar = document.getElementById('progressBar');
-        if (progressDiv && progressText && progressBar) {
-            progressDiv.style.display = 'block';
-            progressText.innerText = 'Загрузка ' + fileName + '...';
-            progressBar.style.width = '0%';
+        
+        // Жёстко показываем блок, даже если сайт попытался его скрыть
+        if (progressDiv) {
+            progressDiv.style.display = 'block'; 
+            if(progressText) progressText.innerText = 'Загрузка ' + fileName + '...';
+            if(progressBar) progressBar.style.width = '0%';
         }
     };
 
     window.updateAndroidUploadProgress = function(percent) {
         const progressBar = document.getElementById('progressBar');
-        if (progressBar) progressBar.style.width = percent + '%';
+        if (progressBar) {
+            progressBar.style.width = percent + '%';
+        }
     };
 
     window.finishAndroidUpload = function(success, fileName) {
@@ -6090,10 +6094,16 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         if (progressDiv && progressText) {
             if (success) {
                 progressText.innerText = '✅ ' + fileName + ' сохранен!';
-                setTimeout(() => { progressDiv.style.display = 'none'; refreshData(); }, 3000);
+                // Обновляем список файлов на сайте
+                if(typeof refreshData === 'function') refreshData();
+                setTimeout(() => { 
+                    progressDiv.style.display = 'none'; 
+                }, 3000);
             } else {
                 progressText.innerText = '❌ Ошибка загрузки';
-                setTimeout(() => { progressDiv.style.display = 'none'; }, 3000);
+                setTimeout(() => { 
+                    progressDiv.style.display = 'none'; 
+                }, 3000);
             }
         }
     };
