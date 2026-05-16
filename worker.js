@@ -4087,6 +4087,43 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       });
     }
 
+    // --- СМАХИВАНИЕ СТРОК ЗАГРУЗКИ ---
+    window.makeRowSwipeable = function(row) {
+      var startX = 0;
+      var currentX = 0;
+      var isDragging = false;
+
+      row.addEventListener('touchstart', function(e) {
+        startX = e.touches[0].clientX;
+        isDragging = true;
+        row.style.transition = 'none';
+      }, {passive: true});
+
+      row.addEventListener('touchmove', function(e) {
+        if (!isDragging) return;
+        currentX = e.touches[0].clientX - startX;
+        row.style.transform = 'translateX(' + currentX + 'px)';
+        row.style.opacity = Math.max(0, 1 - Math.abs(currentX) / 200);
+      }, {passive: true});
+
+      row.addEventListener('touchend', function(e) {
+        isDragging = false;
+        row.style.transition = 'transform 0.3s, opacity 0.3s';
+        
+        if (Math.abs(currentX) > 100) {
+          // Смахнули - улетает и удаляется
+          row.style.transform = 'translateX(' + (currentX > 0 ? '100%' : '-100%') + ')';
+          row.style.opacity = '0';
+          setTimeout(function() { if(row.parentNode) row.remove(); }, 300);
+        } else {
+          // Недотянули - возвращается
+          row.style.transform = 'translateX(0)';
+          row.style.opacity = '1';
+        }
+        currentX = 0;
+      });
+    };
+
     function initTheme() {
       const savedTheme = localStorage.getItem('user-theme');
       const vkAppearance = new URLSearchParams(window.location.search).get('vk_appearance');
@@ -5336,11 +5373,14 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           }
     
           // Успех
-          task.row.setAttribute('data-status', 'done');
+                    task.row.setAttribute('data-status', 'done');
           task.info.innerHTML = '✅ Готово! ' + fileNameHTML;
           if (task.bar) { task.bar.style.background = '#28a745'; task.bar.style.width = '100%'; }
           var btn = task.row.querySelector('.cancel-btn');
           if (btn) btn.style.display = 'none';
+          // 🔥 СМАХИВАНИЕ + ТАЙМАУТ 5 СЕК
+          if (typeof makeRowSwipeable === 'function') makeRowSwipeable(task.row);
+          setTimeout(function() { if(task.row && task.row.parentNode) task.row.remove(); }, 5000);
 
         } else if (currentProvider === 'webdav-buffer') {
           // --- WEBDAV: ИСПОЛЬЗУЕМ /api/upload-buffer ---
@@ -5365,6 +5405,8 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           if (task.bar) { task.bar.style.background = '#28a745'; task.bar.style.width = '100%'; }
           var btn = task.row.querySelector('.cancel-btn');
           if (btn) btn.style.display = 'none';
+          if (typeof makeRowSwipeable === 'function') makeRowSwipeable(task.row);
+          setTimeout(function() { if(task.row && task.row.parentNode) task.row.remove(); }, 5000);
         } else {
           // --- ВСЕ ОСТАЛЬНЫЕ: как раньше через /api/get-upload-link ---
           const res = await fetch('/api/get-upload-link', {
@@ -5430,12 +5472,17 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
                 if (task.bar) { task.bar.style.background = '#28a745'; task.bar.style.width = '100%'; }
                 var btn = task.row.querySelector('.cancel-btn');
                 if (btn) btn.style.display = 'none';
+                // 🔥 СМАХИВАНИЕ + ТАЙМАУТ 5 СЕК
+                if (typeof makeRowSwipeable === 'function') makeRowSwipeable(task.row);
+                setTimeout(function() { if(task.row && task.row.parentNode) task.row.remove(); }, 5000);
               } catch (e) {
                 console.error("Ошибка подтверждения:", e);
                 task.row.setAttribute('data-status', 'warning');
                 task.info.innerHTML = '⚠️ Ошибка базы! ' + fileNameHTML;
                 if (task.bar) { task.bar.style.background = '#ffc107'; task.bar.style.width = '100%'; }
                 var btn = task.row.querySelector('.cancel-btn');
+                if (typeof makeRowSwipeable === 'function') makeRowSwipeable(task.row);
+                setTimeout(function() { if(task.row && task.row.parentNode) task.row.remove(); }, 5000);
                 if (btn) {
                   btn.innerHTML = 'Повторить';
                   btn.style.color = '#2688eb';
@@ -5445,6 +5492,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
             } else {
               task.row.setAttribute('data-status', 'error');
               task.info.innerHTML = '❌ Ошибка облака: ' + xhr.status + fileNameHTML;
+              if (typeof makeRowSwipeable === 'function') makeRowSwipeable(task.row);
             }
             finish();
           };
@@ -5452,6 +5500,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
           xhr.onerror = function() {
             task.row.setAttribute('data-status', 'error');
             task.info.innerHTML = '❌ Ошибка сети. Файл: <b>' + task.fileName + '</b>';
+            if (typeof makeRowSwipeable === 'function') makeRowSwipeable(task.row);
             finish();
           };
     
@@ -5463,6 +5512,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         if (task && task.row) {
           task.row.setAttribute('data-status', 'error');
           task.info.innerHTML = '❌ Ошибка: ' + e.message + '. Файл: <b>' + task.fileName + '</b>';
+          if (typeof makeRowSwipeable === 'function') makeRowSwipeable(task.row);
           if (task.bar) task.bar.style.background = '#ff4d4f';
         }
       } finally {
@@ -6084,7 +6134,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         row.innerHTML = 
           '<div class="info" style="font-size:12px; display:flex; justify-content:space-between;">' +
               '<span>📤 0% Файл: <b>' + fileName + '</b></span>' +
-              '<span style="color:#999; font-size:11px;">Из приложения</span>' +
+              '<span style="color:#999; font-size:11px;">Переслано</span>' +
           '</div>' +
           '<div style="width:100%; height:6px; border-radius:2px; overflow:hidden; position:relative; margin-top:8px;">' +
               '<div class="bar" style="width:0%; background:#2688eb; height:100%; transition:width 0.2s;"></div>' +
@@ -6145,11 +6195,11 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         
         // Обновляем список файлов на сайте
         if (typeof refreshData === 'function') refreshData();
-
-        // Убираем строку через 3 секунды
+        if (typeof makeRowSwipeable === 'function') makeRowSwipeable(row);
+        // Убираем строку через 5 секунды
         setTimeout(function() {
             if (row.parentNode) row.remove();
-        }, 3000);
+        }, 5000);
     };
 
     // Запуск при полной загрузке страницы
