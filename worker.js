@@ -4121,7 +4121,10 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
 
     async function logout() {
       localStorage.removeItem('vk_user_id');
-
+      // 🔥 Если мы в Андроид-приложении — вызываем нативную очистку
+      if (typeof Android !== 'undefined' && typeof Android.logout === 'function') {
+          Android.logout();
+      }
       // Пробуем закрыть бриджи, если они активны
       try {
           if (typeof vkBridge !== 'undefined') {
@@ -4376,7 +4379,14 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
     }
 
     function closeApp() {
-      vkBridge.send('VKWebAppClose', { status: 'success' });
+      // 🔥 Если мы в Андроид-приложении — вызываем нативное закрытие
+      if (typeof Android !== 'undefined' && typeof Android.closeApp === 'function') {
+          Android.closeApp();
+      } 
+      // Иначе — пытаемся закрыть через VK Bridge (как обычно)
+      else if (typeof vkBridge !== 'undefined') {
+          vkBridge.send('VKWebAppClose', { status: 'success' });
+      }
     }
 
     function uiReload() {
