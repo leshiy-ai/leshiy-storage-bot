@@ -5310,6 +5310,7 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       try {
         if (typeof uploadQueue === 'undefined' || !uploadQueue || isUploading) return;
         var task = uploadQueue.find(t => t.row && t.row.getAttribute('data-status') === 'waiting');
+        if (task && task.isAndroidUpload) return; // 🔥 Пропускаем файлы, которые грузит Андроид
         if (!task || isUploading) return;
     
         isUploading = true;
@@ -6067,45 +6068,88 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
       }
     }
 
-    // --- ИНТЕГРАЦИЯ С АНДРОИД ПРИЛОЖЕНИЕМ ---
-    window.showAndroidUpload = function(fileName) {
-        const progressDiv = document.getElementById('uploadProgress');
-        const progressText = document.getElementById('progressText');
-        const progressBar = document.getElementById('progressBar');
+    // --- ИНТЕГРАЦИЯ С АНДРОИД APK ---
+
+    // 1. Андроид просит создать визуальную строку в очередии
+    window.addAndroidUploadTask = function(taskId, fileName) {
+        var container = document.getElementById('dropZone');
+        if (!container) return;
+
+        var row = document.createElement('div');
+        row.id = taskId;
+        row.className = 'upload-row';
+        row.setAttribute('data-status', 'uploading'); // Сразу статус "грузится"
+        row.style.cssText = 'margin-top:10px; padding:10px; border-radius:8px; border:1px solid #dce1e6; text-align:left; position:relative;';
+
+        row.innerHTML = 
+          '<div class="info" style="font-size:12px; display:flex; justify-content:space-between;">' +
+              '<span>📤 0% Файл: <b>' + fileName + '</b></span>' +
+              '<span style="color:#999; font-size:11px;">Из приложения</span>' +
+          '</div>' +
+          '<div style="width:100%; height:6px; border-radius:2px; overflow:hidden; position:relative; margin-top:8px;">' +
+              '<div class="bar" style="width:0%; background:#2688eb; height:100%; transition:width 0.2s;"></div>' +
+          '</div>';
+
+        container.appendChild(row);
+
+        // Добавляем "Призрак" в очередь, чтобы processQueue его видела, но не трогала
+        var task = {
+            id: taskId,
+            file: null, // Файла нет, грузит Андроид
+            fileName: fileName,
+            row: row,
+            bar: row.querySelector('.bar'),
+            info: row.querySelector('.info span'),
+            isAndroidUpload: true // 🔥 ФЛАГ, ЧТОБЫ processQueue ПРОПУСТИЛ ЭТОТ ФАЙЛ
+        };
+        uploadQueue.push(task);
+    };
+
+    // 2. Андроид обновляет проценты
+    window.updateAndroidUploadProgress = function(taskId, pct) {
+        var row = document.getElementById(taskId);
+        if (!row) return;
+        var bar = row.querySelector('.bar');
+        var info = row.querySelector('.info span');
+        if (bar) bar.style.width = pct + '%';
+        if (info) {
+            var nameTag = info.querySelector('b');
+            var name = nameTag ? nameTag.innerText : "Файл";
+            info.innerHTML = '📤 ' + Math.floor(pct) + '% Файл: <b>' + name + '</b>';
+        }
+    };
+
+    // 3. Андроид завершает загрузку
+    window.finishAndroidUpload = function(taskId, success) {
+        var row = document.getElementById(taskId);
+        if (!row) return;
         
-        // Жёстко показываем блок, даже если сайт попытался его скрыть
-        if (progressDiv) {
-            progressDiv.style.display = 'block'; 
-            if(progressText) progressText.innerText = 'Загрузка ' + fileName + '...';
-            if(progressBar) progressBar.style.width = '0%';
-        }
-    };
+        var info = row.querySelector('.info span');
+        var bar = row.querySelector('.bar');
+        var nameTag = info ? info.querySelector('b') : null;
+        var name = nameTag ? nameTag.innerText : "Файл";
 
-    window.updateAndroidUploadProgress = function(percent) {
-        const progressBar = document.getElementById('progressBar');
-        if (progressBar) {
-            progressBar.style.width = percent + '%';
+        if (success) {
+            row.setAttribute('data-status', 'done');
+            if (info) info.innerHTML = '✅ Готово! Файл: <b>' + name + '</b>';
+            if (bar) { bar.style.background = '#28a745'; bar.style.width = '100%'; }
+        } else {
+            row.setAttribute('data-status', 'error');
+            if (info) info.innerHTML = '❌ Ошибка загрузки. Файл: <b>' + name + '</b>';
+            if (bar) { bar.style.background = '#ff4d4f'; }
         }
-    };
 
-    window.finishAndroidUpload = function(success, fileName) {
-        const progressDiv = document.getElementById('uploadProgress');
-        const progressText = document.getElementById('progressText');
-        if (progressDiv && progressText) {
-            if (success) {
-                progressText.innerText = '✅ ' + fileName + ' сохранен!';
-                // Обновляем список файлов на сайте
-                if(typeof refreshData === 'function') refreshData();
-                setTimeout(() => { 
-                    progressDiv.style.display = 'none'; 
-                }, 3000);
-            } else {
-                progressText.innerText = '❌ Ошибка загрузки';
-                setTimeout(() => { 
-                    progressDiv.style.display = 'none'; 
-                }, 3000);
-            }
-        }
+        // Удаляем из очереди
+        var taskIndex = uploadQueue.findIndex(t => t.id === taskId);
+        if (taskIndex !== -1) uploadQueue.splice(taskIndex, 1);
+        
+        // Обновляем список файлов на сайте
+        if (typeof refreshData === 'function') refreshData();
+
+        // Убираем строку через 3 секунды
+        setTimeout(function() {
+            if (row.parentNode) row.remove();
+        }, 3000);
     };
 
     // Запуск при полной загрузке страницы
