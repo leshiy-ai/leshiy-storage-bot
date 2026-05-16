@@ -170,13 +170,30 @@ async function worker_code_fetch(request, env, ctx) {
         let dataChanged = false;
     
         // ОБНОВЛЕНИЕ ПРОФИЛЯ: если имя или фото пришли и они новые — сохраняем
-        if (nameFromUrl && nameFromUrl !== "null" && user.name !== nameFromUrl) {
+        // 🔥 1. НЕ даем APK перезаписать реальное имя на "Пользователь"
+        if (nameFromUrl && nameFromUrl !== "null" && nameFromUrl !== "Пользователь" && user.name !== nameFromUrl) {
             user.name = nameFromUrl;
             dataChanged = true;
         }
         if (photoFromUrl && photoFromUrl !== "null" && user.photo !== photoFromUrl) {
             user.photo = photoFromUrl;
             dataChanged = true;
+        }
+
+        // 🔥 2. ФИКС ДЛЯ APK: Если в базе пусто, а vkUserId есть — бэкенд сам берет имя из VK API
+        if ((!user.name || user.name === "Пользователь") && vkUserId && env.VK_GROUP_TOKEN) {
+            try {
+                const vkApiRes = await fetch(`https://api.vk.com/method/users.get?user_ids=${vkUserId}&fields=photo_100&access_token=${env.VK_GROUP_TOKEN}&v=5.131`);
+                const vkApiData = await vkApiRes.json();
+                if (vkApiData.response && vkApiData.response.length > 0) {
+                    const vkUser = vkApiData.response[0];
+                    user.name = vkUser.first_name + ' ' + vkUser.last_name;
+                    user.photo = vkUser.photo_100;
+                    dataChanged = true;
+                }
+            } catch (e) {
+                console.error("VK API fallback error:", e);
+            }
         }
     
         // Если данные изменились, перезаписываем JSON в KV
@@ -4429,7 +4446,18 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
               throw new TypeError("Сервер вернул не JSON, а " + contentType);
           }
           const data = await response.json();
-          if (data.userPhoto) window.currentUserPhoto = data.userPhoto;
+          // 🔥 ФИКС: Синхронизируем локальные переменные с базой!
+          // Если бэкенд вернул реальное имя — сохраняем его в window и localStorage,
+          // чтобы при следующем refreshData мы его не потеряли.
+          if (data.userName && data.userName !== 'Пользователь') {
+              window.userName = data.userName;
+              localStorage.setItem('vk_user_name', data.userName);
+          }
+          if (data.userPhoto) {
+              window.currentUserPhoto = data.userPhoto;
+              window.userPhoto = data.userPhoto;
+              localStorage.setItem('vk_user_photo', data.userPhoto);
+          }
           
           // Обновляем только UI блоки, чат ИИ не трогаем
           renderHeader(data);
@@ -6028,6 +6056,37 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
         alert("Код приглашения не найден в ссылке");
       }
     }
+
+    // --- ИНТЕГРАЦИЯ С АНДРОИД ПРИЛОЖЕНИЕМ ---
+    window.showAndroidUpload = function(fileName) {
+        const progressDiv = document.getElementById('uploadProgress');
+        const progressText = document.getElementById('progressText');
+        const progressBar = document.getElementById('progressBar');
+        if (progressDiv && progressText && progressBar) {
+            progressDiv.style.display = 'block';
+            progressText.innerText = 'Загрузка ' + fileName + '...';
+            progressBar.style.width = '0%';
+        }
+    };
+
+    window.updateAndroidUploadProgress = function(percent) {
+        const progressBar = document.getElementById('progressBar');
+        if (progressBar) progressBar.style.width = percent + '%';
+    };
+
+    window.finishAndroidUpload = function(success, fileName) {
+        const progressDiv = document.getElementById('uploadProgress');
+        const progressText = document.getElementById('progressText');
+        if (progressDiv && progressText) {
+            if (success) {
+                progressText.innerText = '✅ ' + fileName + ' сохранен!';
+                setTimeout(() => { progressDiv.style.display = 'none'; refreshData(); }, 3000);
+            } else {
+                progressText.innerText = '❌ Ошибка загрузки';
+                setTimeout(() => { progressDiv.style.display = 'none'; }, 3000);
+            }
+        }
+    };
 
     // Запуск при полной загрузке страницы
     window.addEventListener('DOMContentLoaded', function() {
