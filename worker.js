@@ -3498,6 +3498,8 @@ function renderVKMiniAppHTML(params, userData, isAdmin, countUser, env) {
 <html lang="ru">
 <head>
   <meta charset="utf-8">
+  <title>Leshiy-Storage</title>
+  <link rel="icon" href="/images/Storage.png" type="image/png">
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, user-scalable=no, viewport-fit=cover">
   <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
   <style>
